@@ -4,6 +4,7 @@
 #include "node.h"
 #include "object.h"
 #include "DebugPrint.h"
+#include "callback.h"
 
 //#include "framework.h"
 

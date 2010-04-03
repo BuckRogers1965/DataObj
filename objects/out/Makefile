@@ -27,10 +27,11 @@ depend:
 
 # DO NOT DELETE
 
-out.o: /usr/include/stdio.h /usr/include/features.h /usr/include/sys/cdefs.h
+out.o: /usr/include/stdio.h /usr/include/features.h
+out.o: /usr/include/bits/predefs.h /usr/include/sys/cdefs.h
 out.o: /usr/include/bits/wordsize.h /usr/include/gnu/stubs.h
 out.o: /usr/include/gnu/stubs-32.h /usr/include/bits/types.h
 out.o: /usr/include/bits/typesizes.h /usr/include/libio.h
 out.o: /usr/include/_G_config.h /usr/include/wchar.h
 out.o: /usr/include/bits/stdio_lim.h /usr/include/bits/sys_errlist.h
-out.o: ../../node.h ../../data.h ../../object.h
+out.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
