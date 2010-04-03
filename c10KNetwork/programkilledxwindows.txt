@@ -1,0 +1,1931 @@
+l, low) -> IRQ 16
+[   41.655065] pci 0000:00:02.0: setting latency timer to 64
+[   41.657604] [drm] Initialized i915 1.6.0 20080730 on minor 0
+[   41.659878] [drm:i915_setparam] *ERROR* unknown parameter 4
+[   41.659918] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[   43.384274] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[   45.488042] ath0: no IPv6 routers present
+[   77.924327] UDF-fs: No VRS found
+[   77.967617] ISO 9660 Extensions: Microsoft Joliet Level 3
+[   77.970347] ISOFS: changing to secondary root
+[   78.031742] kjournald starting.  Commit interval 5 seconds
+[   78.031765] EXT3-fs warning: maximal mount count reached, running e2fsck is recommended
+[   78.033560] EXT3 FS on sdb1, internal journal
+[   78.033569] EXT3-fs: mounted filesystem with ordered data mode.
+[   78.300253] kjournald starting.  Commit interval 5 seconds
+[   78.300293] EXT3-fs warning: maximal mount count reached, running e2fsck is recommended
+[   78.321606] EXT3 FS on sdb2, internal journal
+[   78.321620] EXT3-fs: mounted filesystem with ordered data mode.
+[  153.860081] ath0: no IPv6 routers present
+[  758.713645] type=1503 audit(1248160660.036:10): operation="capable" name="sys_admin" pid=5255 profile="/usr/sbin/cupsd"
+[  758.713658] type=1503 audit(1248160660.036:11): operation="capable" name="sys_resource" pid=5255 profile="/usr/sbin/cupsd"
+[  758.713668] type=1503 audit(1248160660.036:12): operation="capable" name="sys_rawio" pid=5255 profile="/usr/sbin/cupsd"
+[  758.713775] type=1503 audit(1248160660.036:13): operation="capable" name="sys_admin" pid=5255 profile="/sbin/dhclient3"
+[  758.713785] type=1503 audit(1248160660.036:14): operation="capable" name="sys_resource" pid=5255 profile="/sbin/dhclient3"
+[  758.713795] type=1503 audit(1248160660.036:15): operation="capable" name="sys_rawio" pid=5255 profile="/sbin/dhclient3"
+[  758.713812] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  758.713819] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  758.713824] Call Trace:
+[  758.713836]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  758.713844]  [<c0191525>] oom_kill_process+0x75/0x210
+[  758.713851]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  758.713867]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  758.713871]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  758.713875]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  758.713880]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  758.713885]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  758.713890]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  758.713894]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  758.713898]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  758.713903]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  758.713920]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  758.713923]  [<c04219da>] sock_aio_write+0xda/0x130
+[  758.713929]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  758.713934]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  758.713940]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  758.713944]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  758.713948]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  758.713952]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  758.713957]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  758.713961]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  758.713965]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  758.713969]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  758.713973]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  758.713976] Mem-Info:
+[  758.713978] DMA per-cpu:
+[  758.713980] CPU    0: hi:    0, btch:   1 usd:   0
+[  758.713983] CPU    1: hi:    0, btch:   1 usd:   0
+[  758.713985] Normal per-cpu:
+[  758.713987] CPU    0: hi:  186, btch:  31 usd:   0
+[  758.713990] CPU    1: hi:  186, btch:  31 usd:   0
+[  758.713992] HighMem per-cpu:
+[  758.713994] CPU    0: hi:  186, btch:  31 usd:   0
+[  758.713996] CPU    1: hi:  186, btch:  31 usd:   0
+[  758.714001] Active_anon:74982 active_file:12831 inactive_anon:5591
+[  758.714003]  inactive_file:21923 unevictable:2 dirty:7 writeback:0 unstable:0
+[  758.714004]  free:176724 slab:198403 mapped:16884 pagetables:828 bounce:0
+[  758.714009] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  758.714013] lowmem_reserve[]: 0 861 1984 1984
+[  758.714021] Normal free:14120kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:332kB inactive_file:84kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  758.714025] lowmem_reserve[]: 0 0 8984 8984
+[  758.714033] HighMem free:689284kB min:512kB low:1724kB high:2936kB active_anon:299928kB inactive_anon:22364kB active_file:50992kB inactive_file:87608kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  758.714038] lowmem_reserve[]: 0 0 0 0
+[  758.714042] DMA: 3*4kB 1*8kB 1*16kB 0*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3492kB
+[  758.714055] Normal: 403*4kB 1456*8kB 24*16kB 4*32kB 0*64kB 1*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 14156kB
+[  758.714067] HighMem: 4827*4kB 2594*8kB 1243*16kB 707*32kB 275*64kB 91*128kB 60*256kB 18*512kB 10*1024kB 5*2048kB 130*4096kB = 689356kB
+[  758.714080] 51425 total pagecache pages
+[  758.714082] 0 pages in swap cache
+[  758.714085] Swap cache stats: add 0, delete 0, find 0/0
+[  758.714087] Free swap  = 3228824kB
+[  758.714089] Total swap = 3228824kB
+[  758.724471] 516060 pages RAM
+[  758.724475] 289758 pages HighMem
+[  758.724478] 8698 pages reserved
+[  758.724481] 656825 pages shared
+[  758.724484] 285631 pages non-shared
+[  758.724490] Out of memory: kill process 4147 (run-mozilla.sh) score 744564 or a child
+[  758.724531] Killed process 4151 (firefox-bin)
+[  758.948452] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  758.948462] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  758.948467] Call Trace:
+[  758.948480]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  758.948488]  [<c0191525>] oom_kill_process+0x75/0x210
+[  758.948495]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  758.948501]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  758.948508]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  758.948515]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  758.948521]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  758.948530]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  758.948537]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  758.948544]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  758.948551]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  758.948558]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  758.948580]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  758.948586]  [<c04219da>] sock_aio_write+0xda/0x130
+[  758.948594]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  758.948603]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  758.948612]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  758.948618]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  758.948625]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  758.948631]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  758.948639]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  758.948645]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  758.948652]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  758.948658]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  758.948664]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  758.948669] Mem-Info:
+[  758.948672] DMA per-cpu:
+[  758.948676] CPU    0: hi:    0, btch:   1 usd:   0
+[  758.948680] CPU    1: hi:    0, btch:   1 usd:   0
+[  758.948684] Normal per-cpu:
+[  758.948687] CPU    0: hi:  186, btch:  31 usd:   0
+[  758.948692] CPU    1: hi:  186, btch:  31 usd:   0
+[  758.948695] HighMem per-cpu:
+[  758.948699] CPU    0: hi:  186, btch:  31 usd:   0
+[  758.948703] CPU    1: hi:  186, btch:  31 usd:   0
+[  758.948711] Active_anon:53927 active_file:12739 inactive_anon:6839
+[  758.948713]  inactive_file:22043 unevictable:2 dirty:7 writeback:0 unstable:0
+[  758.948716]  free:194937 slab:200051 mapped:12451 pagetables:766 bounce:0
+[  758.948724] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  758.948731] lowmem_reserve[]: 0 861 1984 1984
+[  758.948744] Normal free:7624kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:440kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  758.948751] lowmem_reserve[]: 0 0 8984 8984
+[  758.948763] HighMem free:768664kB min:512kB low:1724kB high:2936kB active_anon:215708kB inactive_anon:27356kB active_file:50992kB inactive_file:87732kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  758.948771] lowmem_reserve[]: 0 0 0 0
+[  758.948779] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  758.948799] Normal: 1148*4kB 351*8kB 1*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7672kB
+[  758.948819] HighMem: 4670*4kB 3082*8kB 1972*16kB 1194*32kB 517*64kB 184*128kB 98*256kB 37*512kB 12*1024kB 5*2048kB 130*4096kB = 768776kB
+[  758.948840] 51270 total pagecache pages
+[  758.948844] 0 pages in swap cache
+[  758.948848] Swap cache stats: add 0, delete 0, find 0/0
+[  758.948852] Free swap  = 3228824kB
+[  758.948855] Total swap = 3228824kB
+[  758.964636] 516060 pages RAM
+[  758.964641] 289758 pages HighMem
+[  758.964645] 8698 pages reserved
+[  758.964648] 653877 pages shared
+[  758.964651] 271839 pages non-shared
+[  758.964658] Out of memory: kill process 3755 (x-session-manag) score 81707 or a child
+[  758.964697] Killed process 3894 (ssh-agent)
+[  759.077329] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  759.077338] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  759.077343] Call Trace:
+[  759.077356]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  759.077364]  [<c0191525>] oom_kill_process+0x75/0x210
+[  759.077370]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  759.077376]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  759.077383]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  759.077390]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  759.077397]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  759.077406]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  759.077413]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  759.077420]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  759.077427]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  759.077434]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  759.077455]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  759.077461]  [<c04219da>] sock_aio_write+0xda/0x130
+[  759.077470]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  759.077478]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  759.077488]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  759.077494]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  759.077501]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  759.077507]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  759.077515]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  759.077521]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  759.077528]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  759.077534]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  759.077541]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  759.077545] Mem-Info:
+[  759.077548] DMA per-cpu:
+[  759.077552] CPU    0: hi:    0, btch:   1 usd:   0
+[  759.077556] CPU    1: hi:    0, btch:   1 usd:   0
+[  759.077560] Normal per-cpu:
+[  759.077564] CPU    0: hi:  186, btch:  31 usd:   0
+[  759.077568] CPU    1: hi:  186, btch:  31 usd:   0
+[  759.077572] HighMem per-cpu:
+[  759.077575] CPU    0: hi:  186, btch:  31 usd:   0
+[  759.077579] CPU    1: hi:  186, btch:  31 usd:   0
+[  759.077587] Active_anon:53464 active_file:12814 inactive_anon:7225
+[  759.077590]  inactive_file:21993 unevictable:2 dirty:7 writeback:0 unstable:0
+[  759.077592]  free:194987 slab:200085 mapped:12451 pagetables:766 bounce:0
+[  759.077601] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  759.077608] lowmem_reserve[]: 0 861 1984 1984
+[  759.077621] Normal free:7488kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:264kB inactive_file:240kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  759.077628] lowmem_reserve[]: 0 0 8984 8984
+[  759.077640] HighMem free:769000kB min:512kB low:1724kB high:2936kB active_anon:213856kB inactive_anon:28900kB active_file:50992kB inactive_file:87732kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  759.077648] lowmem_reserve[]: 0 0 0 0
+[  759.077656] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  759.077676] Normal: 1181*4kB 314*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7492kB
+[  759.077696] HighMem: 4690*4kB 3089*8kB 1974*16kB 1195*32kB 519*64kB 184*128kB 98*256kB 37*512kB 12*1024kB 5*2048kB 130*4096kB = 769104kB
+[  759.077717] 51270 total pagecache pages
+[  759.077721] 0 pages in swap cache
+[  759.077725] Swap cache stats: add 0, delete 0, find 0/0
+[  759.077729] Free swap  = 3228824kB
+[  759.077732] Total swap = 3228824kB
+[  759.092253] 516060 pages RAM
+[  759.092259] 289758 pages HighMem
+[  759.092263] 8698 pages reserved
+[  759.092267] 653949 pages shared
+[  759.092271] 271813 pages non-shared
+[  759.092279] Out of memory: kill process 3755 (x-session-manag) score 81108 or a child
+[  759.092324] Killed process 3920 (seahorse-agent)
+[  759.192434] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  759.192444] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  759.192449] Call Trace:
+[  759.192462]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  759.192470]  [<c0191525>] oom_kill_process+0x75/0x210
+[  759.192476]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  759.192483]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  759.192490]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  759.192496]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  759.192503]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  759.192512]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  759.192519]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  759.192526]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  759.192533]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  759.192540]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  759.192561]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  759.192568]  [<c04219da>] sock_aio_write+0xda/0x130
+[  759.192576]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  759.192584]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  759.192594]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  759.192600]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  759.192607]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  759.192613]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  759.192620]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  759.192627]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  759.192633]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  759.192640]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  759.192646]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  759.192650] Mem-Info:
+[  759.192654] DMA per-cpu:
+[  759.192657] CPU    0: hi:    0, btch:   1 usd:   0
+[  759.192662] CPU    1: hi:    0, btch:   1 usd:   0
+[  759.192665] Normal per-cpu:
+[  759.192669] CPU    0: hi:  186, btch:  31 usd:   0
+[  759.192673] CPU    1: hi:  186, btch:  31 usd:   0
+[  759.192677] HighMem per-cpu:
+[  759.192680] CPU    0: hi:  186, btch:  31 usd:   0
+[  759.192684] CPU    1: hi:  186, btch:  31 usd:   0
+[  759.192692] Active_anon:52925 active_file:12763 inactive_anon:7256
+[  759.192695]  inactive_file:22030 unevictable:2 dirty:7 writeback:0 unstable:0
+[  759.192697]  free:195395 slab:200221 mapped:12420 pagetables:735 bounce:0
+[  759.192706] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  759.192713] lowmem_reserve[]: 0 861 1984 1984
+[  759.192725] Normal free:6936kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:60kB inactive_file:388kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  759.192732] lowmem_reserve[]: 0 0 8984 8984
+[  759.192745] HighMem free:771184kB min:512kB low:1724kB high:2936kB active_anon:211700kB inactive_anon:29024kB active_file:50992kB inactive_file:87732kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  759.192753] lowmem_reserve[]: 0 0 0 0
+[  759.192761] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  759.192781] Normal: 1273*4kB 204*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 6980kB
+[  759.192801] HighMem: 4770*4kB 3120*8kB 1992*16kB 1197*32kB 518*64kB 188*128kB 99*256kB 38*512kB 12*1024kB 5*2048kB 130*4096kB = 771240kB
+[  759.192822] 51270 total pagecache pages
+[  759.192826] 0 pages in swap cache
+[  759.192830] Swap cache stats: add 0, delete 0, find 0/0
+[  759.192834] Free swap  = 3228824kB
+[  759.192837] Total swap = 3228824kB
+[  759.207583] 516060 pages RAM
+[  759.207588] 289758 pages HighMem
+[  759.207591] 8698 pages reserved
+[  759.207594] 652976 pages shared
+[  759.207597] 271459 pages non-shared
+[  759.207603] Out of memory: kill process 3755 (x-session-manag) score 78429 or a child
+[  759.207643] Killed process 3958 (metacity)
+[  759.216322] Out of memory: kill process 3755 (x-session-manag) score 73275 or a child
+[  759.216335] Killed process 3959 (gnome-panel)
+[  759.313410] Out of memory: kill process 3755 (x-session-manag) score 65182 or a child
+[  759.313454] Killed process 3960 (nautilus)
+[  759.637345] Out of memory: kill process 3755 (x-session-manag) score 56299 or a child
+[  759.637382] Killed process 3976 (update-notifier)
+[  759.861339] Out of memory: kill process 3755 (x-session-manag) score 46842 or a child
+[  759.861360] Killed process 3980 (bluetooth-apple)
+[  759.965306] Out of memory: kill process 3755 (x-session-manag) score 42106 or a child
+[  759.965337] Killed process 3981 (wicd-client)
+[  760.068456] Out of memory: kill process 3755 (x-session-manag) score 35575 or a child
+[  760.068489] Killed process 3983 (tracker-applet)
+[  760.685313] Out of memory: kill process 3755 (x-session-manag) score 32959 or a child
+[  760.685344] Killed process 3984 (trackerd)
+[  760.853265] Out of memory: kill process 3755 (x-session-manag) score 29711 or a child
+[  760.853279] Killed process 3986 (python)
+[  764.844320] __ratelimit: 8 callbacks suppressed
+[  764.844327] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  764.844334] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  764.844339] Call Trace:
+[  764.844352]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  764.844361]  [<c0191525>] oom_kill_process+0x75/0x210
+[  764.844367]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  764.844373]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  764.844380]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  764.844387]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  764.844394]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  764.844403]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  764.844410]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  764.844416]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  764.844424]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  764.844431]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  764.844453]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  764.844459]  [<c04219da>] sock_aio_write+0xda/0x130
+[  764.844467]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  764.844475]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  764.844485]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  764.844491]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  764.844498]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  764.844504]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  764.844511]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  764.844518]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  764.844524]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  764.844531]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  764.844538]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  764.844542] Mem-Info:
+[  764.844545] DMA per-cpu:
+[  764.844549] CPU    0: hi:    0, btch:   1 usd:   0
+[  764.844553] CPU    1: hi:    0, btch:   1 usd:   0
+[  764.844557] Normal per-cpu:
+[  764.844561] CPU    0: hi:  186, btch:  31 usd:   0
+[  764.844565] CPU    1: hi:  186, btch:  31 usd:   4
+[  764.844568] HighMem per-cpu:
+[  764.844572] CPU    0: hi:  186, btch:  31 usd:   0
+[  764.844576] CPU    1: hi:  186, btch:  31 usd:   0
+[  764.844584] Active_anon:30160 active_file:9553 inactive_anon:10577
+[  764.844586]  inactive_file:13331 unevictable:2 dirty:0 writeback:0 unstable:0
+[  764.844589]  free:227002 slab:200201 mapped:9744 pagetables:554 bounce:0
+[  764.844597] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? yes
+[  764.844604] lowmem_reserve[]: 0 861 1984 1984
+[  764.844617] Normal free:7032kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:404kB inactive_file:72kB unevictable:0kB present:881880kB pages_scanned:140 all_unreclaimable? no
+[  764.844624] lowmem_reserve[]: 0 0 8984 8984
+[  764.844637] HighMem free:897516kB min:512kB low:1724kB high:2936kB active_anon:120640kB inactive_anon:42308kB active_file:37808kB inactive_file:53252kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  764.844644] lowmem_reserve[]: 0 0 0 0
+[  764.844652] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  764.844673] Normal: 1410*4kB 150*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7096kB
+[  764.844693] HighMem: 3850*4kB 3221*8kB 2172*16kB 1488*32kB 785*64kB 346*128kB 164*256kB 83*512kB 33*1024kB 10*2048kB 132*4096kB = 897488kB
+[  764.844714] 38492 total pagecache pages
+[  764.844718] 0 pages in swap cache
+[  764.844722] Swap cache stats: add 0, delete 0, find 0/0
+[  764.844726] Free swap  = 3228824kB
+[  764.844729] Total swap = 3228824kB
+[  764.859272] 516060 pages RAM
+[  764.859279] 289758 pages HighMem
+[  764.859283] 8698 pages reserved
+[  764.859288] 620678 pages shared
+[  764.859292] 242942 pages non-shared
+[  764.859300] Out of memory: kill process 3755 (x-session-manag) score 30230 or a child
+[  764.859343] Killed process 3992 (evolution-alarm)
+[  765.051127] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  765.051184] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.051189] Call Trace:
+[  765.051203]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.051211]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.051217]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.051223]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.051231]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.051238]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.051244]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  765.051254]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  765.051261]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  765.051267]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  765.051275]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  765.051282]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  765.051307]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  765.051313]  [<c04219da>] sock_aio_write+0xda/0x130
+[  765.051322]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  765.051330]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  765.051340]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  765.051346]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  765.051353]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  765.051359]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  765.051367]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  765.051373]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  765.051380]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  765.051386]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  765.051393]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.051397] Mem-Info:
+[  765.051401] DMA per-cpu:
+[  765.051405] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.051409] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.051413] Normal per-cpu:
+[  765.051416] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.051421] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.051424] HighMem per-cpu:
+[  765.051428] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.051432] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.051440] Active_anon:29540 active_file:9580 inactive_anon:10577
+[  765.051442]  inactive_file:13333 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.051445]  free:227607 slab:200184 mapped:9713 pagetables:554 bounce:0
+[  765.051453] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.051460] lowmem_reserve[]: 0 861 1984 1984
+[  765.051473] Normal free:7100kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:388kB inactive_file:80kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.051480] lowmem_reserve[]: 0 0 8984 8984
+[  765.051493] HighMem free:899868kB min:512kB low:1724kB high:2936kB active_anon:118160kB inactive_anon:42308kB active_file:37932kB inactive_file:53252kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.051500] lowmem_reserve[]: 0 0 0 0
+[  765.051508] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.051528] Normal: 1426*4kB 143*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7104kB
+[  765.051548] HighMem: 2876*4kB 3245*8kB 2183*16kB 1502*32kB 797*64kB 349*128kB 167*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 899912kB
+[  765.051569] 38467 total pagecache pages
+[  765.051573] 0 pages in swap cache
+[  765.051577] Swap cache stats: add 0, delete 0, find 0/0
+[  765.051581] Free swap  = 3228824kB
+[  765.051584] Total swap = 3228824kB
+[  765.066143] 516060 pages RAM
+[  765.066149] 289758 pages HighMem
+[  765.066153] 8698 pages reserved
+[  765.066156] 619514 pages shared
+[  765.066159] 241219 pages non-shared
+[  765.066167] Out of memory: kill process 3903 (pulseaudio) score 25170 or a child
+[  765.066205] Killed process 3904 (gconf-helper)
+[  765.364373] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  765.364378] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.364381] Call Trace:
+[  765.364389]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.364394]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.364397]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.364400]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.364404]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.364407]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.364411]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  765.364416]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  765.364420]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  765.364423]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  765.364427]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  765.364431]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  765.364447]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  765.364450]  [<c04219da>] sock_aio_write+0xda/0x130
+[  765.364455]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  765.364460]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  765.364466]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  765.364469]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  765.364472]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  765.364475]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  765.364479]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  765.364483]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  765.364486]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  765.364489]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  765.364493]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.364495] Mem-Info:
+[  765.364497] DMA per-cpu:
+[  765.364499] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.364501] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.364503] Normal per-cpu:
+[  765.364505] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.364507] CPU    1: hi:  186, btch:  31 usd:   1
+[  765.364509] HighMem per-cpu:
+[  765.364511] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.364513] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.364517] Active_anon:29455 active_file:9559 inactive_anon:10577
+[  765.364518]  inactive_file:13328 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.364520]  free:227676 slab:200217 mapped:9695 pagetables:535 bounce:0
+[  765.364524] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.364527] lowmem_reserve[]: 0 861 1984 1984
+[  765.364534] Normal free:6932kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:300kB inactive_file:112kB unevictable:0kB present:881880kB pages_scanned:5 all_unreclaimable? no
+[  765.364538] lowmem_reserve[]: 0 0 8984 8984
+[  765.364544] HighMem free:900312kB min:512kB low:1724kB high:2936kB active_anon:117820kB inactive_anon:42308kB active_file:37936kB inactive_file:53200kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.364548] lowmem_reserve[]: 0 0 0 0
+[  765.364552] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.364562] Normal: 1416*4kB 141*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7048kB
+[  765.364572] HighMem: 2884*4kB 3260*8kB 2187*16kB 1504*32kB 800*64kB 349*128kB 167*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 900384kB
+[  765.364583] 38484 total pagecache pages
+[  765.364585] 0 pages in swap cache
+[  765.364587] Swap cache stats: add 0, delete 0, find 0/0
+[  765.364589] Free swap  = 3228824kB
+[  765.364590] Total swap = 3228824kB
+[  765.372486] 516060 pages RAM
+[  765.372488] 289758 pages HighMem
+[  765.372490] 8698 pages reserved
+[  765.372491] 619138 pages shared
+[  765.372493] 241125 pages non-shared
+[  765.372496] Out of memory: kill process 3903 (pulseaudio) score 24189 or a child
+[  765.372525] Killed process 3903 (pulseaudio)
+[  765.465905] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  765.465914] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.466000] Call Trace:
+[  765.466013]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.466022]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.466028]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.466034]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.466041]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.466134]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.466141]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  765.466150]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  765.466157]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  765.466163]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  765.466171]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  765.466178]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  765.466199]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  765.466206]  [<c04219da>] sock_aio_write+0xda/0x130
+[  765.466214]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  765.466223]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  765.466232]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  765.466334]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  765.466341]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  765.466347]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  765.466355]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  765.466361]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  765.466368]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  765.466458]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  765.466466]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.466470] Mem-Info:
+[  765.466473] DMA per-cpu:
+[  765.466477] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.466481] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.466485] Normal per-cpu:
+[  765.466489] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.466493] CPU    1: hi:  186, btch:  31 usd:  30
+[  765.466496] HighMem per-cpu:
+[  765.466500] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.466504] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.466512] Active_anon:29114 active_file:9388 inactive_anon:10577
+[  765.466514]  inactive_file:13317 unevictable:2 dirty:0 writeback:31 unstable:0
+[  765.466517]  free:228256 slab:200217 mapped:9261 pagetables:535 bounce:0
+[  765.466525] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.466532] lowmem_reserve[]: 0 861 1984 1984
+[  765.466545] Normal free:7068kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:440kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.466552] lowmem_reserve[]: 0 0 8984 8984
+[  765.466565] HighMem free:902496kB min:512kB low:1724kB high:2936kB active_anon:116456kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.466572] lowmem_reserve[]: 0 0 0 0
+[  765.466580] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.466601] Normal: 1418*4kB 143*8kB 0*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7072kB
+[  765.466620] HighMem: 3011*4kB 3293*8kB 2197*16kB 1514*32kB 807*64kB 353*128kB 167*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 902596kB
+[  765.466641] 38267 total pagecache pages
+[  765.466645] 0 pages in swap cache
+[  765.466649] Swap cache stats: add 0, delete 0, find 0/0
+[  765.466653] Free swap  = 3228824kB
+[  765.466745] Total swap = 3228824kB
+[  765.481249] 516060 pages RAM
+[  765.481254] 289758 pages HighMem
+[  765.481257] 8698 pages reserved
+[  765.481261] 618198 pages shared
+[  765.481264] 240990 pages non-shared
+[  765.481270] Out of memory: kill process 4231 (evolution-data-) score 20046 or a child
+[  765.481307] Killed process 4231 (evolution-data-)
+[  765.580290] wicd invoked oom-killer: gfp_mask=0xd0, order=1, oomkilladj=0
+[  765.580299] Pid: 3044, comm: wicd Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.580304] Call Trace:
+[  765.580317]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.580325]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.580331]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.580338]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.580344]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.580351]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.580358]  [<c01376f1>] dup_task_struct+0x31/0x110
+[  765.580364]  [<c01384fe>] copy_process+0x6e/0xd00
+[  765.580371]  [<c01d1f50>] ? alloc_fd+0xe0/0x100
+[  765.580379]  [<c01be7d8>] ? get_empty_filp+0x68/0x180
+[  765.580385]  [<c01391f2>] do_fork+0x62/0x300
+[  765.580392]  [<c01c9d84>] ? do_fcntl+0x124/0x270
+[  765.580398]  [<c01023e3>] sys_clone+0x33/0x40
+[  765.580404]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.580409] Mem-Info:
+[  765.580412] DMA per-cpu:
+[  765.580416] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.580420] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.580424] Normal per-cpu:
+[  765.580427] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.580432] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.580435] HighMem per-cpu:
+[  765.580496] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.580501] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.580509] Active_anon:28618 active_file:9400 inactive_anon:10577
+[  765.580511]  inactive_file:13331 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.580514]  free:228815 slab:200217 mapped:8982 pagetables:535 bounce:0
+[  765.580522] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.580529] lowmem_reserve[]: 0 861 1984 1984
+[  765.580542] Normal free:7204kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:36kB inactive_file:496kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.580549] lowmem_reserve[]: 0 0 8984 8984
+[  765.580562] HighMem free:904596kB min:512kB low:1724kB high:2936kB active_anon:114472kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.580569] lowmem_reserve[]: 0 0 0 0
+[  765.580577] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.580597] Normal: 1398*4kB 174*8kB 2*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7272kB
+[  765.580617] HighMem: 3044*4kB 3325*8kB 2216*16kB 1521*32kB 815*64kB 356*128kB 168*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 904664kB
+[  765.580639] 38267 total pagecache pages
+[  765.580642] 0 pages in swap cache
+[  765.580646] Swap cache stats: add 0, delete 0, find 0/0
+[  765.580650] Free swap  = 3228824kB
+[  765.580653] Total swap = 3228824kB
+[  765.595037] 516060 pages RAM
+[  765.595043] 289758 pages HighMem
+[  765.595046] 8698 pages reserved
+[  765.595050] 616504 pages shared
+[  765.595053] 240742 pages non-shared
+[  765.595061] Out of memory: kill process 5255 (gnome-terminal) score 16515 or a child
+[  765.595099] Killed process 5259 (gnome-pty-helpe)
+[  765.796304] wicd invoked oom-killer: gfp_mask=0xd0, order=1, oomkilladj=0
+[  765.796313] Pid: 3044, comm: wicd Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.796318] Call Trace:
+[  765.796331]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.796339]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.796346]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.796352]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.796358]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.796365]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.796372]  [<c01376f1>] dup_task_struct+0x31/0x110
+[  765.796378]  [<c01384fe>] copy_process+0x6e/0xd00
+[  765.796386]  [<c01d1f50>] ? alloc_fd+0xe0/0x100
+[  765.796393]  [<c01be7d8>] ? get_empty_filp+0x68/0x180
+[  765.796399]  [<c01391f2>] do_fork+0x62/0x300
+[  765.796406]  [<c01c9d84>] ? do_fcntl+0x124/0x270
+[  765.796413]  [<c01023e3>] sys_clone+0x33/0x40
+[  765.796419]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.796423] Mem-Info:
+[  765.796426] DMA per-cpu:
+[  765.796430] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.796434] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.796438] Normal per-cpu:
+[  765.796441] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.796446] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.796449] HighMem per-cpu:
+[  765.796453] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.796457] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.796465] Active_anon:28587 active_file:9484 inactive_anon:10577
+[  765.796467]  inactive_file:13231 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.796470]  free:228836 slab:200200 mapped:8951 pagetables:504 bounce:0
+[  765.796478] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.796485] lowmem_reserve[]: 0 861 1984 1984
+[  765.796498] Normal free:7204kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:372kB inactive_file:96kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.796505] lowmem_reserve[]: 0 0 8984 8984
+[  765.796517] HighMem free:904680kB min:512kB low:1724kB high:2936kB active_anon:114348kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.796525] lowmem_reserve[]: 0 0 0 0
+[  765.796533] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.796553] Normal: 1394*4kB 179*8kB 2*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7296kB
+[  765.796573] HighMem: 3045*4kB 3328*8kB 2218*16kB 1521*32kB 816*64kB 356*128kB 168*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 904788kB
+[  765.796594] 38267 total pagecache pages
+[  765.796598] 0 pages in swap cache
+[  765.796602] Swap cache stats: add 0, delete 0, find 0/0
+[  765.796606] Free swap  = 3228824kB
+[  765.796609] Total swap = 3228824kB
+[  765.811075] 516060 pages RAM
+[  765.811082] 289758 pages HighMem
+[  765.811085] 8698 pages reserved
+[  765.811088] 616365 pages shared
+[  765.811091] 240712 pages non-shared
+[  765.811099] Out of memory: kill process 5255 (gnome-terminal) score 16260 or a child
+[  765.811136] Killed process 5260 (bash)
+[  765.916557] wicd invoked oom-killer: gfp_mask=0xd0, order=1, oomkilladj=0
+[  765.916566] Pid: 3044, comm: wicd Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.916571] Call Trace:
+[  765.916584]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.916592]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.916598]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.916604]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.916611]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.916618]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.916625]  [<c01376f1>] dup_task_struct+0x31/0x110
+[  765.916631]  [<c01384fe>] copy_process+0x6e/0xd00
+[  765.916638]  [<c01d1f50>] ? alloc_fd+0xe0/0x100
+[  765.916646]  [<c01be7d8>] ? get_empty_filp+0x68/0x180
+[  765.916652]  [<c01391f2>] do_fork+0x62/0x300
+[  765.916659]  [<c01c9d84>] ? do_fcntl+0x124/0x270
+[  765.916665]  [<c01023e3>] sys_clone+0x33/0x40
+[  765.916671]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.916675] Mem-Info:
+[  765.916679] DMA per-cpu:
+[  765.916683] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.916687] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.916691] Normal per-cpu:
+[  765.916694] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.916698] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.916702] HighMem per-cpu:
+[  765.916706] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.916710] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.916718] Active_anon:27967 active_file:9506 inactive_anon:10577
+[  765.916720]  inactive_file:13196 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.916723]  free:229657 slab:200031 mapped:8951 pagetables:473 bounce:0
+[  765.916731] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.916738] lowmem_reserve[]: 0 861 1984 1984
+[  765.916750] Normal free:7884kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:460kB inactive_file:0kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.916758] lowmem_reserve[]: 0 0 8984 8984
+[  765.916770] HighMem free:907284kB min:512kB low:1724kB high:2936kB active_anon:111868kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.916778] lowmem_reserve[]: 0 0 0 0
+[  765.916785] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.916806] Normal: 1533*4kB 192*8kB 2*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7956kB
+[  765.916826] HighMem: 3056*4kB 3328*8kB 2217*16kB 1521*32kB 830*64kB 369*128kB 168*256kB 86*512kB 35*1024kB 10*2048kB 132*4096kB = 907376kB
+[  765.916847] 38267 total pagecache pages
+[  765.916851] 0 pages in swap cache
+[  765.916855] Swap cache stats: add 0, delete 0, find 0/0
+[  765.916859] Free swap  = 3228824kB
+[  765.916862] Total swap = 3228824kB
+[  765.931301] 516060 pages RAM
+[  765.931306] 289758 pages HighMem
+[  765.931311] 8698 pages reserved
+[  765.931314] 616022 pages shared
+[  765.931317] 239899 pages non-shared
+[  765.931324] Out of memory: kill process 5255 (gnome-terminal) score 15292 or a child
+[  765.931361] Killed process 7006 (bash)
+[  765.944288] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[  765.944298] Pid: 5255, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  765.944302] Call Trace:
+[  765.944315]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  765.944323]  [<c0191525>] oom_kill_process+0x75/0x210
+[  765.944330]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  765.944336]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  765.944343]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  765.944350]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  765.944357]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[  765.944365]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[  765.944372]  [<c042808d>] __alloc_skb+0x4d/0x110
+[  765.944378]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[  765.944386]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[  765.944393]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[  765.944415]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[  765.944422]  [<c04219da>] sock_aio_write+0xda/0x130
+[  765.944430]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[  765.944438]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[  765.944448]  [<c028731f>] ? security_file_permission+0xf/0x20
+[  765.944454]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[  765.944461]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[  765.944467]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[  765.944474]  [<c013f211>] ? __do_softirq+0x111/0x170
+[  765.944481]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[  765.944487]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[  765.944494]  [<c01be24d>] sys_writev+0x3d/0xa0
+[  765.944500]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  765.944505] Mem-Info:
+[  765.944508] DMA per-cpu:
+[  765.944512] CPU    0: hi:    0, btch:   1 usd:   0
+[  765.944516] CPU    1: hi:    0, btch:   1 usd:   0
+[  765.944519] Normal per-cpu:
+[  765.944523] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.944527] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.944531] HighMem per-cpu:
+[  765.944534] CPU    0: hi:  186, btch:  31 usd:   0
+[  765.944538] CPU    1: hi:  186, btch:  31 usd:   0
+[  765.944546] Active_anon:27347 active_file:9510 inactive_anon:10577
+[  765.944549]  inactive_file:13219 unevictable:2 dirty:0 writeback:0 unstable:0
+[  765.944551]  free:230287 slab:200031 mapped:8796 pagetables:473 bounce:0
+[  765.944560] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  765.944566] lowmem_reserve[]: 0 861 1984 1984
+[  765.944579] Normal free:7884kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:476kB inactive_file:48kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  765.944586] lowmem_reserve[]: 0 0 8984 8984
+[  765.944599] HighMem free:909804kB min:512kB low:1724kB high:2936kB active_anon:109388kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  765.944606] lowmem_reserve[]: 0 0 0 0
+[  765.944614] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  765.944634] Normal: 1534*4kB 192*8kB 2*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7960kB
+[  765.944654] HighMem: 2899*4kB 3027*8kB 2017*16kB 1417*32kB 813*64kB 396*128kB 184*256kB 93*512kB 37*1024kB 10*2048kB 132*4096kB = 909908kB
+[  765.944675] 38267 total pagecache pages
+[  765.944679] 0 pages in swap cache
+[  765.944683] Swap cache stats: add 0, delete 0, find 0/0
+[  765.944687] Free swap  = 3228824kB
+[  765.944690] Total swap = 3228824kB
+[  765.959168] 516060 pages RAM
+[  765.959172] 289758 pages HighMem
+[  765.959177] 8698 pages reserved
+[  765.959180] 615652 pages shared
+[  765.959183] 239427 pages non-shared
+[  765.959189] Out of memory: kill process 4114 (tracker-indexer) score 14774 or a child
+[  765.959225] Killed process 4114 (tracker-indexer)
+[  766.036554] wicd invoked oom-killer: gfp_mask=0xd0, order=1, oomkilladj=0
+[  766.036559] Pid: 3044, comm: wicd Tainted: P           2.6.28-13-generic #45-Ubuntu
+[  766.036562] Call Trace:
+[  766.036571]  [<c04fcbf6>] ? printk+0x18/0x1a
+[  766.036576]  [<c0191525>] oom_kill_process+0x75/0x210
+[  766.036579]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[  766.036582]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[  766.036585]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[  766.036589]  [<c01943e1>] __get_free_pages+0x21/0x40
+[  766.036593]  [<c01376f1>] dup_task_struct+0x31/0x110
+[  766.036596]  [<c01384fe>] copy_process+0x6e/0xd00
+[  766.036600]  [<c01d1f50>] ? alloc_fd+0xe0/0x100
+[  766.036604]  [<c01be7d8>] ? get_empty_filp+0x68/0x180
+[  766.036607]  [<c01391f2>] do_fork+0x62/0x300
+[  766.036611]  [<c01c9d84>] ? do_fcntl+0x124/0x270
+[  766.036614]  [<c01023e3>] sys_clone+0x33/0x40
+[  766.036617]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[  766.036619] Mem-Info:
+[  766.036621] DMA per-cpu:
+[  766.036623] CPU    0: hi:    0, btch:   1 usd:   0
+[  766.036625] CPU    1: hi:    0, btch:   1 usd:   0
+[  766.036627] Normal per-cpu:
+[  766.036629] CPU    0: hi:  186, btch:  31 usd:   0
+[  766.036631] CPU    1: hi:  186, btch:  31 usd:   0
+[  766.036633] HighMem per-cpu:
+[  766.036635] CPU    0: hi:  186, btch:  31 usd:   0
+[  766.036637] CPU    1: hi:  186, btch:  31 usd:   0
+[  766.036641] Active_anon:25735 active_file:9501 inactive_anon:10577
+[  766.036642]  inactive_file:13218 unevictable:2 dirty:0 writeback:0 unstable:0
+[  766.036644]  free:231921 slab:200031 mapped:8486 pagetables:473 bounce:0
+[  766.036648] DMA free:3460kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[  766.036652] lowmem_reserve[]: 0 861 1984 1984
+[  766.036658] Normal free:7952kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:440kB inactive_file:44kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[  766.036662] lowmem_reserve[]: 0 0 8984 8984
+[  766.036668] HighMem free:916272kB min:512kB low:1724kB high:2936kB active_anon:102940kB inactive_anon:42308kB active_file:37564kB inactive_file:52828kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[  766.036672] lowmem_reserve[]: 0 0 0 0
+[  766.036676] DMA: 3*4kB 1*8kB 1*16kB 1*32kB 1*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3460kB
+[  766.036686] Normal: 1539*4kB 193*8kB 2*16kB 0*32kB 0*64kB 0*128kB 1*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 7988kB
+[  766.036696] HighMem: 3811*4kB 3013*8kB 2000*16kB 1418*32kB 818*64kB 398*128kB 188*256kB 94*512kB 36*1024kB 11*2048kB 132*4096kB = 916340kB
+[  766.036707] 38298 total pagecache pages
+[  766.036709] 0 pages in swap cache
+[  766.036711] Swap cache stats: add 0, delete 0, find 0/0
+[  766.036713] Free swap  = 3228824kB
+[  766.036714] Total swap = 3228824kB
+[  766.044592] 516060 pages RAM
+[  766.044595] 289758 pages HighMem
+[  766.044596] 8698 pages reserved
+[  766.044598] 614352 pages shared
+[  766.044599] 238113 pages non-shared
+[  766.044605] Out of memory: kill process 5255 (gnome-terminal) score 14317 or a child
+[  766.044632] Killed process 5255 (gnome-terminal)
+[ 2887.909331] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[ 2887.909340] Pid: 7583, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2887.909345] Call Trace:
+[ 2887.909358]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2887.909366]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2887.909373]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2887.909379]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2887.909386]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2887.909393]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2887.909400]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[ 2887.909409]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[ 2887.909416]  [<c042808d>] __alloc_skb+0x4d/0x110
+[ 2887.909422]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[ 2887.909429]  [<c0424a90>] ? sock_def_readable+0x40/0x80
+[ 2887.909436]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[ 2887.909444]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[ 2887.909451]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[ 2887.909457]  [<c04219da>] sock_aio_write+0xda/0x130
+[ 2887.909466]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[ 2887.909474]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[ 2887.909484]  [<c028731f>] ? security_file_permission+0xf/0x20
+[ 2887.909490]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[ 2887.909497]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[ 2887.909503]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[ 2887.909510]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[ 2887.909516]  [<c01be24d>] sys_writev+0x3d/0xa0
+[ 2887.909523]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2887.909527] Mem-Info:
+[ 2887.909531] DMA per-cpu:
+[ 2887.909534] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2887.909539] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2887.909542] Normal per-cpu:
+[ 2887.909546] CPU    0: hi:  186, btch:  31 usd:   0
+[ 2887.909550] CPU    1: hi:  186, btch:  31 usd:   0
+[ 2887.909554] HighMem per-cpu:
+[ 2887.909557] CPU    0: hi:  186, btch:  31 usd:   0
+[ 2887.909561] CPU    1: hi:  186, btch:  31 usd:   0
+[ 2887.909569] Active_anon:52001 active_file:9678 inactive_anon:13110
+[ 2887.909572]  inactive_file:21650 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2887.909574]  free:193258 slab:134662 mapped:14699 pagetables:645 bounce:0
+[ 2887.909583] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2887.909590] lowmem_reserve[]: 0 861 1984 1984
+[ 2887.909602] Normal free:3772kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:456kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[ 2887.909609] lowmem_reserve[]: 0 0 8984 8984
+[ 2887.909622] HighMem free:765768kB min:512kB low:1724kB high:2936kB active_anon:208004kB inactive_anon:52440kB active_file:38716kB inactive_file:86144kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2887.909629] lowmem_reserve[]: 0 0 0 0
+[ 2887.909637] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2887.909658] Normal: 171*4kB 113*8kB 30*16kB 4*32kB 2*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3860kB
+[ 2887.909677] HighMem: 2060*4kB 1021*8kB 487*16kB 338*32kB 102*64kB 31*128kB 138*256kB 114*512kB 52*1024kB 14*2048kB 133*4096kB = 765896kB
+[ 2887.909699] 47677 total pagecache pages
+[ 2887.909702] 0 pages in swap cache
+[ 2887.909706] Swap cache stats: add 0, delete 0, find 0/0
+[ 2887.909710] Free swap  = 3228824kB
+[ 2887.909713] Total swap = 3228824kB
+[ 2887.924575] 516060 pages RAM
+[ 2887.924581] 289758 pages HighMem
+[ 2887.924586] 8698 pages reserved
+[ 2887.924591] 273105 pages shared
+[ 2887.924595] 239949 pages non-shared
+[ 2887.924603] Out of memory: kill process 7649 (run-mozilla.sh) score 549367 or a child
+[ 2887.924648] Killed process 7653 (firefox-bin)
+[ 2887.946786] dbus-daemon invoked oom-killer: gfp_mask=0xd0, order=0, oomkilladj=0
+[ 2887.946792] Pid: 2738, comm: dbus-daemon Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2887.946795] Call Trace:
+[ 2887.946804]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2887.946809]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2887.946812]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2887.946816]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2887.946819]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2887.946823]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2887.946827]  [<c01cc1da>] __pollwait+0x9a/0xe0
+[ 2887.946832]  [<c04985e7>] unix_poll+0x17/0xb0
+[ 2887.946836]  [<c0420fef>] sock_poll+0xf/0x20
+[ 2887.946839]  [<c01cb463>] do_poll+0xd3/0x240
+[ 2887.946843]  [<c01cb892>] do_sys_poll+0x152/0x1c0
+[ 2887.946846]  [<c01cc140>] ? __pollwait+0x0/0xe0
+[ 2887.946849]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946852]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946855]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946858]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946861]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946864]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946867]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946870]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946873]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946876]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946879]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946882]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946885]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946888]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946891]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946894]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946897]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946900]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946903]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946906]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.946910]  [<c01cb688>] ? poll_select_set_timeout+0x68/0x80
+[ 2887.946913]  [<c01cba74>] sys_poll+0x54/0xb0
+[ 2887.946917]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2887.946919] Mem-Info:
+[ 2887.946921] DMA per-cpu:
+[ 2887.946923] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2887.946926] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2887.946928] Normal per-cpu:
+[ 2887.946929] CPU    0: hi:  186, btch:  31 usd:  32
+[ 2887.946932] CPU    1: hi:  186, btch:  31 usd:  42
+[ 2887.946933] HighMem per-cpu:
+[ 2887.946935] CPU    0: hi:  186, btch:  31 usd:  51
+[ 2887.946937] CPU    1: hi:  186, btch:  31 usd: 180
+[ 2887.946942] Active_anon:34300 active_file:9682 inactive_anon:13110
+[ 2887.946943]  inactive_file:21660 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2887.946944]  free:210760 slab:134649 mapped:10297 pagetables:583 bounce:0
+[ 2887.946948] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2887.946952] lowmem_reserve[]: 0 861 1984 1984
+[ 2887.946958] Normal free:3640kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:12kB inactive_file:496kB unevictable:0kB present:881880kB pages_scanned:130 all_unreclaimable? no
+[ 2887.946962] lowmem_reserve[]: 0 0 8984 8984
+[ 2887.946969] HighMem free:835908kB min:512kB low:1724kB high:2936kB active_anon:137200kB inactive_anon:52440kB active_file:38716kB inactive_file:86144kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2887.946972] lowmem_reserve[]: 0 0 0 0
+[ 2887.946977] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2887.946987] Normal: 129*4kB 108*8kB 29*16kB 4*32kB 2*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3636kB
+[ 2887.946997] HighMem: 2643*4kB 1823*8kB 1163*16kB 1046*32kB 451*64kB 66*128kB 142*256kB 114*512kB 52*1024kB 14*2048kB 133*4096kB = 835956kB
+[ 2887.947008] 47677 total pagecache pages
+[ 2887.947010] 0 pages in swap cache
+[ 2887.947012] Swap cache stats: add 0, delete 0, find 0/0
+[ 2887.947014] Free swap  = 3228824kB
+[ 2887.947016] Total swap = 3228824kB
+[ 2887.955668] 516060 pages RAM
+[ 2887.955671] 289758 pages HighMem
+[ 2887.955672] 8698 pages reserved
+[ 2887.955674] 265620 pages shared
+[ 2887.955676] 226613 pages non-shared
+[ 2887.955678] Out of memory: kill process 3755 (x-session-manag) score 18050 or a child
+[ 2887.955708] Killed process 7530 (metacity)
+[ 2887.957444] at-spi-registry invoked oom-killer: gfp_mask=0xd0, order=0, oomkilladj=0
+[ 2887.957449] Pid: 3944, comm: at-spi-registry Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2887.957451] Call Trace:
+[ 2887.957460]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2887.957464]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2887.957468]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2887.957471]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2887.957474]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2887.957478]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2887.957482]  [<c01cc1da>] __pollwait+0x9a/0xe0
+[ 2887.957485]  [<c04985e7>] unix_poll+0x17/0xb0
+[ 2887.957490]  [<c0420fef>] sock_poll+0xf/0x20
+[ 2887.957493]  [<c01cb463>] do_poll+0xd3/0x240
+[ 2887.957496]  [<c01cb892>] do_sys_poll+0x152/0x1c0
+[ 2887.957499]  [<c01cc140>] ? __pollwait+0x0/0xe0
+[ 2887.957503]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957506]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957509]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957512]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957515]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957518]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957520]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957523]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957526]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957529]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957532]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957535]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957538]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957541]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957544]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957547]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957549]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957552]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957555]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957558]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.957563]  [<c01bdd3a>] ? vfs_read+0xfa/0x100
+[ 2887.957566]  [<c01cba74>] sys_poll+0x54/0xb0
+[ 2887.957570]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2887.957572] Mem-Info:
+[ 2887.957574] DMA per-cpu:
+[ 2887.957576] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2887.957578] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2887.957580] Normal per-cpu:
+[ 2887.957582] CPU    0: hi:  186, btch:  31 usd:  38
+[ 2887.957584] CPU    1: hi:  186, btch:  31 usd:  42
+[ 2887.957586] HighMem per-cpu:
+[ 2887.957588] CPU    0: hi:  186, btch:  31 usd: 183
+[ 2887.957590] CPU    1: hi:  186, btch:  31 usd: 180
+[ 2887.957594] Active_anon:33556 active_file:9679 inactive_anon:13110
+[ 2887.957596]  inactive_file:21662 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2887.957597]  free:211390 slab:134649 mapped:10142 pagetables:583 bounce:0
+[ 2887.957601] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2887.957605] lowmem_reserve[]: 0 861 1984 1984
+[ 2887.957611] Normal free:3640kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:504kB unevictable:0kB present:881880kB pages_scanned:128 all_unreclaimable? no
+[ 2887.957614] lowmem_reserve[]: 0 0 8984 8984
+[ 2887.957621] HighMem free:838428kB min:512kB low:1724kB high:2936kB active_anon:134224kB inactive_anon:52440kB active_file:38716kB inactive_file:86144kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2887.957625] lowmem_reserve[]: 0 0 0 0
+[ 2887.957629] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2887.957639] Normal: 129*4kB 108*8kB 29*16kB 4*32kB 2*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3636kB
+[ 2887.957649] HighMem: 2898*4kB 1857*8kB 1235*16kB 1049*32kB 452*64kB 66*128kB 142*256kB 114*512kB 52*1024kB 14*2048kB 133*4096kB = 838560kB
+[ 2887.957659] 47677 total pagecache pages
+[ 2887.957661] 0 pages in swap cache
+[ 2887.957664] Swap cache stats: add 0, delete 0, find 0/0
+[ 2887.957665] Free swap  = 3228824kB
+[ 2887.957667] Total swap = 3228824kB
+[ 2887.965632] 516060 pages RAM
+[ 2887.965635] 289758 pages HighMem
+[ 2887.965636] 8698 pages reserved
+[ 2887.965638] 263208 pages shared
+[ 2887.965639] 225986 pages non-shared
+[ 2887.965642] Out of memory: kill process 7562 (mixer_applet2) score 16191 or a child
+[ 2887.965671] Killed process 7562 (mixer_applet2)
+[ 2887.983534] at-spi-registry invoked oom-killer: gfp_mask=0xd0, order=0, oomkilladj=0
+[ 2887.983545] Pid: 3944, comm: at-spi-registry Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2887.983553] Call Trace:
+[ 2887.983564]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2887.983571]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2887.983579]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2887.983585]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2887.983592]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2887.983600]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2887.983607]  [<c01cc1da>] __pollwait+0x9a/0xe0
+[ 2887.983614]  [<c04985e7>] unix_poll+0x17/0xb0
+[ 2887.983621]  [<c0420fef>] sock_poll+0xf/0x20
+[ 2887.983628]  [<c01cb463>] do_poll+0xd3/0x240
+[ 2887.983634]  [<c01cb892>] do_sys_poll+0x152/0x1c0
+[ 2887.983641]  [<c01cc140>] ? __pollwait+0x0/0xe0
+[ 2887.983648]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983655]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983661]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983668]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983675]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983681]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983688]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983695]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983702]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983708]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983715]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983722]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983729]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983736]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983742]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983749]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983756]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983763]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983769]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983776]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2887.983786]  [<c02a9209>] ? apparmor_file_permission+0x19/0x40
+[ 2887.983796]  [<c028731f>] ? security_file_permission+0xf/0x20
+[ 2887.983804]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[ 2887.983811]  [<c01bdd3a>] ? vfs_read+0xfa/0x100
+[ 2887.983818]  [<c01cba74>] sys_poll+0x54/0xb0
+[ 2887.983824]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2887.983830] Mem-Info:
+[ 2887.983834] DMA per-cpu:
+[ 2887.983838] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2887.983843] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2887.983848] Normal per-cpu:
+[ 2887.983852] CPU    0: hi:  186, btch:  31 usd:  64
+[ 2887.983857] CPU    1: hi:  186, btch:  31 usd:  31
+[ 2887.983862] HighMem per-cpu:
+[ 2887.983865] CPU    0: hi:  186, btch:  31 usd: 157
+[ 2887.983871] CPU    1: hi:  186, btch:  31 usd:  48
+[ 2887.983879] Active_anon:32254 active_file:9341 inactive_anon:13110
+[ 2887.983884]  inactive_file:15196 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2887.983889]  free:219679 slab:134634 mapped:9894 pagetables:583 bounce:0
+[ 2887.983898] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2887.983912] lowmem_reserve[]: 0 861 1984 1984
+[ 2887.983921] Normal free:3700kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:12kB inactive_file:432kB unevictable:0kB present:881880kB pages_scanned:123 all_unreclaimable? no
+[ 2887.983937] lowmem_reserve[]: 0 0 8984 8984
+[ 2887.983946] HighMem free:871524kB min:512kB low:1724kB high:2936kB active_anon:129016kB inactive_anon:52440kB active_file:37352kB inactive_file:60352kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2887.983963] lowmem_reserve[]: 0 0 0 0
+[ 2887.983970] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2887.983989] Normal: 143*4kB 111*8kB 28*16kB 4*32kB 2*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3700kB
+[ 2887.984020] HighMem: 2956*4kB 2303*8kB 1589*16kB 1383*32kB 492*64kB 144*128kB 143*256kB 114*512kB 52*1024kB 14*2048kB 133*4096kB = 871512kB
+[ 2887.984041] 40919 total pagecache pages
+[ 2887.984045] 0 pages in swap cache
+[ 2887.984050] Swap cache stats: add 0, delete 0, find 0/0
+[ 2887.984055] Free swap  = 3228824kB
+[ 2887.984058] Total swap = 3228824kB
+[ 2887.992118] 516060 pages RAM
+[ 2887.992121] 289758 pages HighMem
+[ 2887.992123] 8698 pages reserved
+[ 2887.992124] 260632 pages shared
+[ 2887.992126] 217711 pages non-shared
+[ 2887.992129] Out of memory: kill process 3302 (gdm) score 50007 or a child
+[ 2887.992156] Killed process 3306 (Xorg)
+[ 2888.088203] [drm:i915_get_vblank_counter] *ERROR* trying to get vblank count for disabled pipe 0
+[ 2888.465519] gvfs-fuse-daemo invoked oom-killer: gfp_mask=0xd0, order=1, oomkilladj=0
+[ 2888.465524] Pid: 3932, comm: gvfs-fuse-daemo Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2888.465527] Call Trace:
+[ 2888.465535]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2888.465540]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2888.465543]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2888.465546]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2888.465550]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2888.465553]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2888.465557]  [<c01376f1>] dup_task_struct+0x31/0x110
+[ 2888.465560]  [<c01384fe>] copy_process+0x6e/0xd00
+[ 2888.465564]  [<c01c8b03>] ? user_path_at+0x53/0x80
+[ 2888.465568]  [<c01391f2>] do_fork+0x62/0x300
+[ 2888.465572]  [<c01d389d>] ? mntput_no_expire+0x1d/0x120
+[ 2888.465576]  [<c01023e3>] sys_clone+0x33/0x40
+[ 2888.465579]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2888.465581] Mem-Info:
+[ 2888.465583] DMA per-cpu:
+[ 2888.465585] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2888.465587] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2888.465589] Normal per-cpu:
+[ 2888.465591] CPU    0: hi:  186, btch:  31 usd:   0
+[ 2888.465593] CPU    1: hi:  186, btch:  31 usd:   0
+[ 2888.465594] HighMem per-cpu:
+[ 2888.465596] CPU    0: hi:  186, btch:  31 usd:   0
+[ 2888.465598] CPU    1: hi:  186, btch:  31 usd:   0
+[ 2888.465602] Active_anon:17157 active_file:7822 inactive_anon:6693
+[ 2888.465604]  inactive_file:11116 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2888.465605]  free:247215 slab:142412 mapped:7972 pagetables:428 bounce:0
+[ 2888.465609] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2888.465613] lowmem_reserve[]: 0 861 1984 1984
+[ 2888.465619] Normal free:3720kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:12kB inactive_file:480kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[ 2888.465623] lowmem_reserve[]: 0 0 8984 8984
+[ 2888.465629] HighMem free:981648kB min:512kB low:1724kB high:2936kB active_anon:68628kB inactive_anon:26772kB active_file:31276kB inactive_file:43984kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2888.465633] lowmem_reserve[]: 0 0 0 0
+[ 2888.465637] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2888.465647] Normal: 260*4kB 99*8kB 25*16kB 0*32kB 1*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3832kB
+[ 2888.465657] HighMem: 3394*4kB 2488*8kB 1775*16kB 1755*32kB 789*64kB 203*128kB 157*256kB 121*512kB 55*1024kB 17*2048kB 145*4096kB = 981720kB
+[ 2888.465668] 19926 total pagecache pages
+[ 2888.465670] 0 pages in swap cache
+[ 2888.465672] Swap cache stats: add 0, delete 0, find 0/0
+[ 2888.465674] Free swap  = 3228824kB
+[ 2888.465675] Total swap = 3228824kB
+[ 2888.473778] 516060 pages RAM
+[ 2888.473781] 289758 pages HighMem
+[ 2888.473782] 8698 pages reserved
+[ 2888.473784] 252075 pages shared
+[ 2888.473785] 215386 pages non-shared
+[ 2888.473789] Out of memory: kill process 3755 (x-session-manag) score 18719 or a child
+[ 2888.473850] Killed process 7533 (gnome-panel)
+[ 2888.479852] dbus-daemon invoked oom-killer: gfp_mask=0xd0, order=0, oomkilladj=0
+[ 2888.479858] Pid: 2738, comm: dbus-daemon Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2888.479861] Call Trace:
+[ 2888.479870]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2888.479874]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2888.479878]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2888.479881]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2888.479884]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2888.479888]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2888.479892]  [<c01cc1da>] __pollwait+0x9a/0xe0
+[ 2888.479896]  [<c04985e7>] unix_poll+0x17/0xb0
+[ 2888.479901]  [<c0420fef>] sock_poll+0xf/0x20
+[ 2888.479904]  [<c01cb463>] do_poll+0xd3/0x240
+[ 2888.479907]  [<c01cb892>] do_sys_poll+0x152/0x1c0
+[ 2888.479911]  [<c01cc140>] ? __pollwait+0x0/0xe0
+[ 2888.479914]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479917]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479920]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479923]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479926]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479929]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479932]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479935]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479937]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479940]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479943]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479946]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479949]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479952]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479955]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479958]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479961]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479964]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479967]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479970]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.479975]  [<c0156913>] ? getnstimeofday+0x53/0x110
+[ 2888.479978]  [<c01cb688>] ? poll_select_set_timeout+0x68/0x80
+[ 2888.479982]  [<c01cba74>] sys_poll+0x54/0xb0
+[ 2888.479986]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2888.479988] Mem-Info:
+[ 2888.479990] DMA per-cpu:
+[ 2888.479992] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2888.479994] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2888.479996] Normal per-cpu:
+[ 2888.479998] CPU    0: hi:  186, btch:  31 usd:  30
+[ 2888.480000] CPU    1: hi:  186, btch:  31 usd:   5
+[ 2888.480002] HighMem per-cpu:
+[ 2888.480004] CPU    0: hi:  186, btch:  31 usd:  37
+[ 2888.480006] CPU    1: hi:  186, btch:  31 usd: 179
+[ 2888.480010] Active_anon:13499 active_file:7829 inactive_anon:6693
+[ 2888.480011]  inactive_file:11124 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2888.480012]  free:250665 slab:142415 mapped:7259 pagetables:428 bounce:0
+[ 2888.480017] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2888.480020] lowmem_reserve[]: 0 861 1984 1984
+[ 2888.480027] Normal free:3660kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:40kB inactive_file:512kB unevictable:0kB present:881880kB pages_scanned:131 all_unreclaimable? no
+[ 2888.480030] lowmem_reserve[]: 0 0 8984 8984
+[ 2888.480037] HighMem free:995508kB min:512kB low:1724kB high:2936kB active_anon:53996kB inactive_anon:26772kB active_file:31276kB inactive_file:43984kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2888.480040] lowmem_reserve[]: 0 0 0 0
+[ 2888.480044] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2888.480055] Normal: 229*4kB 100*8kB 24*16kB 0*32kB 1*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3700kB
+[ 2888.480065] HighMem: 4021*4kB 2565*8kB 1826*16kB 1638*32kB 789*64kB 243*128kB 176*256kB 126*512kB 56*1024kB 17*2048kB 145*4096kB = 995484kB
+[ 2888.480076] 19740 total pagecache pages
+[ 2888.480078] 0 pages in swap cache
+[ 2888.480080] Swap cache stats: add 0, delete 0, find 0/0
+[ 2888.480082] Free swap  = 3228824kB
+[ 2888.480083] Total swap = 3228824kB
+[ 2888.488062] 516060 pages RAM
+[ 2888.488065] 289758 pages HighMem
+[ 2888.488066] 8698 pages reserved
+[ 2888.488068] 248421 pages shared
+[ 2888.488069] 212307 pages non-shared
+[ 2888.488072] Out of memory: kill process 7587 (gnome-terminal) score 14471 or a child
+[ 2888.488104] Killed process 7587 (gnome-terminal)
+[ 2888.493330] dbus-daemon invoked oom-killer: gfp_mask=0xd0, order=0, oomkilladj=0
+[ 2888.493347] Pid: 2738, comm: dbus-daemon Tainted: P           2.6.28-13-generic #45-Ubuntu
+[ 2888.493350] Call Trace:
+[ 2888.493358]  [<c04fcbf6>] ? printk+0x18/0x1a
+[ 2888.493363]  [<c0191525>] oom_kill_process+0x75/0x210
+[ 2888.493366]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[ 2888.493370]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[ 2888.493373]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[ 2888.493377]  [<c01943e1>] __get_free_pages+0x21/0x40
+[ 2888.493382]  [<c01cc1da>] __pollwait+0x9a/0xe0
+[ 2888.493386]  [<c04985e7>] unix_poll+0x17/0xb0
+[ 2888.493390]  [<c0420fef>] sock_poll+0xf/0x20
+[ 2888.493393]  [<c01cb463>] do_poll+0xd3/0x240
+[ 2888.493397]  [<c01cb892>] do_sys_poll+0x152/0x1c0
+[ 2888.493401]  [<c01cc140>] ? __pollwait+0x0/0xe0
+[ 2888.493404]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493408]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493411]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493414]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493417]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493420]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493424]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493427]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493430]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493433]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493436]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493439]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493443]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493446]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493449]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493452]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493455]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493458]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493462]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493465]  [<c0133d00>] ? default_wake_function+0x0/0x10
+[ 2888.493470]  [<c0156913>] ? getnstimeofday+0x53/0x110
+[ 2888.493474]  [<c01cb688>] ? poll_select_set_timeout+0x68/0x80
+[ 2888.493478]  [<c01cba74>] sys_poll+0x54/0xb0
+[ 2888.493482]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[ 2888.493484] Mem-Info:
+[ 2888.493486] DMA per-cpu:
+[ 2888.493488] CPU    0: hi:    0, btch:   1 usd:   0
+[ 2888.493491] CPU    1: hi:    0, btch:   1 usd:   0
+[ 2888.493493] Normal per-cpu:
+[ 2888.493495] CPU    0: hi:  186, btch:  31 usd:  30
+[ 2888.493497] CPU    1: hi:  186, btch:  31 usd:  14
+[ 2888.493499] HighMem per-cpu:
+[ 2888.493501] CPU    0: hi:  186, btch:  31 usd:  36
+[ 2888.493503] CPU    1: hi:  186, btch:  31 usd: 179
+[ 2888.493508] Active_anon:13499 active_file:7823 inactive_anon:6693
+[ 2888.493509]  inactive_file:11123 unevictable:2 dirty:0 writeback:0 unstable:0
+[ 2888.493510]  free:250665 slab:142398 mapped:7259 pagetables:428 bounce:0
+[ 2888.493515] DMA free:3492kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[ 2888.493519] lowmem_reserve[]: 0 861 1984 1984
+[ 2888.493526] Normal free:3660kB min:3720kB low:4648kB high:5580kB active_anon:0kB inactive_anon:0kB active_file:16kB inactive_file:508kB unevictable:0kB present:881880kB pages_scanned:269 all_unreclaimable? no
+[ 2888.493530] lowmem_reserve[]: 0 0 8984 8984
+[ 2888.493537] HighMem free:995508kB min:512kB low:1724kB high:2936kB active_anon:53996kB inactive_anon:26772kB active_file:31276kB inactive_file:43984kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[ 2888.493541] lowmem_reserve[]: 0 0 0 0
+[ 2888.493545] DMA: 3*4kB 1*8kB 0*16kB 1*32kB 0*64kB 1*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3508kB
+[ 2888.493556] Normal: 229*4kB 101*8kB 24*16kB 0*32kB 1*64kB 0*128kB 0*256kB 1*512kB 1*1024kB 0*2048kB 0*4096kB = 3708kB
+[ 2888.493567] HighMem: 4021*4kB 2565*8kB 1826*16kB 1638*32kB 789*64kB 243*128kB 176*256kB 126*512kB 56*1024kB 17*2048kB 145*4096kB = 995484kB
+[ 2888.493579] 19740 total pagecache pages
+[ 2888.493581] 0 pages in swap cache
+[ 2888.493584] Swap cache stats: add 0, delete 0, find 0/0
+[ 2888.493586] Free swap  = 3228824kB
+[ 2888.493587] Total swap = 3228824kB
+[ 2888.501991] 516060 pages RAM
+[ 2888.501995] 289758 pages HighMem
+[ 2888.501998] 8698 pages reserved
+[ 2888.502001] 248419 pages shared
+[ 2888.502004] 212300 pages non-shared
+[ 2888.502009] Out of memory: kill process 3947 (bonobo-activati) score 12762 or a child
+[ 2888.502041] Killed process 3947 (bonobo-activati)
+[ 2895.019692] [drm:i915_setparam] *ERROR* unknown parameter 4
+[ 2895.019713] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[ 2896.876145] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[ 3118.821102] CE: hpet increasing min_delta_ns to 15000 nsec
+[ 4388.201075] ACPI: EC: missing confirmations, switch off interrupt mode.
+[14002.433167] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[35672.387936] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[41678.934135] usb 1-1: USB disconnect, address 2
+[42369.215385] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.215395] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.215400] Call Trace:
+[42369.215412]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.215420]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.215427]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.215433]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.215440]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.215447]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.215454]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.215463]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.215470]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.215477]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.215484]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.215492]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.215499]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.215506]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.215512]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.215521]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.215529]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.215539]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.215545]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.215552]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.215558]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.215566]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.215572]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.215579]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.215586]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.215593]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.215597] Mem-Info:
+[42369.215600] DMA per-cpu:
+[42369.215604] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.215609] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.215612] Normal per-cpu:
+[42369.215616] CPU    0: hi:  186, btch:  31 usd:  33
+[42369.215620] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.215624] HighMem per-cpu:
+[42369.215628] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.215632] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.215640] Active_anon:77947 active_file:44681 inactive_anon:28678
+[42369.215642]  inactive_file:73730 unevictable:2 dirty:0 writeback:161 unstable:0
+[42369.215645]  free:90585 slab:173537 mapped:18343 pagetables:895 bounce:0
+[42369.215653] DMA free:3520kB min:64kB low:80kB high:96kB active_anon:12kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.215660] lowmem_reserve[]: 0 861 1984 1984
+[42369.215673] Normal free:107892kB min:3720kB low:4648kB high:5580kB active_anon:392kB inactive_anon:600kB active_file:8kB inactive_file:0kB unevictable:0kB present:881880kB pages_scanned:294 all_unreclaimable? no
+[42369.215681] lowmem_reserve[]: 0 0 8984 8984
+[42369.215694] HighMem free:250928kB min:512kB low:1724kB high:2936kB active_anon:311384kB inactive_anon:114204kB active_file:178716kB inactive_file:294920kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.215701] lowmem_reserve[]: 0 0 0 0
+[42369.215709] DMA: 4*4kB 8*8kB 6*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3536kB
+[42369.215730] Normal: 2931*4kB 11914*8kB 39*16kB 2*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 107852kB
+[42369.215750] HighMem: 17558*4kB 6984*8kB 2366*16kB 1022*32kB 337*64kB 58*128kB 25*256kB 3*512kB 5*1024kB 6*2048kB 0*4096kB = 251000kB
+[42369.215771] 137640 total pagecache pages
+[42369.215775] 2410 pages in swap cache
+[42369.215779] Swap cache stats: add 19996, delete 17586, find 768/1078
+[42369.215783] Free swap  = 3157784kB
+[42369.215787] Total swap = 3228824kB
+[42369.232200] 516060 pages RAM
+[42369.232205] 289758 pages HighMem
+[42369.232208] 8698 pages reserved
+[42369.232211] 628556 pages shared
+[42369.232214] 307704 pages non-shared
+[42369.232220] Out of memory: kill process 17421 (run-mozilla.sh) score 624762 or a child
+[42369.232264] Killed process 17425 (firefox-bin)
+[42369.366120] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.366129] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.366134] Call Trace:
+[42369.366147]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.366155]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.366162]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.366168]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.366175]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.366182]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.366190]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.366199]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.366206]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.366213]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.366220]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.366227]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.366235]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.366242]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.366248]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.366257]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.366266]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.366275]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.366282]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.366289]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.366295]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.366303]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.366309]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.366316]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.366323]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.366330]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.366334] Mem-Info:
+[42369.366337] DMA per-cpu:
+[42369.366341] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.366346] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.366349] Normal per-cpu:
+[42369.366353] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.366358] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.366361] HighMem per-cpu:
+[42369.366365] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.366369] CPU    1: hi:  186, btch:  31 usd: 172
+[42369.366377] Active_anon:50003 active_file:44664 inactive_anon:27817
+[42369.366380]  inactive_file:73760 unevictable:2 dirty:0 writeback:136 unstable:0
+[42369.366382]  free:118644 slab:174197 mapped:16824 pagetables:895 bounce:0
+[42369.366391] DMA free:3456kB min:64kB low:80kB high:96kB active_anon:12kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.366398] lowmem_reserve[]: 0 861 1984 1984
+[42369.366411] Normal free:105784kB min:3720kB low:4648kB high:5580kB active_anon:92kB inactive_anon:536kB active_file:0kB inactive_file:120kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42369.366418] lowmem_reserve[]: 0 0 8984 8984
+[42369.366431] HighMem free:365336kB min:512kB low:1724kB high:2936kB active_anon:199908kB inactive_anon:110732kB active_file:178716kB inactive_file:294920kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.366439] lowmem_reserve[]: 0 0 0 0
+[42369.366447] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42369.366467] Normal: 3260*4kB 11503*8kB 30*16kB 4*32kB 1*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 105864kB
+[42369.366488] HighMem: 20679*4kB 10212*8kB 4608*16kB 1875*32kB 511*64kB 65*128kB 29*256kB 3*512kB 5*1024kB 6*2048kB 0*4096kB = 365532kB
+[42369.366509] 136747 total pagecache pages
+[42369.366513] 1470 pages in swap cache
+[42369.366517] Swap cache stats: add 20007, delete 18537, find 768/1079
+[42369.366522] Free swap  = 3203804kB
+[42369.366525] Total swap = 3228824kB
+[42369.383700] 516060 pages RAM
+[42369.383706] 289758 pages HighMem
+[42369.383709] 8698 pages reserved
+[42369.383712] 622247 pages shared
+[42369.383715] 278876 pages non-shared
+[42369.383721] Out of memory: kill process 10620 (x-session-manag) score 41238 or a child
+[42369.383763] Killed process 10761 (ssh-agent)
+[42369.402678] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.402688] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.402693] Call Trace:
+[42369.402705]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.402713]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.402720]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.402726]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.402733]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.402740]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.402747]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.402757]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.402764]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.402771]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.402778]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.402786]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.402793]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.402800]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.402806]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.402815]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.402824]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.402833]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.402840]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.402847]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.402853]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.402861]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.402867]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.402875]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.402881]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.402888]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.402892] Mem-Info:
+[42369.402896] DMA per-cpu:
+[42369.402900] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.402904] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.402908] Normal per-cpu:
+[42369.402912] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.402916] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.402920] HighMem per-cpu:
+[42369.402923] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.402928] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.402936] Active_anon:44546 active_file:44701 inactive_anon:27704
+[42369.402938]  inactive_file:73725 unevictable:2 dirty:0 writeback:138 unstable:0
+[42369.402941]  free:124439 slab:174221 mapped:13555 pagetables:802 bounce:0
+[42369.402950] DMA free:3456kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:12kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.402957] lowmem_reserve[]: 0 861 1984 1984
+[42369.402970] Normal free:105832kB min:3720kB low:4648kB high:5580kB active_anon:88kB inactive_anon:520kB active_file:88kB inactive_file:0kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42369.402977] lowmem_reserve[]: 0 0 8984 8984
+[42369.402990] HighMem free:388468kB min:512kB low:1724kB high:2936kB active_anon:178096kB inactive_anon:110284kB active_file:178716kB inactive_file:294920kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.402998] lowmem_reserve[]: 0 0 0 0
+[42369.403006] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42369.403026] Normal: 3270*4kB 11503*8kB 32*16kB 5*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 105904kB
+[42369.403046] HighMem: 21520*4kB 11570*8kB 4768*16kB 1941*32kB 542*64kB 76*128kB 30*256kB 2*512kB 6*1024kB 6*2048kB 0*4096kB = 388592kB
+[42369.403068] 136696 total pagecache pages
+[42369.403071] 1467 pages in swap cache
+[42369.403076] Swap cache stats: add 20015, delete 18548, find 768/1080
+[42369.403080] Free swap  = 3204072kB
+[42369.403084] Total swap = 3228824kB
+[42369.419928] 516060 pages RAM
+[42369.419933] 289758 pages HighMem
+[42369.419937] 8698 pages reserved
+[42369.419940] 622181 pages shared
+[42369.419943] 278804 pages non-shared
+[42369.419949] Out of memory: kill process 10620 (x-session-manag) score 40939 or a child
+[42369.419990] Killed process 10784 (seahorse-agent)
+[42369.463792] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.463797] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.463800] Call Trace:
+[42369.463808]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.463813]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.463817]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.463820]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.463823]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.463827]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.463831]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.463836]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.463840]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.463843]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.463847]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.463851]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.463855]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.463858]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.463861]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.463866]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.463871]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.463877]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.463880]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.463884]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.463887]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.463891]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.463895]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.463898]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.463901]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.463905]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.463907] Mem-Info:
+[42369.463909] DMA per-cpu:
+[42369.463911] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.463913] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.463915] Normal per-cpu:
+[42369.463917] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.463919] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.463921] HighMem per-cpu:
+[42369.463923] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.463925] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.463929] Active_anon:44453 active_file:44669 inactive_anon:27295
+[42369.463931]  inactive_file:73754 unevictable:2 dirty:0 writeback:138 unstable:0
+[42369.463932]  free:124725 slab:174496 mapped:13524 pagetables:802 bounce:0
+[42369.463936] DMA free:3456kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:12kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.463940] lowmem_reserve[]: 0 861 1984 1984
+[42369.463947] Normal free:104792kB min:3720kB low:4648kB high:5580kB active_anon:88kB inactive_anon:496kB active_file:0kB inactive_file:96kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42369.463950] lowmem_reserve[]: 0 0 8984 8984
+[42369.463957] HighMem free:390652kB min:512kB low:1724kB high:2936kB active_anon:177724kB inactive_anon:108672kB active_file:178716kB inactive_file:294920kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.463961] lowmem_reserve[]: 0 0 0 0
+[42369.463965] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42369.463975] Normal: 3410*4kB 11358*8kB 8*16kB 2*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 104824kB
+[42369.463985] HighMem: 21624*4kB 11620*8kB 4792*16kB 1949*32kB 551*64kB 76*128kB 30*256kB 2*512kB 6*1024kB 6*2048kB 0*4096kB = 390624kB
+[42369.463996] 136727 total pagecache pages
+[42369.463998] 1488 pages in swap cache
+[42369.464021] Swap cache stats: add 20042, delete 18554, find 771/1087
+[42369.464023] Free swap  = 3204096kB
+[42369.464024] Total swap = 3228824kB
+[42369.473601] 516060 pages RAM
+[42369.473604] 289758 pages HighMem
+[42369.473606] 8698 pages reserved
+[42369.473607] 621656 pages shared
+[42369.473609] 278607 pages non-shared
+[42369.473613] Out of memory: kill process 10620 (x-session-manag) score 39599 or a child
+[42369.473644] Killed process 10821 (metacity)
+[42369.784398] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.784408] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.784413] Call Trace:
+[42369.784426]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.784434]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.784440]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.784446]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.784453]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.784461]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.784468]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.784477]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.784484]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.784491]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.784498]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.784505]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.784512]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.784519]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.784525]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.784534]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.784542]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.784552]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.784558]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.784565]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.784571]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.784579]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.784585]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.784592]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.784598]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.784605]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.784610] Mem-Info:
+[42369.784613] DMA per-cpu:
+[42369.784617] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.784621] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.784625] Normal per-cpu:
+[42369.784629] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.784633] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.784637] HighMem per-cpu:
+[42369.784640] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.784644] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.784653] Active_anon:43614 active_file:37780 inactive_anon:27247
+[42369.784655]  inactive_file:71305 unevictable:2 dirty:0 writeback:152 unstable:0
+[42369.784658]  free:134620 slab:174827 mapped:13388 pagetables:787 bounce:0
+[42369.784666] DMA free:3472kB min:64kB low:80kB high:96kB active_anon:12kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.784674] lowmem_reserve[]: 0 861 1984 1984
+[42369.784686] Normal free:103452kB min:3720kB low:4648kB high:5580kB active_anon:64kB inactive_anon:488kB active_file:0kB inactive_file:116kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42369.784694] lowmem_reserve[]: 0 0 8984 8984
+[42369.784707] HighMem free:431556kB min:512kB low:1724kB high:2936kB active_anon:174380kB inactive_anon:108500kB active_file:151120kB inactive_file:285104kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.784714] lowmem_reserve[]: 0 0 0 0
+[42369.784722] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42369.784743] Normal: 3712*4kB 11040*8kB 9*16kB 1*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 103472kB
+[42369.784763] HighMem: 22238*4kB 11841*8kB 5036*16kB 2177*32kB 719*64kB 128*128kB 44*256kB 11*512kB 6*1024kB 6*2048kB 0*4096kB = 431648kB
+[42369.784784] 127390 total pagecache pages
+[42369.784788] 1515 pages in swap cache
+[42369.784793] Swap cache stats: add 20119, delete 18604, find 782/1109
+[42369.784797] Free swap  = 3205008kB
+[42369.784800] Total swap = 3228824kB
+[42369.801585] 516060 pages RAM
+[42369.801591] 289758 pages HighMem
+[42369.801596] 8698 pages reserved
+[42369.801601] 620130 pages shared
+[42369.801605] 268927 pages non-shared
+[42369.801614] Out of memory: kill process 10620 (x-session-manag) score 36985 or a child
+[42369.801659] Killed process 10825 (gnome-panel)
+[42369.872521] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42369.872530] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42369.872535] Call Trace:
+[42369.872548]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42369.872557]  [<c0191525>] oom_kill_process+0x75/0x210
+[42369.872563]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42369.872569]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42369.872576]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42369.872584]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42369.872591]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42369.872600]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42369.872607]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42369.872614]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42369.872621]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42369.872629]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42369.872636]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42369.872643]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42369.872649]  [<c04219da>] sock_aio_write+0xda/0x130
+[42369.872658]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42369.872667]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42369.872677]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42369.872684]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42369.872690]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42369.872697]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42369.872705]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42369.872711]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42369.872718]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42369.872724]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42369.872732]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42369.872736] Mem-Info:
+[42369.872739] DMA per-cpu:
+[42369.872743] CPU    0: hi:    0, btch:   1 usd:   0
+[42369.872748] CPU    1: hi:    0, btch:   1 usd:   0
+[42369.872751] Normal per-cpu:
+[42369.872755] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.872760] CPU    1: hi:  186, btch:  31 usd:  24
+[42369.872763] HighMem per-cpu:
+[42369.872767] CPU    0: hi:  186, btch:  31 usd:   0
+[42369.872771] CPU    1: hi:  186, btch:  31 usd:   0
+[42369.872779] Active_anon:37104 active_file:37787 inactive_anon:27086
+[42369.872782]  inactive_file:71305 unevictable:2 dirty:0 writeback:152 unstable:0
+[42369.872784]  free:141137 slab:175067 mapped:12923 pagetables:725 bounce:0
+[42369.872793] DMA free:3472kB min:64kB low:80kB high:96kB active_anon:12kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42369.872800] lowmem_reserve[]: 0 861 1984 1984
+[42369.872813] Normal free:102556kB min:3720kB low:4648kB high:5580kB active_anon:64kB inactive_anon:464kB active_file:28kB inactive_file:116kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42369.872821] lowmem_reserve[]: 0 0 8984 8984
+[42369.872833] HighMem free:458520kB min:512kB low:1724kB high:2936kB active_anon:148340kB inactive_anon:107880kB active_file:151120kB inactive_file:285104kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42369.872841] lowmem_reserve[]: 0 0 0 0
+[42369.872849] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42369.872869] Normal: 3881*4kB 10845*8kB 6*16kB 1*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 102540kB
+[42369.872890] HighMem: 22693*4kB 12010*8kB 5223*16kB 2291*32kB 825*64kB 169*128kB 54*256kB 16*512kB 6*1024kB 6*2048kB 0*4096kB = 458612kB
+[42369.872911] 127235 total pagecache pages
+[42369.872915] 1360 pages in swap cache
+[42369.872919] Swap cache stats: add 20133, delete 18773, find 786/1115
+[42369.872923] Free swap  = 3209648kB
+[42369.872927] Total swap = 3228824kB
+[42369.889768] 516060 pages RAM
+[42369.889773] 289758 pages HighMem
+[42369.889776] 8698 pages reserved
+[42369.889779] 610638 pages shared
+[42369.889783] 262551 pages non-shared
+[42369.889789] Out of memory: kill process 10620 (x-session-manag) score 34385 or a child
+[42369.889832] Killed process 10826 (nautilus)
+[42370.516372] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42370.516381] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42370.516387] Call Trace:
+[42370.516400]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42370.516408]  [<c0191525>] oom_kill_process+0x75/0x210
+[42370.516415]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42370.516421]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42370.516428]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42370.516435]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42370.516442]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42370.516451]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42370.516458]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42370.516465]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42370.516472]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42370.516480]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42370.516487]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42370.516493]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42370.516500]  [<c04219da>] sock_aio_write+0xda/0x130
+[42370.516508]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42370.516517]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42370.516526]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42370.516533]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42370.516540]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42370.516546]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42370.516554]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42370.516560]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42370.516604]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42370.516610]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42370.516617]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42370.516621] Mem-Info:
+[42370.516625] DMA per-cpu:
+[42370.516629] CPU    0: hi:    0, btch:   1 usd:   0
+[42370.516633] CPU    1: hi:    0, btch:   1 usd:   0
+[42370.516637] Normal per-cpu:
+[42370.516641] CPU    0: hi:  186, btch:  31 usd:   0
+[42370.516645] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.516649] HighMem per-cpu:
+[42370.516653] CPU    0: hi:  186, btch:  31 usd:   0
+[42370.516657] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.516665] Active_anon:31588 active_file:37818 inactive_anon:27146
+[42370.516667]  inactive_file:71284 unevictable:2 dirty:0 writeback:135 unstable:0
+[42370.516670]  free:145573 slab:176098 mapped:12155 pagetables:655 bounce:0
+[42370.516679] DMA free:3472kB min:64kB low:80kB high:96kB active_anon:12kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42370.516686] lowmem_reserve[]: 0 861 1984 1984
+[42370.516699] Normal free:98488kB min:3720kB low:4648kB high:5580kB active_anon:64kB inactive_anon:468kB active_file:156kB inactive_file:28kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42370.516706] lowmem_reserve[]: 0 0 8984 8984
+[42370.516719] HighMem free:480332kB min:512kB low:1724kB high:2936kB active_anon:126276kB inactive_anon:108116kB active_file:151116kB inactive_file:285108kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42370.516727] lowmem_reserve[]: 0 0 0 0
+[42370.516735] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42370.516755] Normal: 4661*4kB 9953*8kB 6*16kB 1*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 98524kB
+[42370.516775] HighMem: 22910*4kB 12231*8kB 5405*16kB 2375*32kB 879*64kB 208*128kB 74*256kB 16*512kB 6*1024kB 6*2048kB 0*4096kB = 480416kB
+[42370.516797] 127329 total pagecache pages
+[42370.516801] 1439 pages in swap cache
+[42370.516805] Swap cache stats: add 20256, delete 18817, find 862/1209
+[42370.516810] Free swap  = 3211304kB
+[42370.516813] Total swap = 3228824kB
+[42370.533459] 516060 pages RAM
+[42370.533464] 289758 pages HighMem
+[42370.533467] 8698 pages reserved
+[42370.533470] 603992 pages shared
+[42370.533473] 259124 pages non-shared
+[42370.533479] Out of memory: kill process 10620 (x-session-manag) score 25699 or a child
+[42370.533518] Killed process 10839 (update-notifier)
+[42370.837754] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42370.837763] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42370.837768] Call Trace:
+[42370.837781]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42370.837789]  [<c0191525>] oom_kill_process+0x75/0x210
+[42370.837796]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42370.837802]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42370.837809]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42370.837816]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42370.837823]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42370.837832]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42370.837839]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42370.837846]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42370.837853]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42370.837860]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42370.837868]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42370.837875]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42370.837881]  [<c04219da>] sock_aio_write+0xda/0x130
+[42370.837889]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42370.837898]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42370.837907]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42370.837914]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42370.837920]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42370.837926]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42370.837934]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42370.837940]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42370.837947]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42370.837953]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42370.837961]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42370.837965] Mem-Info:
+[42370.837968] DMA per-cpu:
+[42370.837972] CPU    0: hi:    0, btch:   1 usd:   0
+[42370.837976] CPU    1: hi:    0, btch:   1 usd:   0
+[42370.837980] Normal per-cpu:
+[42370.837984] CPU    0: hi:  186, btch:  31 usd:   0
+[42370.837988] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.837992] HighMem per-cpu:
+[42370.837995] CPU    0: hi:  186, btch:  31 usd:   0
+[42370.837999] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.838007] Active_anon:30562 active_file:37842 inactive_anon:27250
+[42370.838010]  inactive_file:71288 unevictable:2 dirty:0 writeback:135 unstable:0
+[42370.838012]  free:145414 slab:177125 mapped:12139 pagetables:656 bounce:0
+[42370.838021] DMA free:3472kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:12kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42370.838028] lowmem_reserve[]: 0 861 1984 1984
+[42370.838041] Normal free:94244kB min:3720kB low:4648kB high:5580kB active_anon:68kB inactive_anon:460kB active_file:216kB inactive_file:0kB unevictable:0kB present:881880kB pages_scanned:0 all_unreclaimable? no
+[42370.838048] lowmem_reserve[]: 0 0 8984 8984
+[42370.838061] HighMem free:483940kB min:512kB low:1724kB high:2936kB active_anon:122180kB inactive_anon:108528kB active_file:151152kB inactive_file:285172kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42370.838069] lowmem_reserve[]: 0 0 0 0
+[42370.838077] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42370.838097] Normal: 5421*4kB 9049*8kB 5*16kB 1*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 94316kB
+[42370.838117] HighMem: 23029*4kB 12279*8kB 5432*16kB 2401*32kB 882*64kB 218*128kB 74*256kB 16*512kB 6*1024kB 6*2048kB 0*4096kB = 484012kB
+[42370.838139] 127505 total pagecache pages
+[42370.838142] 1592 pages in swap cache
+[42370.838147] Swap cache stats: add 20409, delete 18817, find 884/1253
+[42370.838151] Free swap  = 3211304kB
+[42370.838155] Total swap = 3228824kB
+[42370.854560] 516060 pages RAM
+[42370.854566] 289758 pages HighMem
+[42370.854571] 8698 pages reserved
+[42370.854576] 604253 pages shared
+[42370.854580] 259258 pages non-shared
+[42370.854588] Out of memory: kill process 10620 (x-session-manag) score 22777 or a child
+[42370.854632] Killed process 10849 (bluetooth-apple)
+[42370.885269] gnome-terminal invoked oom-killer: gfp_mask=0x44d0, order=2, oomkilladj=0
+[42370.885278] Pid: 27811, comm: gnome-terminal Tainted: P           2.6.28-13-generic #45-Ubuntu
+[42370.885283] Call Trace:
+[42370.885296]  [<c04fcbf6>] ? printk+0x18/0x1a
+[42370.885304]  [<c0191525>] oom_kill_process+0x75/0x210
+[42370.885311]  [<c0191c03>] ? select_bad_process+0xc3/0x100
+[42370.885317]  [<c0191ce2>] out_of_memory+0xa2/0x140
+[42370.885324]  [<c0194350>] __alloc_pages_internal+0x450/0x490
+[42370.885331]  [<c01943e1>] __get_free_pages+0x21/0x40
+[42370.885338]  [<c01b8c2e>] __kmalloc_track_caller+0xee/0xf0
+[42370.885347]  [<c0425409>] ? sock_alloc_send_pskb+0x179/0x260
+[42370.885355]  [<c042808d>] __alloc_skb+0x4d/0x110
+[42370.885361]  [<c0425409>] sock_alloc_send_pskb+0x179/0x260
+[42370.885369]  [<c0425508>] sock_alloc_send_skb+0x18/0x20
+[42370.885376]  [<c049a85a>] unix_stream_sendmsg+0x1fa/0x350
+[42370.885383]  [<c042795e>] ? kfree_skb+0x1e/0x40
+[42370.885390]  [<c04218f1>] __sock_sendmsg+0x51/0x60
+[42370.885397]  [<c04219da>] sock_aio_write+0xda/0x130
+[42370.885405]  [<c01bd335>] do_sync_readv_writev+0xb5/0xf0
+[42370.885414]  [<c014ecb0>] ? autoremove_wake_function+0x0/0x50
+[42370.885424]  [<c028731f>] ? security_file_permission+0xf/0x20
+[42370.885431]  [<c01bd5e4>] ? rw_verify_area+0x54/0xd0
+[42370.885437]  [<c01be07c>] do_readv_writev+0x9c/0x1d0
+[42370.885444]  [<c0421900>] ? sock_aio_write+0x0/0x130
+[42370.885451]  [<c013f211>] ? __do_softirq+0x111/0x170
+[42370.885458]  [<c0152cc6>] ? hrtimer_interrupt+0x186/0x1b0
+[42370.885465]  [<c01be1fa>] vfs_writev+0x4a/0x60
+[42370.885471]  [<c01be24d>] sys_writev+0x3d/0xa0
+[42370.885478]  [<c0103f6b>] sysenter_do_call+0x12/0x2f
+[42370.885483] Mem-Info:
+[42370.885486] DMA per-cpu:
+[42370.885490] CPU    0: hi:    0, btch:   1 usd:   0
+[42370.885494] CPU    1: hi:    0, btch:   1 usd:   0
+[42370.885498] Normal per-cpu:
+[42370.885502] CPU    0: hi:  186, btch:  31 usd:  30
+[42370.885506] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.885510] HighMem per-cpu:
+[42370.885514] CPU    0: hi:  186, btch:  31 usd:   0
+[42370.885518] CPU    1: hi:  186, btch:  31 usd:   0
+[42370.885526] Active_anon:29880 active_file:37788 inactive_anon:27245
+[42370.885528]  inactive_file:71360 unevictable:2 dirty:0 writeback:135 unstable:0
+[42370.885531]  free:146090 slab:177142 mapped:12139 pagetables:656 bounce:0
+[42370.885540] DMA free:3472kB min:64kB low:80kB high:96kB active_anon:0kB inactive_anon:12kB active_file:0kB inactive_file:0kB unevictable:0kB present:15764kB pages_scanned:0 all_unreclaimable? no
+[42370.885547] lowmem_reserve[]: 0 861 1984 1984
+[42370.885560] Normal free:94176kB min:3720kB low:4648kB high:5580kB active_anon:68kB inactive_anon:440kB active_file:0kB inactive_file:144kB unevictable:0kB present:881880kB pages_scanned:65 all_unreclaimable? no
+[42370.885567] lowmem_reserve[]: 0 0 8984 8984
+[42370.885580] HighMem free:486712kB min:512kB low:1724kB high:2936kB active_anon:119452kB inactive_anon:108528kB active_file:151152kB inactive_file:285296kB unevictable:8kB present:1149976kB pages_scanned:0 all_unreclaimable? no
+[42370.885588] lowmem_reserve[]: 0 0 0 0
+[42370.885596] DMA: 4*4kB 8*8kB 2*16kB 1*32kB 0*64kB 0*128kB 1*256kB 0*512kB 1*1024kB 1*2048kB 0*4096kB = 3472kB
+[42370.885616] Normal: 5454*4kB 9019*8kB 5*16kB 1*32kB 0*64kB 1*128kB 0*256kB 0*512kB 0*1024kB 0*2048kB 0*4096kB = 94208kB
+[42370.885636] HighMem: 23051*4kB 12299*8kB 5442*16kB 2410*32kB 890*64kB 230*128kB 74*256kB 16*512kB 6*1024kB 6*2048kB 0*4096kB = 486756kB
+[42370.885657] 127536 total pagecache pages
+[42370.885661] 1591 pages in swap cache
+[42370.885666] Swap cache stats: add 20415, delete 18824, find 885/1255
+[42370.885670] Free swap  = 3211312kB
+[42370.885673] Total swap = 3228824kB
+[42370.902107] 516060 pages RAM
+[42370.902111] 289758 pages HighMem
+[42370.902114] 8698 pages reserved
+[42370.902118] 602529 pages shared
+[42370.902121] 258573 pages non-shared
+[42370.902127] Out of memory: kill process 10620 (x-session-manag) score 20409 or a child
+[42370.902168] Killed process 10852 (wicd-client)
+[42371.040894] Out of memory: kill process 10620 (x-session-manag) score 16954 or a child
+[42371.040908] Killed process 10853 (tracker-applet)
+[42371.052963] Out of memory: kill process 27811 (gnome-terminal) score 16305 or a child
+[42371.052978] Killed process 27812 (gnome-pty-helpe)
+[42371.307910] Out of memory: kill process 27811 (gnome-terminal) score 16050 or a child
+[42371.307925] Killed process 27813 (bash)
+[42371.732351] Out of memory: kill process 10620 (x-session-manag) score 16243 or a child
+[42371.732383] Killed process 10854 (trackerd)
+[42372.032343] Out of memory: kill process 27811 (gnome-terminal) score 15076 or a child
+[42372.032375] Killed process 28090 (bash)
+[46145.533624] __ratelimit: 5 callbacks suppressed
+[46145.533642] test[1585]: segfault at 2804a09c ip 08048c5d sp bfac2f50 error 4 in test[8048000+1000]
+[46825.918538] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[47286.578778] test[3042]: segfault at 2804a09c ip 08048c5d sp bf923db0 error 4 in test[8048000+1000]
+[47858.002338] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[52898.006422] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[56158.928256] UDF-fs: No VRS found
+[56158.973430] ISO 9660 Extensions: Microsoft Joliet Level 3
+[56158.976518] ISOFS: changing to secondary root
+[68545.480713] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[81668.161175] UDF-fs: No VRS found
+[81668.223508] ISO 9660 Extensions: Microsoft Joliet Level 3
+[81668.228873] ISOFS: changing to secondary root
+[90026.286372] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[119896.397283] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[120898.805026] hda_intel: azx_get_response timeout, switching to polling mode: last cmd=0x008f000a
+[128616.989012] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[134980.735067] gvfsd-trash[10834]: segfault at 14 ip 080569f5 sp bfe0df80 error 4 in gvfsd-trash[8048000+1e000]
+[136788.799052] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[148098.556424] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[159594.222618] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[179874.826144] UDF-fs: No VRS found
+[179874.873054] ISO 9660 Extensions: Microsoft Joliet Level 3
+[179874.873826] ISOFS: changing to secondary root
+[181056.451652] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[203924.380291] wifi0: rx FIFO overrun; resetting
+[204642.379770] firefox-bin[24577]: segfault at a6d0b03c ip b80260f7 sp abefd280 error 6 in libpthread-2.9.so[b801c000+15000]
+[210906.638468] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[212286.700280] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[216571.080405] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[217959.753667] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[218871.544909] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[222598.530246] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[226471.760054] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226473.752055] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226477.736026] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226485.704049] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226501.644023] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226533.512059] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226597.256077] TCP: Treason uncloaked! Peer 69.118.41.96:45910/45225 shrinks window 1771998780:1771998781. Repaired.
+[226610.812171] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[232967.110966] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[234369.769614] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[235984.487063] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[241359.628812] UDF-fs: No VRS found
+[241359.666784] ISO 9660 Extensions: Microsoft Joliet Level 3
+[241359.670038] ISOFS: changing to secondary root
+[246354.476322] realplay.bin[22752]: segfault at 24 ip b527e230 sp bfbc8d30 error 4 in vidsite.so[b5265000+3f000]
+[269969.596122] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[302713.627998] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[307018.762159] end_request: I/O error, dev sr0, sector 0
+[307018.762170] Buffer I/O error on device sr0, logical block 0
+[307018.763756] end_request: I/O error, dev sr0, sector 0
+[307018.763762] Buffer I/O error on device sr0, logical block 0
+[307019.131052] cdrom: This disc doesn't have any tracks I recognize!
+[308108.640986] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[308977.740579] end_request: I/O error, dev sr0, sector 0
+[308977.740590] Buffer I/O error on device sr0, logical block 0
+[308977.745407] end_request: I/O error, dev sr0, sector 0
+[308977.745417] Buffer I/O error on device sr0, logical block 0
+[308977.835765] cdrom: This disc doesn't have any tracks I recognize!
+[309004.123237] transmission[3498]: segfault at 37302d3d ip 080a27a2 sp b5931240 error 4 in transmission[8048000+ac000]
+[309788.965593] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[316882.958194] [drm:i915_getparam] *ERROR* Unknown parameter 6
+[323008.839043] [drm:i915_getparam] *ERROR* Unknown parameter 6

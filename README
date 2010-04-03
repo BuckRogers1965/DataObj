@@ -1,0 +1,8 @@
+
+in order to find the core library you have to run this command:
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.
+
+Then you can run the framework by typing:
+
+./framework
