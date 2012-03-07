@@ -2,8 +2,8 @@ PROJECT=dynTest
 
 CC=gcc 
 
-#SOURCE= $(wildcard *.c)
-SOURCE= dynbuff.c dynbufftest.c
+SOURCE= $(wildcard *.c)
+#SOURCE= dynbuff.c dynbufftest.c
 
 INCLUDE= -I.
 DIRECTIVES= -w -fprofile-arcs -ftest-coverage

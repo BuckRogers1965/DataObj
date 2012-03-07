@@ -156,20 +156,22 @@ CreateTestApp(NodeObj Main){
 
 	NodeObj TestApp = CreateContainer(Main, "TestApp");
 
+	// Create a file writer object
 	NodeObj WriteFile = CreateObject(TestApp, "File");
 	SetPropStr (WriteFile, "Name", "Writer");
 	SetPropStr (WriteFile, "Path", "out.txt");
 	SetPropStr (WriteFile, "Mode", "w");
 	SetPropInt (WriteFile, "State", 1);
 
+	// Create a file reader object
 	NodeObj ReadFile = CreateObject(TestApp, "File");
 	SetPropStr (ReadFile, "Name", "Reader"); 
 	SetPropStr (ReadFile, "Path", "in.txt");
 	SetPropStr (ReadFile, "Mode", "r");
-
-	Connect(ReadFile, "Out", WriteFile, "In");
-
 	SetPropInt (ReadFile, "State", 1);
+
+	// Copy the input to the output
+	Connect(ReadFile, "Out", WriteFile, "In");
 	
 }
 
@@ -177,7 +179,6 @@ CreateTestApp(NodeObj Main){
 int
 IsRunning(NodeObj Main){
 
-	//return 1;
 	return (GetInt((DataObj)GetValueNode(GetPropNode(Main, "State"))));
 }
 
@@ -191,20 +192,11 @@ LoadDefaultApp(NodeObj Main){
 void
 PerformTesting(){
 
-	int i;
-
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 
-//	printf("\n");
-	for (i=0; i<10 ; i++)
-		DataTest();
+	DataTest();
 
-//	printf("\n");
-
-	for (i=0; i<10 ; i++)
-		NodeTest();
-
-//	printf("\n");
+	NodeTest();
 
 	BuffTest();
 
