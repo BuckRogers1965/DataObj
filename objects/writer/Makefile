@@ -5,7 +5,7 @@ SOURCE= $(wildcard *.c)
 
 OBJECTS= $(subst .c,.o,$(SOURCE))
 
-GOAL=out.object
+GOAL=writer.object
 
 INCLUDES=-I../..
 

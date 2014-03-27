@@ -31,7 +31,7 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data){
 void _init()
 {
 
-	Self = Register("Out", "GrokThink", "8da17004-242c-4f21-a77e-6a823a52c600", &Handle_Message);
+	Self = Register("Reader", "GrokThink", "8da17004-242c-4f21-a77e-6a823a52c639", &Handle_Message);
 }
 
 void _fini()

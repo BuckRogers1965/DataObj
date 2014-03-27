@@ -11,9 +11,10 @@
 
 /*
 
-If anything comes into this objects IN, output it to standard out, with it's name on it, and send it to it's Out.
+ // on activate open specified file for writing
+ // messages in goto file.
 
-Have a property to turn on and off the echoing.
+Have a property to turn on and off the writing.
 
 Turning the object off disables any output.
 
@@ -31,7 +32,7 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data){
 void _init()
 {
 
-	Self = Register("Out", "GrokThink", "8da17004-242c-4f21-a77e-6a823a52c600", &Handle_Message);
+	Self = Register("Writer", "GrokThink", "8da17004-242c-4f21-a77e-6a823a52c640", &Handle_Message);
 }
 
 void _fini()

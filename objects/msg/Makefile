@@ -5,7 +5,7 @@ SOURCE= $(wildcard *.c)
 
 OBJECTS= $(subst .c,.o,$(SOURCE))
 
-GOAL=out.object
+GOAL=msg.object
 
 INCLUDES=-I../..
 
@@ -27,7 +27,7 @@ depend:
 
 # DO NOT DELETE
 
-out.o: /usr/include/stdio.h /usr/include/features.h /usr/include/libio.h
-out.o: /usr/include/_G_config.h /usr/include/wchar.h /usr/include/xlocale.h
-out.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
-out.o: ../../callback.h
+msg.o: /usr/include/stdio.h /usr/include/features.h /usr/include/libio.h
+msg.o: /usr/include/_G_config.h /usr/include/wchar.h /usr/include/xlocale.h
+msg.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
+msg.o: ../../callback.h
