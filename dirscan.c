@@ -78,12 +78,12 @@ ScanRegularFiles (struct dirent **namelist, int n, char *extension,
   // allocate space to hold the lstat value
   struct stat sb;
 
-  int length;
+  //int length;
 
   while (n--)
     {
       // find the length of the name
-      length = strlen (namelist[n]->d_name);
+      //length = strlen (namelist[n]->d_name);
 
       // get the information about the file
       // notice that we use lstat() here and not stat()
@@ -122,7 +122,7 @@ ScanDirectoryFiles (char *name, char *extension, FoundFile * function,
   int length;
 
   // for each name
-  while (n--)
+  while (n-- > 0)
     {
       // find the length of the name
       length = strlen (namelist[n]->d_name);
@@ -174,12 +174,12 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
 		int SearchDirection)
 {
   struct dirent **namelist;
-  int n;
+  int n, ignoreint;
   char oldpath[PATH_MAX];
-  int ignore;
 
   // store the current directory path to restore later
-  ignore =  (int) getcwd (oldpath, PATH_MAX);
+  char * ignore = getcwd (oldpath, PATH_MAX);
+  if (ignore == NULL) ;
 
   // change to the new directory path
   if (chdir (name) == -1)
@@ -203,8 +203,9 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
   if (n < 0)
     {
       perror ("scandir");
-       ignore = chdir (oldpath);
-      return 0;
+       ignoreint = chdir (oldpath);
+       if (ignoreint == 0) ;
+       return 0;
     }
   else
     {
@@ -238,12 +239,12 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
 	  break;
 	}			// switch, the order things happen in
     }				// else
-  while (n--){
+  while (n-- > 0){
 	  free(namelist[n]);
   }
   free(namelist);
 
-  ignore = chdir (oldpath);
+  ignoreint = chdir (oldpath);
   return 1;
 }
 

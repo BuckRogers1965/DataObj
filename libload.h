@@ -8,4 +8,5 @@
 */
 
 int
-LoadObject (char *name, int depth);
+LoadObject (char *, int);
+

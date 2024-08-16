@@ -68,6 +68,7 @@ struct task_list {
 } task_list;
 
 
+   # ifndef S_SPLINT_S
 /* create and initialize a new task list object that is empty */
 TaskList
 CreateList(){
@@ -173,6 +174,8 @@ DeleteList(TaskList list){
 /* adds a task to the list with a delay */
 int
 AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func, int mesgid, NodeObj data){
+
+
 
 //	printf("Add task with delay of % d seconds %d milliseconds\n", delay_seconds, delay_millisecs);
 	TaskList list = task->owner;
@@ -373,6 +376,7 @@ testcallback(NodeObj object, NodeObj data, int value){
 	printf("!!! ");
 	return 1;
 }
+   # endif
 
 void
 SchedTest (){
@@ -380,6 +384,8 @@ SchedTest (){
 	int CountOfScheduledTasks = 1;
 
 	TimeUpdate();
+
+   # ifndef S_SPLINT_S
 
 	TaskList testlist = CreateList();
 	
@@ -412,6 +418,7 @@ SchedTest (){
 		fflush(stdout);
 		usleep(10000);
 	}
+   # endif
 
 	printf("\n");
 

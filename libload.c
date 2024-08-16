@@ -13,6 +13,8 @@
 
 #include "DebugPrint.h"
 
+#define BUFFLEN 10024
+
 
 int
 LoadObject (char *name, int depth)
@@ -20,30 +22,31 @@ LoadObject (char *name, int depth)
 	void *ClassHandle;
 	int *ClassMsgFunc;
 	char *error;
-	char hereName[1024];
-	char DebugMsg[1024];
-        int ignore;
+	char hereName[BUFFLEN];
+	char DebugMsg[BUFFLEN];
 	//LPVCLASS pnewDevClass;
 
         char bundlePath[PATH_MAX];
-	ignore = (int) getcwd( bundlePath, PATH_MAX );
+	char * ignore = getcwd( bundlePath, PATH_MAX );
+        if (ignore == NULL) ;
 
 	fflush(NULL);
 	//printf("\n");
-	sprintf (hereName, "%s/%s", bundlePath, name);
+	snprintf (hereName, BUFFLEN-10, "%s/%s", bundlePath, name);
 
 	ClassHandle = dlopen(hereName, RTLD_LAZY);
 	if (!ClassHandle) {
 		//fputs(dlerror(), stderr);
-		sprintf((char *)&DebugMsg, "Failed to load %s", hereName);
+		snprintf((char *)&DebugMsg, BUFFLEN-10, "Failed to load %s", hereName);
 		DebugPrint ( (char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 		return 0;
 	} else {
-		sprintf((char *)&DebugMsg, "Loaded %s", name);
+		snprintf((char *)&DebugMsg, BUFFLEN-1, "Loaded %s", name);
 		DebugPrint ((char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
 	ClassMsgFunc = dlsym(ClassHandle, "Handle_Message");
+        if (ClassMsgFunc == NULL) ;
 	if ((error = dlerror()) != NULL) {
 
 		// couldn't find the proper start point, unload library
