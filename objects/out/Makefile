@@ -27,7 +27,5 @@ depend:
 
 # DO NOT DELETE
 
-out.o: /usr/include/stdio.h /usr/include/features.h /usr/include/libio.h
-out.o: /usr/include/_G_config.h /usr/include/wchar.h /usr/include/xlocale.h
-out.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
-out.o: ../../callback.h
+out.o: /usr/include/stdio.h ../../node.h ../../data.h ../../object.h
+out.o: ../../DebugPrint.h ../../callback.h

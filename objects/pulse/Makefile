@@ -5,7 +5,7 @@ SOURCE= $(wildcard *.c)
 
 OBJECTS= $(subst .c,.o,$(SOURCE))
 
-GOAL=writer.object
+GOAL=pulse.object
 
 INCLUDES=-I../..
 
@@ -26,6 +26,3 @@ depend:
 	makedepend $(INCLUDES) $(SOURCE) > /dev/null 2>&1
 
 # DO NOT DELETE
-
-writer.o: /usr/include/stdio.h ../../node.h ../../data.h ../../object.h
-writer.o: ../../DebugPrint.h ../../callback.h
