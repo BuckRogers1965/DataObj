@@ -7,5 +7,26 @@ Then you can run the framework by typing:
 
 ./framework
 
+or just run 
+
+./framework.sh 
+
+If you want help run 
+
+./framework.sh --help
+
+
 
 test
+
+
+To build:
+
+make depend
+make
+
+To clean up: 
+make clean
+
+
+I just fixed this so it would build and run again.  It had a problem when we switched to 64 bit OS a decade ago. 
