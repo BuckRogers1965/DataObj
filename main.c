@@ -132,13 +132,13 @@ and objects and position their
 void
 MainLoop(NodeObj Main){
 
-	long offset;
+	unsigned long offset;
 
 	int CountOfScheduledTasks = 0;
 
-	offset = TimeUpdate();
+	offset = (unsigned long) TimeUpdate();
 
-	if ( offset )
+	if ( offset > 0 )
 		AdjustDelayedTasks (Tasks, offset);
 
 	CountOfScheduledTasks = ExecTasks(Tasks);
@@ -151,6 +151,8 @@ MainLoop(NodeObj Main){
 
 void
 CreateTestApp(NodeObj Main){
+
+   # ifndef S_SPLINT_S
 
 	/* Create a test app to copy a file */
 
@@ -172,6 +174,7 @@ CreateTestApp(NodeObj Main){
 
 	// Copy the input to the output
 	Connect(ReadFile, "Out", WriteFile, "In");
+   # endif
 	
 }
 
@@ -438,7 +441,7 @@ main ( int argc, char* argv[] ){
 
 	DebugPrint ( "Entering Main Loop.", __FILE__, __LINE__, PROG_FLOW);
 
-	while(IsRunning(Main)){
+	while(IsRunning(Main)>0){
 		MainLoop(Main);
 		// improvement: get delay from next scheduled item, min of 10 usecs
 		usleep(10);
@@ -446,7 +449,7 @@ main ( int argc, char* argv[] ){
 
 	DebugPrint ( "No more tasks scheduled, cleaning up and exiting", __FILE__, __LINE__, PROG_FLOW);
 
-	if (GetValueInt(GetPropNode(Main, "PrintNodes"))) {
+	if (GetValueInt(GetPropNode(Main, "PrintNodes")) !=0) {
 		DebugPrint ( "Dumping Main Node on exit because -p was passed on command line.\n", __FILE__, __LINE__, PROG_FLOW);
 		PrintNode(Main);
 	}

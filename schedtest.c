@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#ifndef S_SPLINT_S
 
 /*
  * cleanup 
@@ -191,3 +192,5 @@ SchedTest(){
   state ();
 	printf("\n");
 }
+
+   # endif

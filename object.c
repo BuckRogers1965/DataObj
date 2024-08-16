@@ -13,6 +13,15 @@ ObjSetRegObjList(NodeObj node){
 
 NodeObj
 CreateContainer(NodeObj container, char * name){
+
+        // these containers just exist in our nodes to organize groups of objects together.
+        // evolve into an application grouping with a schedule? 
+
+        // these could be functional organizations
+        // later we could also have these same objects in multiple views in logical organizations
+
+
+        // need to check to see if name already exists
 	NodeObj temp = NewNode();
 	SetName(temp, name);
 
@@ -23,15 +32,31 @@ CreateContainer(NodeObj container, char * name){
 
 NodeObj
 CreateObject(NodeObj container, char * classname){
+
+        // has the class name been registered?
+        // how do we tie these actions into class actions?
+
+        //does this node name exist?
+
 	NodeObj temp = NewNode();
+
+
+        // decorate the node with class functions.
+
+          
 	SetName(temp, classname);
+        // set object handle into us here.
 
 	AddChild(container, temp);
+        // place us into the container
 
 	return temp;
 }
 
 void AddConnectTo(NodeObj fromNode, NodeObj toNode){
+
+
+    // find our name in subscription list.
 }
 
 void AddConnectFrom(NodeObj toNode, NodeObj fromNode){

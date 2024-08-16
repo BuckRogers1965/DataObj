@@ -3,51 +3,53 @@
 
 #define IN_NAMESPACE
 
-
 /* Given a set of strings, create a search tree of values */
 
-typedef struct NSObj {
+typedef struct NSObj
+{
 
-        /*@null@*/ struct NSObj * Child;
+	/*@null@*/ struct NSObj *Child;
 
-        /*@null@*/ struct NSObj * Next;
+	/*@null@*/ struct NSObj *Next;
 
-        char Character;
-        long Value;
+	char Character;
+	long Value;
 
 } NSObj;
 
-//#include "namespace.h"
+// #include "namespace.h"
 
+/*@null@*/ NSObj *NSCreate()
+{
 
-/*@null@*/ NSObj * NSCreate (){
+	NSObj *Root;
 
-	NSObj * Root;
-	
-        // create the NSObjs, zeroed memory;
-        Root = (NSObj *)calloc(sizeof(NSObj), 1);
-	if (Root == NULL) 
+	// create the NSObjs, zeroed memory;
+	Root = (NSObj *)calloc(sizeof(NSObj), 1);
+	if (Root == NULL)
 		return NULL;
 
-        // put the NSObjs in a big loop around the Root. 
+	// put the NSObjs in a big loop around the Root.
 
-        // initialize the first new NSObj
-        //Root->Next = NULL;
-        //Root->Child = 0;
-        //Root->Character = 0;
-        //Root->Value = 0;
+	// initialize the first new NSObj
+	// Root->Next = NULL;
+	// Root->Child = 0;
+	// Root->Character = 0;
+	// Root->Value = 0;
 
 	return Root;
 }
 
-void NSRelease (NSObj * Root){
+void NSRelease(NSObj *Root)
+{
 
-	NSObj * DeleteNow;
-	NSObj * DeleteNext;
+	NSObj *DeleteNow;
+	NSObj *DeleteNext;
 
 	DeleteNow = Root;
 
-	while (DeleteNow) {
+	while (DeleteNow)
+	{
 		DeleteNext = DeleteNow->Next;
 		if (DeleteNow->Child)
 			NSRelease(DeleteNow->Child);
@@ -58,34 +60,37 @@ void NSRelease (NSObj * Root){
 	Root = NULL;
 }
 
-/*@null@*/ NSObj * AllocNSObj(){
+/*@null@*/ NSObj *AllocNSObj()
+{
 
-	NSObj * Root;
+	NSObj *Root;
 
-        // create the NSObjs, zeroed memory;
-        Root = (NSObj *)calloc(sizeof(NSObj), 1);
-	if (Root == NULL) 
+	// create the NSObjs, zeroed memory;
+	Root = (NSObj *)calloc(sizeof(NSObj), 1);
+	if (Root == NULL)
 		return NULL;
 
-        // put the NSObjs in a big loop around the Root. 
+	// put the NSObjs in a big loop around the Root.
 
-        // initialize the first new NSObj
-        //Root->Next = NULL;
-        //Root->Child = 0;
-        //Root->Character = 0;
-        //Root->Value = 0;
-	
+	// initialize the first new NSObj
+	// Root->Next = NULL;
+	// Root->Child = 0;
+	// Root->Character = 0;
+	// Root->Value = 0;
+
 	return Root;
 }
 
-int NSInsert (NSObj * Root, char * String, long Value){
+int NSInsert(NSObj *Root, char *String, long Value)
+{
 
-	/*@null@*/ NSObj * Current;
-	/*@null@*/ NSObj * Previous;
-	int StrLoc=0;
+	/*@null@*/ NSObj *Current;
+	/*@null@*/ NSObj *Previous;
+	int StrLoc = 0;
 
 	// check values to make sure they are valid.
-	if (String && String[0] && Root) {
+	if (String && String[0] && Root)
+	{
 
 		Current = Root->Child;
 		Previous = Root;
@@ -93,10 +98,12 @@ int NSInsert (NSObj * Root, char * String, long Value){
 		// crawl the string and tree, inserting NSObjs as needed.
 
 		// while there are still characters left
-		while (String[StrLoc]){
+		while (String[StrLoc])
+		{
 
 			// is current NULL?
-			if (!Current) {
+			if (!Current)
+			{
 
 				// attach free NSObj to Previous
 				Current = AllocNSObj();
@@ -106,11 +113,12 @@ int NSInsert (NSObj * Root, char * String, long Value){
 
 				// put the first character from the string in it
 				Current->Character = String[StrLoc];
-
-			} else if (String[StrLoc] < Current->Character) {
-			// is the character is less than Current->Character
+			}
+			else if (String[StrLoc] < Current->Character)
+			{
+				// is the character is less than Current->Character
 				// Create a new NSObj and place it before this NSObj.
-				NSObj * Temp;
+				NSObj *Temp;
 
 				// attach free NSObj to Current
 				Temp = AllocNSObj();
@@ -122,27 +130,32 @@ int NSInsert (NSObj * Root, char * String, long Value){
 				Temp->Next = Current;
 
 				Current = Temp;
+			}
+			else if (String[StrLoc] != Current->Character)
+			{
 
-			} else if (String[StrLoc] != Current->Character) {
+				// the character is greater than Current->Character
 
-			// the character is greater than Current->Character
-
-				while (Current && String[StrLoc] > Current->Character){
+				while (Current && String[StrLoc] > Current->Character)
+				{
 					Previous = Current;
 					Current = Current->Next;
 				}
-				if (!Current){
+				if (!Current)
+				{
 					// we are larger than anything else
 					Current = AllocNSObj();
 					if (!Current)
 						return 0;
 					Previous->Next = Current;
-                                	Current->Character = String[StrLoc];
-
-				} else {
+					Current->Character = String[StrLoc];
+				}
+				else
+				{
 
 					// we are not equal to
-					if (String[StrLoc] != Current->Character) {
+					if (String[StrLoc] != Current->Character)
+					{
 
 						// attach free NSObj to Previous
 						Previous->Next = AllocNSObj();
@@ -162,30 +175,34 @@ int NSInsert (NSObj * Root, char * String, long Value){
 			Current = Current->Child;
 
 			StrLoc++;
-		}	
+		}
 
 		// all done with String
 		Previous->Value = Value;
 		return 1;
-
-	} else
+	}
+	else
 		return 0;
 }
 
-long NSSearch (NSObj * Root, char * String){
+long NSSearch(NSObj *Root, char *String)
+{
 
-	NSObj * Current;
-	NSObj * Previous;
-	int StrLoc=0;
+	NSObj *Current;
+	// NSObj * Previous;
+	int StrLoc = 0;
 
 	// check values to make sure they are valid.
-	if (String && String[0] && Root) {
+	if (String && String[0] && Root)
+	{
 
 		Current = Root->Child;
-		Previous = Root;
-	
-		while (Current && String[StrLoc]) {
-			if (String[StrLoc] > Current->Character) {
+		// Previous = Root;
+
+		while (Current && String[StrLoc])
+		{
+			if (String[StrLoc] > Current->Character)
+			{
 				while (Current && String[StrLoc] > Current->Character)
 					Current = Current->Next;
 
@@ -193,45 +210,51 @@ long NSSearch (NSObj * Root, char * String){
 					break;
 
 				if (String[StrLoc] == Current->Character)
-					if (!String[StrLoc+1])
+					if (!String[StrLoc + 1])
 						// Found
-                        			return (Current->Value);
-					Current = Current->Child;
-	
-			} else  if (String[StrLoc] == Current->Character) {
-				if (!String[StrLoc+1])
-					// Found
-                        		return (Current->Value);
+						return (Current->Value);
 				Current = Current->Child;
-
-			} else {
+			}
+			else if (String[StrLoc] == Current->Character)
+			{
+				if (!String[StrLoc + 1])
+					// Found
+					return (Current->Value);
+				Current = Current->Child;
+			}
+			else
+			{
 				break;
 			}
 
 			StrLoc++;
 		}
 	}
-	
+
 	// Not Found
 	return 0;
 }
 
-int NSDelete (NSObj * Root, char * String){
-	NSObj * Current;
-	NSObj * Previous;
-	NSObj * LastBranch;  
-	int StrLoc=0;
+int NSDelete(NSObj *Root, char *String)
+{
+	NSObj *Current;
+	// NSObj * Previous;
+	NSObj *LastBranch;
+	int StrLoc = 0;
 
 	// check values to make sure they are valid.
-	if (String && String[0] && Root) {
+	if (String && String[0] && Root)
+	{
 
-		Current    = Root->Child;
-		Previous   = Root;
-		LastBranch = Current;     // Remember the last value point, 
-					  // delete from there to current when found.
-	
-		while (Current && String[StrLoc]) {
-			if (String[StrLoc] > Current->Character) {
+		Current = Root->Child;
+		// Previous   = Root;
+		LastBranch = Current; // Remember the last value point,
+							  // delete from there to current when found.
+
+		while (Current && String[StrLoc])
+		{
+			if (String[StrLoc] > Current->Character)
+			{
 				while (Current && String[StrLoc] > Current->Character)
 					Current = Current->Next;
 
@@ -239,10 +262,11 @@ int NSDelete (NSObj * Root, char * String){
 					break;
 
 				if (String[StrLoc] == Current->Character)
-					if (!String[StrLoc+1]) {
+					if (!String[StrLoc + 1])
+					{
 
-						NSObj * DeleteNSObj;
-						NSObj * DeleteNext;
+						NSObj *DeleteNSObj;
+						NSObj *DeleteNext;
 						// Found
 
 						// If there is no value here
@@ -250,36 +274,40 @@ int NSDelete (NSObj * Root, char * String){
 						if (!Current->Value)
 							return 0;
 
-						// if there is more from here, then leave it, 
+						// if there is more from here, then leave it,
 						// just remove the stored value
-						if(Current->Child){
+						if (Current->Child)
+						{
 							Current->Value = 0;
 							return (1);
-						}	
+						}
 
 						// Delete the extra NSObjs
 						DeleteNSObj = LastBranch->Child;
 						LastBranch->Child = NULL;
-						while (DeleteNSObj) {
-							//printf("%c", DeleteNSObj->Character);
+						while (DeleteNSObj)
+						{
+							// printf("%c", DeleteNSObj->Character);
 							DeleteNext = DeleteNSObj->Child;
-							free (DeleteNSObj);
+							free(DeleteNSObj);
 							DeleteNSObj = DeleteNext;
 						}
 
-                        			return (1);
+						return (1);
 					}
 
-					if (Current->Value > 0)
-						LastBranch = Current;
-					Current = Current->Child;
-	
-			} else  if (String[StrLoc] == Current->Character) {
+				if (Current->Value > 0)
+					LastBranch = Current;
+				Current = Current->Child;
+			}
+			else if (String[StrLoc] == Current->Character)
+			{
 
-				if (!String[StrLoc+1]) {
+				if (!String[StrLoc + 1])
+				{
 
-					NSObj * DeleteNSObj;
-					NSObj * DeleteNext;
+					NSObj *DeleteNSObj;
+					NSObj *DeleteNext;
 					// Found
 
 					// If there is no value here
@@ -287,38 +315,41 @@ int NSDelete (NSObj * Root, char * String){
 					if (!Current->Value)
 						return 0;
 
-					// if there is more from here, then leave it, 
+					// if there is more from here, then leave it,
 					// just remove the stored value
-					if(Current->Child){
+					if (Current->Child)
+					{
 						Current->Value = 0;
 						return (1);
-					}	
+					}
 
 					// Delete the extra NSObjs
 					DeleteNSObj = LastBranch->Child;
 					LastBranch->Child = NULL;
-					while (DeleteNSObj) {
-						//printf("%c", DeleteNSObj->Character);
+					while (DeleteNSObj)
+					{
+						// printf("%c", DeleteNSObj->Character);
 						DeleteNext = DeleteNSObj->Child;
-						free (DeleteNSObj);
+						free(DeleteNSObj);
 						DeleteNSObj = DeleteNext;
 					}
 
-                        		return (1);
+					return (1);
 				}
 
 				if (Current->Value > 0)
 					LastBranch = Current;
 				Current = Current->Child;
-
-			} else {
+			}
+			else
+			{
 				break;
 			}
 
 			StrLoc++;
 		}
 	}
-	
+
 	// Not Found
 	return 0;
 }
@@ -328,77 +359,79 @@ int NSDelete (NSObj * Root, char * String){
 
 #include "namespace.h"
 
-int NameSpaceTest (){
+int NameSpaceTest()
+{
 
-	NSObj * NameSpace;
+	NSObj *NameSpace;
 	int i, j;
 	char string[1024];
 
-  for (j=0; j<=10; j++) {
+	for (j = 0; j <= 10; j++)
+	{
 
-	NameSpace = NSCreate();
+		NameSpace = NSCreate();
 
-    for (i=0; i <= 10000; i++) {
-	
-	sprintf(string, "lksdfhjklsdfjklsdfhjklsdfhjklsdfh%d/test0/test1/test2/test3/test4/%d", i/10, j);
-	NSInsert(NameSpace, string, i);
-	printf("%ld\n", NSSearch(NameSpace, string));
+		for (i = 0; i <= 10000; i++)
+		{
 
-	NSInsert(NameSpace, "james",     1);
-	NSInsert(NameSpace, "rogers",    2);
-	NSInsert(NameSpace, "bob",       3);
-	NSInsert(NameSpace, "aaa",       3);
-	NSInsert(NameSpace, "bobabcdefghijklmnopqrstuv",    4);
-	NSInsert(NameSpace, "bobabcdefghij",   5);
-	NSInsert(NameSpace, "fred",      6);
-	NSInsert(NameSpace, "This is a very/long/test of /multiple dirs/",       7);
-	NSInsert(NameSpace, "This is a very/long/test of /multiple dirs/me too",       8);
-	NSInsert(NameSpace, "harry",     9);
-	NSInsert(NameSpace, "retriever", 10);
+			sprintf(string, "lksdfhjklsdfjklsdfhjklsdfhjklsdfh%d/test0/test1/test2/test3/test4/%d", i / 10, j);
+			NSInsert(NameSpace, string, i);
+			printf("%ld\n", NSSearch(NameSpace, string));
 
-	printf("%ld ", NSSearch(NameSpace, "james"));
-	printf("%ld ", NSSearch(NameSpace, "rogers"));
-	printf("%ld ", NSSearch(NameSpace, "bob"));
-	printf("%ld ", NSSearch(NameSpace, "aaa"));
-	printf("%ld ", NSSearch(NameSpace, "bobabcdefghijklmnopqrstuv"));
-	printf("%ld ", NSSearch(NameSpace, "bobabcdefghij"));
-	printf("%ld ", NSSearch(NameSpace, "fred"));
-	printf("%ld ", NSSearch(NameSpace, "This is a very/long/test of /multiple dirs/"));
-	printf("%ld ", NSSearch(NameSpace, "This is a very/long/test of /multiple dirs/me too"));
-	printf("%ld ", NSSearch(NameSpace, "harry"));
-	printf("%ld  ", NSSearch(NameSpace, "retriever"));
+			NSInsert(NameSpace, "james", 1);
+			NSInsert(NameSpace, "rogers", 2);
+			NSInsert(NameSpace, "bob", 3);
+			NSInsert(NameSpace, "aaa", 3);
+			NSInsert(NameSpace, "bobabcdefghijklmnopqrstuv", 4);
+			NSInsert(NameSpace, "bobabcdefghij", 5);
+			NSInsert(NameSpace, "fred", 6);
+			NSInsert(NameSpace, "This is a very/long/test of /multiple dirs/", 7);
+			NSInsert(NameSpace, "This is a very/long/test of /multiple dirs/me too", 8);
+			NSInsert(NameSpace, "harry", 9);
+			NSInsert(NameSpace, "retriever", 10);
 
-	printf("%ld ", NSSearch(NameSpace, "I don't exist"));
-	
-	printf("%d ", NSDelete(NameSpace, "bobabcdefghij") );
-	printf("%d ", NSDelete(NameSpace, "bobabcdefghij") );
-	printf("%d  ", NSDelete(NameSpace, "I don't exist") );
+			printf("%ld ", NSSearch(NameSpace, "james"));
+			printf("%ld ", NSSearch(NameSpace, "rogers"));
+			printf("%ld ", NSSearch(NameSpace, "bob"));
+			printf("%ld ", NSSearch(NameSpace, "aaa"));
+			printf("%ld ", NSSearch(NameSpace, "bobabcdefghijklmnopqrstuv"));
+			printf("%ld ", NSSearch(NameSpace, "bobabcdefghij"));
+			printf("%ld ", NSSearch(NameSpace, "fred"));
+			printf("%ld ", NSSearch(NameSpace, "This is a very/long/test of /multiple dirs/"));
+			printf("%ld ", NSSearch(NameSpace, "This is a very/long/test of /multiple dirs/me too"));
+			printf("%ld ", NSSearch(NameSpace, "harry"));
+			printf("%ld  ", NSSearch(NameSpace, "retriever"));
 
-	printf("%ld ", NSSearch(NameSpace, "bob"));
-	printf("%ld ", NSSearch(NameSpace, "bobabcdefghijklmnopqrstuv"));
-	printf("%ld ", NSSearch(NameSpace, "bobabcdefghij"));
+			printf("%ld ", NSSearch(NameSpace, "I don't exist"));
 
-	NSInsert(NameSpace, "james",     1000);
-	printf("%ld\n", NSSearch(NameSpace, "james"));
+			printf("%d ", NSDelete(NameSpace, "bobabcdefghij"));
+			printf("%d ", NSDelete(NameSpace, "bobabcdefghij"));
+			printf("%d  ", NSDelete(NameSpace, "I don't exist"));
 
-    }
+			printf("%ld ", NSSearch(NameSpace, "bob"));
+			printf("%ld ", NSSearch(NameSpace, "bobabcdefghijklmnopqrstuv"));
+			printf("%ld ", NSSearch(NameSpace, "bobabcdefghij"));
 
-	NSRelease(NameSpace);
+			NSInsert(NameSpace, "james", 1000);
+			printf("%ld\n", NSSearch(NameSpace, "james"));
+		}
 
-	usleep (0);
-	fprintf(stderr,".");
-  }
-	fprintf(stderr,"\n");
+		NSRelease(NameSpace);
+
+		usleep(0);
+		fprintf(stderr, ".");
+	}
+	fprintf(stderr, "\n");
 	return 0;
 }
 
 #ifdef TESTBUILD
-int main (){
+int main()
+{
 
-NameSpaceTest();
+	NameSpaceTest();
 
-return 0;
+	return 0;
 }
 
 #endif
-

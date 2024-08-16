@@ -2,7 +2,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
-#include <stdint.h>  
 
 
 /* Data objects.
@@ -38,7 +37,7 @@ o  add getxml and store xml types
 
 typedef struct Data * DataObj;
 
-typedef intptr_t(*func_ptr)(DataObj, int, int, char *);
+typedef int(*func_ptr)(DataObj, int, int, char *);
 
 struct Data {
 
@@ -261,7 +260,7 @@ int convert(DataObj this, int type){
 	return 0;
 }
 
-intptr_t datafunc(DataObj this, int kind, int type, char * val){
+int datafunc(DataObj this, int kind, int type, char * val){
 	if (kind == GET){
 		switch (type) {
 		case INTEGER:
@@ -273,17 +272,17 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 			if (!this->str_set){
 				convert(this, STRING);
 			}
-			return (intptr_t)this->str_val;
+			return (int)this->str_val;
 		case HEX:
 			if (!this->hex_set){
 				convert(this, HEX);
 			}
-			return (intptr_t)this->hex_val;
+			return (int)this->hex_val;
 		case REAL:
 			if (!this->real_set){
 				convert(this, REAL);
 			}
-			return (intptr_t)&this->real_val;
+			return (int)&this->real_val;
 		default:
 			return 0;
 			
@@ -294,7 +293,7 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 		switch (type){
 
 		case INTEGER:
-			this->int_val=(intptr_t)val;
+			this->int_val=(int)val;
 			this->int_set=1;
 			return 1;
 		case STRING:
@@ -358,8 +357,7 @@ char *
 GetStr(DataObj this){
 	if (!this)
 		return 0;
-	return (char *)(intptr_t)this->call(this, GET, STRING, NULL);
-
+	return (char *)this->call(this, GET, STRING, NULL);
 }
 
 int
@@ -373,7 +371,7 @@ int
 SetInt(DataObj this, int value){
 	if (!this)
 		return 0;
-	return this->call(this, SET, INTEGER, (char *)(intptr_t)value);
+	return this->call(this, SET, INTEGER, (char *)value);
 }
 
 int
@@ -387,21 +385,21 @@ int
 SetHex(DataObj this, char * value){
 	if (!this)
 		return 0;
-	return this->call(this, SET, HEX, (char *)(intptr_t)value);
+	return this->call(this, SET, HEX, (char *)value);
 }
 
 char *
 GetHex(DataObj this){
 	if (!this)
 		return 0;
-	return (char *)(intptr_t)this->call(this, GET, HEX, NULL);
+	return (char *)this->call(this, GET, HEX, NULL);
 }
 
 int
 SetReal(DataObj this, double value){
 	if (!this)
 		return 0;
-	return this->call(this, SET, REAL, (char *)(intptr_t)&value);
+	return this->call(this, SET, REAL, (char *)&value);
 }
 
 double
@@ -409,8 +407,8 @@ GetReal(DataObj this){
 	char * result;
 	if (!this)
 		return 0;
-	result =  (char *)(intptr_t)this->call(this, GET, REAL, NULL);
-	return *(double *)(intptr_t)result ;
+	result =  (char *)this->call(this, GET, REAL, NULL);
+	return *(double *)result ;
 }
 
 void

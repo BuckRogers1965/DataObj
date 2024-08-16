@@ -239,6 +239,8 @@ AddChild(NodeObj parent, NodeObj child){
 
 NodeObj
 GetPropNode(NodeObj node, char * name){
+   # ifndef S_SPLINT_S
+
 	if (!node || !name)
 		return NULL;
 	NodeObj current = node->props;
@@ -247,6 +249,7 @@ GetPropNode(NodeObj node, char * name){
 			return current;
 		current=current->nextSib;
 	}
+   # endif
 	return NULL;
 }
 
@@ -267,9 +270,12 @@ SetPropInt(NodeObj node, char * name, int value){
 			SetStr(newpropnode->name, name);
 			SetInt(newpropnode->value, value);
 
+   # ifndef S_SPLINT_S
+
 			FuncPtr callback = (FuncPtr)GetValueInt(GetPropNode(intercept, "Callback"));
 			NodeObj current = GetPropNode(intercept, "Current");
 
+   # endif
 			if (!callback || ! current){
 				SetInt(propnode->value, value);
 			} else {
