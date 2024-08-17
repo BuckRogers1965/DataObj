@@ -26,3 +26,5 @@ depend:
 	makedepend $(INCLUDES) $(SOURCE) > /dev/null 2>&1
 
 # DO NOT DELETE
+
+pulseobj.o: ../../node.h ../../data.h
