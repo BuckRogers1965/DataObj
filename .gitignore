@@ -1,0 +1,6 @@
+*.o
+*.so
+Makefile.bak
+*.object
+framework
+.vscode
