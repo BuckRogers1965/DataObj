@@ -131,26 +131,19 @@ and objects and position their
 
 void
 MainLoop(NodeObj Main){
-
 	unsigned long offset;
-
 	int CountOfScheduledTasks = 0;
-
 	offset = (unsigned long) TimeUpdate();
-
 	if ( offset > 0 )
 		AdjustDelayedTasks (Tasks, offset);
-
 	CountOfScheduledTasks = ExecTasks(Tasks);
 
 	/* if we have no scheduled tasks, then begin stopping */
 	if (CountOfScheduledTasks == 0)
-		SetPropInt(Main, "State", Stopping);
-		
+		SetPropInt(Main, "State", Stopping);	
 }
 
-void
-CreateTestApp(NodeObj Main){
+void CreateTestApp(NodeObj Main){
 
    # ifndef S_SPLINT_S
 
@@ -179,21 +172,18 @@ CreateTestApp(NodeObj Main){
 }
 
 /* return the current status of the Main execution thread */
-int
-IsRunning(NodeObj Main){
+int IsRunning(NodeObj Main){
 
 	return (GetInt((DataObj)GetValueNode(GetPropNode(Main, "State"))));
 }
 
 /* Load in a default application */
-void
-LoadDefaultApp(NodeObj Main){
+void LoadDefaultApp(NodeObj Main){
 	DebugPrint ( "Entering Default Application function.", __FILE__, __LINE__, PROG_FLOW);
 	CreateTestApp(Main);
 }
 
-void
-PerformTesting(){
+void PerformTesting(){
 
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 
@@ -208,8 +198,7 @@ PerformTesting(){
 	SchedTest();
 }
 
-void 
-Init(NodeObj Main){
+void Init(NodeObj Main){
 
 	char * logname;
 	NodeObj RegObjList;
@@ -287,8 +276,7 @@ void InstallObjects(void)
 }
 
 enum { STORE_FILENAME=0, STORE_LOGNAME, STORE_OPTION, STORE_LOGLEVEL };
-void
-ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
+void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 	/* skip the process name */
 	int i=0;
@@ -419,9 +407,7 @@ ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 }
 
 /* MAIN */
-
-int 
-main ( int argc, char* argv[] ){
+int main ( int argc, char* argv[] ){
 
 	NodeObj Main = NewNode();
 
