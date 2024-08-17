@@ -1,0 +1,34 @@
+# Generated automatically from Makefile.in by configure.
+CC=gcc 
+
+SOURCE= $(wildcard *.c) 
+
+OBJECTS= $(subst .c,.o,$(SOURCE))
+
+GOAL=reader.object
+
+INCLUDES=-I../..
+
+OPT=-Wall -g
+
+%.o : %.c
+	$(CC) -fPIC $(OPT) $(INCLUDES) -c $< -o $@
+
+all: $(OBJECTS) $(GOAL)
+
+$(GOAL): $(OBJECTS)
+	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+
+clean:
+	rm $(OBJECTS) $(GOAL) > /dev/null 2>&1
+
+depend:
+	makedepend $(INCLUDES) $(SOURCE) > /dev/null 2>&1
+
+# DO NOT DELETE
+
+reader.o: /usr/include/stdio.h ../../node.h ../../data.h ../../object.h
+reader.o: ../../DebugPrint.h ../../callback.h
+test.o: /usr/include/stdio.h /usr/include/stdlib.h /usr/include/string.h
+test.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
+test.o: ../../callback.h ../../data.h
