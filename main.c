@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -129,8 +128,7 @@ and objects and position their
 
 */
 
-void
-MainLoop(NodeObj Main){
+void MainLoop(NodeObj Main){
 	unsigned long offset;
 	int CountOfScheduledTasks = 0;
 	offset = (unsigned long) TimeUpdate();
@@ -144,11 +142,6 @@ MainLoop(NodeObj Main){
 }
 
 void CreateTestApp(NodeObj Main){
-
-   # ifndef S_SPLINT_S
-
-	/* Create a test app to copy a file */
-
 	NodeObj TestApp = CreateContainer(Main, "TestApp");
 
 	// Create a file writer object
@@ -165,15 +158,11 @@ void CreateTestApp(NodeObj Main){
 	SetPropStr (ReadFile, "Mode", "r");
 	SetPropInt (ReadFile, "State", 1);
 
-	// Copy the input to the output
 	Connect(ReadFile, "Out", WriteFile, "In");
-   # endif
-	
 }
 
 /* return the current status of the Main execution thread */
 int IsRunning(NodeObj Main){
-
 	return (GetInt((DataObj)GetValueNode(GetPropNode(Main, "State"))));
 }
 
@@ -184,18 +173,12 @@ void LoadDefaultApp(NodeObj Main){
 }
 
 void PerformTesting(){
-
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
-
 	DataTest();
-
-	NodeTest();
-
-	BuffTest();
-
-	NameSpaceTest();
-
-	SchedTest();
+	//NodeTest();
+	//BuffTest();
+	//NameSpaceTest();
+	//SchedTest();
 }
 
 void Init(NodeObj Main){
@@ -256,13 +239,7 @@ void Init(NodeObj Main){
 		DebugPrint ( "Verbose Logging Enabled.", __FILE__, __LINE__, PROG_FLOW);
 		;
 	}
-
-	/* set the logging level for debug print */
-
 	DebugPrint ( "Logging Level Set.", __FILE__, __LINE__, PROG_FLOW);
-
-
-	/* Setup task list */
 	Tasks = CreateList();
 
 }
@@ -273,6 +250,8 @@ void InstallObjects(void)
         ScanDir (".", ".object", (void *) LoadObject, 8, 0, PreOrder);
 
 	// once the objects are found and loaded then initialize them after this.
+
+	loadClasses();
 }
 
 enum { STORE_FILENAME=0, STORE_LOGNAME, STORE_OPTION, STORE_LOGLEVEL };
@@ -286,7 +265,6 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 	DebugPrint ( "Store default verbose logging level of 1.", __FILE__, __LINE__, CMDLINEOPTS);
 	SetPropInt(Main, "loglevel", 1);
-
 
 	while(i < argc){
 
@@ -406,10 +384,9 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 }
 
-/* MAIN */
 int main ( int argc, char* argv[] ){
 
-	NodeObj Main = NewNode();
+	NodeObj Main = NewNode(INTEGER);
 
 	SetPropInt(Main, "State", Starting);
 

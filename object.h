@@ -1,3 +1,7 @@
+#ifndef Object_H_
+#define Object_H_
+
+
 
 typedef int MsgId;
 
@@ -22,12 +26,33 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
 
 /* Call backs from dynamically loaded objects to register and unregister themselves. */
 NodeObj
-Register(char * classname, char * company, char * uuid, msgobj objhndl);
+RegisterLibrary(NodeObj node);
 
 void
-Unregister(NodeObj node);
+UnregisterLibrary(NodeObj node);
+
+NodeObj
+RegisterClass(NodeObj obj, NodeObj class);
+void
+UnregisterClass(NodeObj obj, NodeObj class);
+
+NodeObj
+RegisterInstance(NodeObj class, NodeObj inst);
+void
+UnregisterInstance(NodeObj class, NodeObj inst);
 
 
 /* The main funtion must sent a property node of it's main to accept the register list */
 void
 ObjSetRegObjList(NodeObj node);
+
+
+typedef enum {
+    PROP_TEXTBOX=1,
+    PROP_LED,
+    PROP_BUTTON,
+    PROP_CHECKBOX,
+    PROP_NULL
+} PropertyType;
+
+#endif
