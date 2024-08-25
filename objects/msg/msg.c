@@ -32,13 +32,20 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data){
 
 void _init()
 {
-
-	Self = Register("Msg", "GrokThink", "8da17004-242d-4f21-a77e-6a823a52c601", &Handle_Message);
+	NodeObj temp = NewNode(INTEGER);
+    SetName(temp, "Msg");
+    SetPropStr(temp, "Company", "GrokThink");
+    SetPropStr(temp, "UUID", "8da17004-242d-4f21-a77e-6a823a52c601");
+    SetPropLong(temp, "ClassStart", (long) &Handle_Message );
+    SetPropLong(temp, "ClassEnd", (long)0 );
+    SetPropLong(temp, "ClassMsg", (long)0 );
+    SetPropInt(temp, "State", 1);
+	Self = RegisterLibrary(temp);
 }
 
 void _fini()
 {
-	Unregister(Self);
+	UnregisterLibrary(Self);
 	Self = NULL;
 }
 

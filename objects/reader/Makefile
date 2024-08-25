@@ -9,7 +9,7 @@ GOAL=reader.object
 
 INCLUDES=-I../..
 
-OPT=-Wall -g
+OPT=-Wall -ggdb
 
 %.o : %.c
 	$(CC) -fPIC $(OPT) $(INCLUDES) -c $< -o $@

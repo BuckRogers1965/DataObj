@@ -11,6 +11,19 @@ ObjSetRegObjList(NodeObj node){
 	RegObjList = node;
 }
 
+loadClasses(){
+	NodeObj library = GetChild( RegObjList );
+	while (library) {
+		msgobj ClassStart = (msgobj)GetPropLong(library, "ClassStart");
+		if (ClassStart) ClassStart(library, 0, NULL);
+		library = GetNextSibling(library);
+	}
+		//printf ("In core:     Class callbacks: %lu, %lu, %lu\n", (long)ClassStart, (long)ClassEnd, (long)ClassMsg);
+		//msgobj ClassEnd   = (msgobj)GetPropLong(library, "ClassEnd");
+		//msgobj ClassMsg   = (msgobj)GetPropLong(library, "ClassMsg");
+		//PrintNode(library);
+}
+
 NodeObj
 CreateContainer(NodeObj container, char * name){
 
@@ -22,7 +35,7 @@ CreateContainer(NodeObj container, char * name){
 
 
         // need to check to see if name already exists
-	NodeObj temp = NewNode();
+	NodeObj temp = NewNode(INTEGER);
 	SetName(temp, name);
 
 	AddChild(container, temp);
@@ -38,7 +51,7 @@ CreateObject(NodeObj container, char * classname){
 
         //does this node name exist?
 
-	NodeObj temp = NewNode();
+	NodeObj temp = NewNode(INTEGER);
 
 
         // decorate the node with class functions.
@@ -53,64 +66,65 @@ CreateObject(NodeObj container, char * classname){
 	return temp;
 }
 
-void AddConnectTo(NodeObj fromNode, NodeObj toNode){
-
-
-    // find our name in subscription list.
-}
-
-void AddConnectFrom(NodeObj toNode, NodeObj fromNode){
+void AddSubscription(NodeObj fromNode, NodeObj toNode){
+    // Add our name to subscription list.
+	
 }
 
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
-
 	NodeObj nfrom = GetPropNode(fromNode, from);
 	NodeObj nto= GetPropNode(toNode, to);
-	AddConnectTo(nfrom, toNode);
-	AddConnectFrom(fromNode, nto);
-
+	//AddSubcription(nfrom, toNode);
 	return 0;
 }
 
-NodeObj
-Register(char * classname, char * company, char * uuid, msgobj objhndl){
 
+
+// Handle registration of objects, classes, and instances,
+PrintRegInfo(char* message, NodeObj obj){
 	char buffer[255];
-
-	NodeObj temp = NewNode();
-	SetName(temp, classname);
-
-	SetPropStr(temp, "Company", company);
-	SetPropStr(temp, "UUID", uuid);
-
-	SetPropInt(temp, "ObjectHandle", (int)objhndl);
-
-	SetPropInt(temp, "State", 1);
-
-	sprintf((char *)&buffer, "Registering object '%s' company '%s' uuid '%s' memhandle at %lu", classname, company, uuid, (unsigned long) objhndl);
+	sprintf((char *)&buffer, message, GetNameStr(obj));
 	DebugPrint ((char *)&buffer, __FILE__, __LINE__, REGISTER);
-
-	AddChild(RegObjList, temp);
-
-	// need to add this item to a property which is a list.
-
-	return temp;
 }
 
+NodeObj RegisterLibrary(NodeObj library){
+	PrintRegInfo("Registering object '%s'", library);
+	AddChild(RegObjList, library);
+	return library;
+}
 
-void
-Unregister(NodeObj node){
+void UnregisterLibrary(NodeObj library){
+	PrintRegInfo("Unregistering object '%s'", library);
+	SetPropInt(library, "State", 0); 	//Mark this node as gone.
+	PrintNode(library);
+	//DelNode(node);  // I stopped removing the node to see it dump out on exit
+}
 
-	char buffer[255];
+NodeObj RegisterClass(NodeObj library, NodeObj class){
+	PrintRegInfo("Registering class '%s'", class);
+	AddChild(library, class);
+	//PrintNode(library);
+	//msgobj InstanceStart = (msgobj)GetPropLong(class, "InstanceStart");
+	//if (InstanceStart) InstanceStart(class, 1, NULL);
+	return class;
+}
 
-	sprintf((char *)&buffer, "Unregistering object '%s'", GetNameStr(node));
-	DebugPrint ((char *)&buffer, __FILE__, __LINE__, REGISTER);
-
-
-	//Mark this node as gone.
-	SetPropInt(node, "State", 0);
-
+void UnRegisterClass(NodeObj library, NodeObj class){
+    PrintRegInfo("Unregistering class '%s'", library);
 	//DelNode(node);
 }
 
+NodeObj RegisterInstance(NodeObj class, NodeObj Instance){
+	PrintRegInfo("Registering instance of '%s'", Instance);
+
+	AddChild(class, Instance);
+	//PrintNode(Instance);
+	return Instance;
+}
+
+void
+UnRegisterInstance(NodeObj class, NodeObj Instance){
+    PrintRegInfo("Unregistering instance of '%s'", class);
+	//DelNode(node);
+}

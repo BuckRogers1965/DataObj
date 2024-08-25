@@ -30,10 +30,12 @@ o  add getxml and store xml types
 #define SET 0
 #define GET 1
 
-#define STRING 0
+#define STRING  0
 #define INTEGER 1
-#define HEX 2
-#define REAL 3
+#define HEX     2
+#define REAL    3
+#define LONG    4
+#define BOOL    5
 
 
 typedef struct Data * DataObj;
@@ -56,6 +58,12 @@ struct Data {
 
 	int real_set;
 	double real_val;
+
+	int long_set;
+	long long_val;
+
+	int bool_set;
+	char bool_val; 
 
 	
 } Data;
@@ -116,6 +124,31 @@ int Str2Int(char * val){
 	return ret_val;
 }
 
+char * Long2Str(long val){
+	char * ret_val = malloc(20);
+	if (!ret_val)
+		return NULL;
+	sprintf(ret_val, "%llu", val);
+	return ret_val;
+}
+
+long Str2Long(char * val){
+	long ret_val=0;
+	if (!val)
+		return 0;
+
+	while(val[0] && isspace(val[0])){
+		val++;
+	}
+	while(val[0] && isdigit(val[0])){
+		ret_val=ret_val*10+val[0]-'0';
+		val++;
+	}
+	return ret_val;
+}
+
+
+
 char * dup (char * val){
 	int length;
 	char * ret_val = NULL;
@@ -139,6 +172,9 @@ void clear (DataObj this){
 	this->hex_val=NULL;
 	this->real_set = 0;
 	this->real_val = 0;
+	this->long_set = 0;
+	this->long_val = 0;
+
 }
 
 void clearAll (DataObj this){
@@ -174,6 +210,12 @@ int convert(DataObj this, int type){
 				convert (this, INTEGER);
 				this->real_val = this->int_val;
 				this->real_set=1;
+			}
+			return 1;
+		case LONG:
+			if (!this->long_set) {
+				this->long_val = Str2Long(this->str_val);
+				this->long_set=1;
 			}
 			return 1;
 		default:
@@ -254,6 +296,18 @@ int convert(DataObj this, int type){
 			break;		
 		}
 		break;
+	case LONG:
+		switch(type){
+		case STRING:
+			if (!this->str_set) {
+				this->str_val=Long2Str(this->long_val);
+				this->str_set=1;
+			}
+			return 1;
+		default:
+			break;		
+		}
+		break;
 	default:
 		;
 
@@ -284,6 +338,11 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 				convert(this, REAL);
 			}
 			return (intptr_t)&this->real_val;
+		case LONG:
+		    if (!this->long_set){
+			    convert(this, LONG);
+			}
+			return (intptr_t)this->long_val;
 		default:
 			return 0;
 			
@@ -313,6 +372,9 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 			this->real_val = *(double*)val;
 			this->real_set = 1;
 			return 1;
+		case LONG:
+			this->long_val=(long)val;
+			this->long_set=1;
 		default:
 			return 0;
 		}
@@ -347,9 +409,14 @@ NewData(int type){
 			ret_val->real_set=1;
 			ret_val->real_val = 0;
 			break;
+		case LONG:	
+			ret_val->call= &datafunc;
+			ret_val->long_set=1;
+			break;
 		default:
 			free(ret_val);
 			return NULL;
+
 	}
 	return ret_val;
 }
@@ -384,6 +451,20 @@ GetInt(DataObj this){
 }
 
 int
+SetLong(DataObj this, long value){
+	if (!this)
+		return 0;
+	return this->call(this, SET, LONG, (char *)(intptr_t)value);
+}
+
+long
+GetLong(DataObj this){
+	if (!this)
+		return 0;
+	return (long)(intptr_t)this->call(this, GET, LONG, NULL);
+}
+
+int
 SetHex(DataObj this, char * value){
 	if (!this)
 		return 0;
@@ -413,6 +494,9 @@ GetReal(DataObj this){
 	return *(double *)(intptr_t)result ;
 }
 
+
+
+// TEST
 void
 DataTest (){
 
@@ -473,4 +557,15 @@ DataTest (){
 	printf("int   %d \t\t\t>%d<\t\t\t %d \t\t\t %d \n", int_str, int_int, int_hex, int_real);
 	printf("hex   %s \t\t\t %s \t\t\t>%s<\t\t\t %s \n", hex_str, hex_int, hex_hex, hex_real);
 	printf("real  %e \t\t %e \t\t %e \t\t>%e<\n\n", real_str, real_int, real_hex, real_real);
+
+
+	DataObj long_do  = NewData(LONG);
+	SetLong(long_do,  140224278132965);
+	printf("\nLong to string check This long %lu to string %s \n\n", GetLong(long_do), GetStr(long_do));
+
+	
+	
+
+
+
 }

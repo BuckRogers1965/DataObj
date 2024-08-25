@@ -13,11 +13,11 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 GOAL=framework
 
 # Compiler options
-OPT=-w -falign-loops -falign-jumps=2 -falign-functions=2 -fstrength-reduce -fomit-frame-pointer -O6 -Idyn
+OPT=-w -falign-loops -falign-jumps=2 -falign-functions=2 -fstrength-reduce -fomit-frame-pointer -O6 -Idyn -ggdb
 
 # Rule to compile .c files to .o files
 %.o : %.c
-	$(CC) -fPIC $(OPT) -c $< -o $@
+	$(CC) -fPIC $(OPT) -c $< -o $@ -ggdb
 
 # Build all targets
 all: $(OBJECTS) libframework.so $(GOAL) subdirs

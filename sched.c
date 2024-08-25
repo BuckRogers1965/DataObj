@@ -394,7 +394,7 @@ SchedTest (){
 	TaskPtr   testtask3 =  CreateTask(testlist);
 	TaskPtr   testtask4 =  CreateTask(testlist);
 
-	NodeObj testdata = NewNode();
+	NodeObj testdata = NewNode(INTEGER);
 	SetPropInt(testdata, "TestData", 1);
 
 
