@@ -11,6 +11,7 @@ ObjSetRegObjList(NodeObj node){
 	RegObjList = node;
 }
 
+
 loadClasses(){
 	NodeObj library = GetChild( RegObjList );
 	while (library) {
@@ -18,11 +19,23 @@ loadClasses(){
 		if (ClassStart) ClassStart(library, 0, NULL);
 		library = GetNextSibling(library);
 	}
+}
+
+UnloadClasses(){
+	NodeObj library = GetChild( RegObjList );
+	while (library) {
+		msgobj ClassEnd = (msgobj)GetPropLong(library, "ClassEnd");
+		if (ClassEnd) ClassEnd(library, 0, NULL);
+		library = GetNextSibling(library);
+	}
+}
+
+
+
 		//printf ("In core:     Class callbacks: %lu, %lu, %lu\n", (long)ClassStart, (long)ClassEnd, (long)ClassMsg);
 		//msgobj ClassEnd   = (msgobj)GetPropLong(library, "ClassEnd");
 		//msgobj ClassMsg   = (msgobj)GetPropLong(library, "ClassMsg");
 		//PrintNode(library);
-}
 
 NodeObj
 CreateContainer(NodeObj container, char * name){

@@ -142,23 +142,27 @@ void MainLoop(NodeObj Main){
 }
 
 void CreateTestApp(NodeObj Main){
-	NodeObj TestApp = CreateContainer(Main, "TestApp");
+	//NodeObj TestApp = CreateContainer(Main, "TestApp");
 
 	// Create a file writer object
-	NodeObj WriteFile = CreateObject(TestApp, "File");
-	SetPropStr (WriteFile, "Name", "Writer");
-	SetPropStr (WriteFile, "Path", "out.txt");
-	SetPropStr (WriteFile, "Mode", "w");
-	SetPropInt (WriteFile, "State", 1);
+	//NodeObj WriteFile = CreateObject(TestApp, "File");
+	//SetPropStr (WriteFile, "Name", "Writer");
+	//SetPropStr (WriteFile, "Path", "out.txt");
+	//SetPropStr (WriteFile, "Mode", "w");
+	//SetPropInt (WriteFile, "State", 1);
 
 	// Create a file reader object
-	NodeObj ReadFile = CreateObject(TestApp, "File");
-	SetPropStr (ReadFile, "Name", "Reader"); 
-	SetPropStr (ReadFile, "Path", "in.txt");
-	SetPropStr (ReadFile, "Mode", "r");
-	SetPropInt (ReadFile, "State", 1);
+	//NodeObj ReadFile = CreateInstanceOfClass("Reader");
+	//GetPropNode()
+	//GetPropNode (ReadFile, "Filename");
+	//SndMsg(ReadFile)
 
-	Connect(ReadFile, "Out", WriteFile, "In");
+	//SetPropStr (ReadFile, "Name", "Reader"); 
+
+
+
+	//Connect(ReadFile, "Out", WriteFile, "In");
+	//SetPropInt (ReadFile, "State", 1);
 }
 
 /* return the current status of the Main execution thread */
@@ -175,10 +179,10 @@ void LoadDefaultApp(NodeObj Main){
 void PerformTesting(){
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 	DataTest();
-	//NodeTest();
-	//BuffTest();
+	NodeTest();
+	BuffTest();
 	//NameSpaceTest();
-	//SchedTest();
+	SchedTest();
 }
 
 void Init(NodeObj Main){
