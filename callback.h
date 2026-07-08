@@ -5,7 +5,8 @@
 typedef int (*FuncPtr)(NodeObj, NodeObj, int);
 
 // the message_id that is sent in
-enum { msg_change=0, msg_update, msg_initialize, msg_send };
+// msg_eof marks the end of a stream, it travels the same path as the data
+enum { msg_change=0, msg_update, msg_initialize, msg_send, msg_eof };
 
 // The return values from these functions
 //
