@@ -1,288 +1,258 @@
+
 #include <stdio.h>
-#include <fcntl.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
-//#include "callback.h"
-#include "framework.h"
+#include "node.h"
+#include "object.h"
+#include "sched.h"
+#include "DebugPrint.h"
 
-struct InstanceData
-{
-    int state;           // Current state of the instance (e.g., running, stopped)
-    char filename[1025]; // Path to the file being processed
-    int tail;
-    FILE *file_handle; // File handle for the open file
-    NodeObj *instance;
-    struct InstanceData *next;
-};
+/*
 
-typedef struct InstanceData InstanceData;
+Reader object: a data source.
 
-typedef struct
-{
-    NodeObj *instance;
-    InstanceData *list;
-    NodeObj self;
-} ClassData;
+Reads the file named in its Filename property one chunk at a time and
+sends each chunk as a message out its Out port.  The message is routed
+to every subscriber of the port.
 
-ClassData class;
+When the file is used up the reader sends msg_eof out the same port,
+closes the file, and stops rescheduling its task.  With no task in the
+scheduler the reader has gone quiet on its own.
 
-int Handle_Message(NodeObj instance, NodeObj data)
-{
-    DebugPrint("Handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
-    return rtrn_handled;
-}
+Chunks travel as null terminated strings for now, so this reads text
+files.  Binary payloads need a length carried beside the data node.
 
-
-int onFilenameChange(NodeObj instance, int msg_id, NodeObj data)
-{
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    char *new_filename = GetValueStr(data);
-    strcpy(new_filename, local->filename);
-    return rtrn_handled;
-}
-
-int onStatusChange(NodeObj instance, int msg_id, NodeObj data)
-{
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    // Handle changes to the "Status LED" property
-    local->state = GetPropInt(data, "value");
-    return rtrn_handled;
-}
-
-
-/* 
-
-onStatusChange
-
-onStopChange’ undeclared (first use in this function)
-onTailFileChange’ undeclared (first use in this function)
-  122 |     SetSubProp(temp, "Filename", PROP_CHECKBOX, onTailFileChange, 
 */
 
-//onRunChange undeclared (first use in this function)
-int onRunChange(NodeObj instance, int msg_id, NodeObj data)
-{
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    // Get the current state
-    int current_state = GetPropInt(instance, "State");
-    // Toggle the state
-    if (local->state == 0)
-    {
-        // Open the file in non-blocking mode
-        FILE *file = fopen(local->filename, "r");
-        if (file != NULL)
-        {
-            int flags = fcntl(fileno(file), F_GETFL, 0);
-            if (flags != -1)
-            {
-                fcntl(fileno(file), F_SETFL, flags | O_NONBLOCK);
-            }
+#define READER_CHUNK_SIZE 1024
 
-            // Store the file handle in the instance's local data
-            local->file_handle = file;
-            local->state = 1;
-            // send message to text box with a start message handle
-            // Send_Message (local, START, empty_node);
-        }
-        else
-        {
-            return rtrn_dropped;
-        }
-    }
-    else
-    {
-        return rtrn_dropped;
-    }
-    return rtrn_handled;
+typedef struct InstanceData
+{
+	FILE  * file;
+	TaskObj task;
+	int     active;
+	int     enabled;	/* the Enable port gates the reading   */
+	int     scheduled;	/* is the read task currently armed?   */
+} InstanceData;
+
+static NodeObj LibrarySelf;
+static NodeObj ClassSelf;
+
+/* every loadable object must export this, the loader checks for it */
+int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
+{
+	DebugPrint ( "Reader handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
+	return rtrn_handled;
 }
 
-int onStopChange(NodeObj instance, int msg_id, NodeObj data)
+/* scheduler callback: read one chunk, send it, reschedule until EOF     */
+/* the scheduler calls back as (data, data, reason) so the instance node */
+/* must be the data the task was armed with                              */
+int Reader_ReadChunk(NodeObj instance, NodeObj data, int reason)
 {
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    if (local->state == 1)
-    { // Check if the object is currently running
-        // Stop the object
-        local->state = 0;
-        // Close the file if it's open
-        if (local->file_handle != NULL)
-        {
-            fclose(local->file_handle);
-            local->file_handle = NULL;
-        }
-    }
-    else
-    {
-        return rtrn_dropped;
-    }
-    return rtrn_handled;
+	char buffer[READER_CHUNK_SIZE + 1];
+	size_t bytes;
+	NodeObj chunk;
+	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+
+	if (reason == task_deactivate)
+		return rtrn_handled;
+
+	if (!local || !local->file)
+		return rtrn_dropped;
+
+	local->scheduled = 0;
+
+	/* paused: the file stays open, the Enable port re-arms us */
+	if (!local->enabled)
+		return rtrn_handled;
+
+	bytes = fread(buffer, 1, READER_CHUNK_SIZE, local->file);
+
+	if (bytes > 0)
+	{
+		buffer[bytes] = 0;
+
+		chunk = NewNode(STRING);
+		SetName(chunk, "Data");
+		SetValueStr(chunk, buffer);
+
+		/* delivery is synchronous, subscribers copy what they  */
+		/* need before this returns, so the chunk node can go   */
+		SndMsg(instance, "Out", msg_send, chunk);
+		DelNode(chunk);
+	}
+
+	if (feof(local->file) || ferror(local->file))
+	{
+		/* the stream is over, EOF goes out the same port as the */
+		/* data, then this object goes quiet: no reschedule      */
+		SndMsg(instance, "Out", msg_eof, NULL);
+
+		fclose(local->file);
+		local->file = NULL;
+		local->active = 0;
+		SetPropInt(instance, "State", Stopping);
+
+		DebugPrint ( "Reader hit end of file, sent EOF, and deactivated.", __FILE__, __LINE__, OBJMSGHANDLING);
+	}
+	else
+	{
+		AddTaskNow(local->task, (FuncPtr)Reader_ReadChunk, msg_send, instance);
+		local->scheduled = 1;
+	}
+
+	return rtrn_handled;
 }
 
-int onOutputChange(NodeObj instance, int msg_id, NodeObj data)
+/* control callback: 1 enables, 0 disables, EOF on this line is ignored */
+int Reader_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    char buffer[1025];
+	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-    if (local->state == 1 && local->file_handle != NULL)
-    {
-        ssize_t bytes_read =  0; // fread(fileno(local->file_handle), buffer, 1, 1024);
-        buffer[bytes_read] = 0;
+	if (!local || message != msg_send)
+		return rtrn_dropped;
 
-        if (bytes_read > 0)
-        {
-            //ScheduleMessage(local, "ReadNext", NULL, 0);
-        }
-        else if (feof(local->file_handle))
-        {
-            // End of file reached
-            fclose(local->file_handle);
-            local->file_handle = NULL;
-            local->state = 0;
-        }
-        else
-        {
-            // Error reading from file
-            // Handle the error (e.g., log, emit an error message)
-        }
-    }
-    ScheduleMessage(local, "ReadNext", NULL, 0);
-    return rtrn_handled;
+	if (GetValueInt(data))
+	{
+		if (!local->enabled)
+		{
+			local->enabled = 1;
+			SetValueStr(GetPropNode(instance, "Enable"), "1");
+
+			/* resume a paused read */
+			if (local->active && local->file && !local->scheduled)
+			{
+				AddTaskNow(local->task, (FuncPtr)Reader_ReadChunk, msg_send, instance);
+				local->scheduled = 1;
+			}
+		}
+	}
+	else
+	{
+		local->enabled = 0;
+		SetValueStr(GetPropNode(instance, "Enable"), "0");
+	}
+
+	return rtrn_handled;
 }
 
-int onTailFileChange(NodeObj instance, int msg_id, NodeObj data)
+/* open the file and start the read task pumping */
+int Reader_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    local->tail = GetPropInt(data, "value");
-    return rtrn_handled;
+	char * filename;
+	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+
+	if (!local || local->active)
+		return rtrn_dropped;
+
+	filename = GetPropStr(instance, "Filename");
+	if (!filename || !filename[0])
+	{
+		DebugPrint ( "Reader has no Filename to read.", __FILE__, __LINE__, ERROR);
+		return rtrn_dropped;
+	}
+
+	local->file = fopen(filename, "r");
+	if (!local->file)
+	{
+		DebugPrint ( "Reader could not open its input file.", __FILE__, __LINE__, ERROR);
+		return rtrn_dropped;
+	}
+
+	local->task = CreateTask(ObjGetTaskList());
+	local->active = 1;
+	SetPropInt(instance, "State", Running);
+
+	/* the first read happens on the next trip through the main loop */
+	AddTaskNow(local->task, (FuncPtr)Reader_ReadChunk, msg_send, instance);
+	local->scheduled = 1;
+
+	return rtrn_handled;
 }
 
-int onCustomMessage1(NodeObj instance, int msg_id, NodeObj data)
+int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-    return rtrn_handled;
+	NodeObj instance, port;
+	InstanceData * local = malloc(sizeof(InstanceData));
+
+	local->file = NULL;
+	local->task = NULL;
+	local->active = 0;
+	local->enabled = 1;
+	local->scheduled = 0;
+
+	instance = NewNode(INTEGER);
+	SetName(instance, "Reader");
+	SetPropStr(instance, "Filename", "");
+	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
+	SetPropInt(instance, "State", Starting);
+	SetPropLong(instance, "local", (long)local);
+	SetPropLong(instance, "Activate", (long)Reader_Activate);
+
+	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
+	SetPropStr(instance, "Enable", "1");
+	port = GetPropNode(instance, "Enable");
+	SetPropLong(port, "OnMsg", (long)Reader_OnEnable);
+
+	RegisterInstance(class, instance);
+
+	return rtrn_handled;
 }
 
-
-
-
-void SetSubProp(NodeObj prop, char *name, int graphics, long func_ptr, long local_ptr)
+int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
-    NodeObj subprop = NewNode(INTEGER);
-    SetName(subprop, "Properties");
-    SetPropInt(subprop, "graphics", graphics);
-    SetPropLong(subprop, "OnChange", (long)func_ptr);
-    SetPropLong(subprop, "local", (long)local_ptr);
+	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-    NodeObj the_prop = GetPropNode(prop, name);
-    AddProp(the_prop, subprop);
+	if (local)
+	{
+		if (local->file)
+			fclose(local->file);
+		free(local);
+	}
+
+	return rtrn_handled;
 }
 
-int InstanceStart(NodeObj instance, int msg_id, NodeObj data)
+int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
-    printf("    ***   In INSTANCE START    ***\n");
+	NodeObj class = NewNode(INTEGER);
 
-    // Create the local data structure
-    InstanceData *local = malloc(sizeof(InstanceData));
-    local->state = 0; // Initial state: Stopped
-    local->filename[0] = 0;
+	SetName(class, "Reader");
+	SetPropLong(class, "InstanceStart", (long)InstanceStart);
+	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 
-    NodeObj temp = NewNode(INTEGER);
-    SetName(temp, "Reader");
-    SetPropStr(temp, "Filename", "");
-    SetSubProp(temp, "Filename",  PROP_TEXTBOX, (long) onFilenameChange, (long) local);
-    SetPropInt(temp, "Status LED", 0);
-    SetSubProp(temp, "Status LED", PROP_LED, (long) onStatusChange,  (long) local);
-    SetPropInt(temp, "Run Button", 0);
-    SetSubProp(temp, "Run Button", PROP_BUTTON, (long) onRunChange,  (long) local);
-    SetPropInt(temp, "Stop Button", 0);
-    SetSubProp(temp, "Stop Button", PROP_BUTTON, (long) onStopChange,  (long) local);
-    SetPropInt(temp, "Tail File", 0);
-    SetSubProp(temp, "Tail File", PROP_CHECKBOX, (long) onTailFileChange,  (long) local);
-    SetPropStr(temp, "Output", "");
-    SetSubProp(temp, "Output", PROP_TEXTBOX, (long) onTailFileChange,  (long) local);
+	ClassSelf = RegisterClass(library, class);
 
-    local->instance = RegisterInstance(instance, temp); // does this need a node passed to hold info
-    return rtrn_handled;
+	return rtrn_handled;
 }
 
-
-
-int InstanceEnd(NodeObj instance, int msg_id, NodeObj data)
+int ClassEnd(NodeObj library, MsgId message, NodeObj data)
 {
+	UnRegisterClass(library, ClassSelf);
+	ClassSelf = NULL;
 
-    InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-
-    // Close the file if it's open
-    if (local->file_handle != NULL)
-    {
-        fclose(local->file_handle);
-    }
-    UnRegisterInstance(instance);
-    UnRegisterinstancewithclass(instance);
-    free(local);
-
-    return rtrn_handled;
-}
-
-int ClassStart(NodeObj instance, int msg_id,  NodeObj data)
-{
-    printf("    ***   In CLASS START    ***\n");
-    NodeObj temp = NewNode(INTEGER);
-    SetName(temp, "Reader");
-    SetPropLong(temp, "InstanceStart", (long)InstanceStart);
-    SetPropLong(temp, "InstanceEnd", (long)InstanceEnd);
-    //NodeObj depends = NewNode();
-
-    class.instance = RegisterClass(class.self, temp);
-    class.list = NULL;
-    return rtrn_handled;
-}
-
-int ClassEnd(NodeObj instance, int msg_id, NodeObj data)
-{
-    InstanceData *element, *next;
-    element = class.list;
-    while (element != NULL)
-    {
-        next = element->next;
-        InstanceEnd(element->instance, data, msg_id);
-        element = next;
-    }
-    UnRegisterClass(class.instance);
-    class.instance = NULL;
-    class.list = NULL;
-    return rtrn_handled;
-}
-
-int ClassMsg(NodeObj instance, int msg_id, NodeObj data)
-{
-    return rtrn_handled;
+	return rtrn_handled;
 }
 
 void _init()
 {
-    // object level loading by library function
-    // add a dependency list to this call so the core and load the classes in the correct order
-    // incase one class requires another class to be present to subclass
+	NodeObj temp = NewNode(INTEGER);
 
-    printf ("In object:  Class callbacks: %lu, %lu, %lu\n", (unsigned long)ClassStart, (unsigned long)ClassEnd, (unsigned long)ClassMsg);
+	SetName(temp, "Reader");
+	SetPropStr(temp, "Company", "GrokThink");
+	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c639");
+	SetPropLong(temp, "ClassStart", (long)ClassStart);
+	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
+	SetPropLong(temp, "ClassMsg", (long)0);
+	SetPropInt(temp, "State", 1);
 
-    NodeObj temp = NewNode(INTEGER);
-    SetName(temp, "Reader");
-    SetPropStr(temp, "Company", "GrokThink");
-    SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c639");
-    SetPropLong(temp, "ClassStart", (long)ClassStart);
-    SetPropLong(temp, "ClassEnd", (long)ClassEnd);
-    SetPropLong(temp, "ClassMsg", (long)ClassMsg);
-    SetPropInt(temp, "State", 1);
-
-    class.self=temp;
-
-    class.self = RegisterLibrary(temp);
+	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
-    UnregisterLibrary(class.self);
-    class.self = NULL;
+	UnregisterLibrary(LibrarySelf);
+	LibrarySelf = NULL;
 }

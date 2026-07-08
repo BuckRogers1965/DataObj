@@ -93,6 +93,11 @@ CreateTask(TaskList list){
 
 	task->owner = list;
 
+	task->callback = NULL;
+	task->data = NULL;
+	task->name = NULL;
+	task->trace = 0;
+
 	return task;
 
 
@@ -188,6 +193,10 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func,
 	GetCurrentTime(&seconds, &millisecs);
 
 	task->callback = func;
+
+	/* the data rides with the task and is handed to the callback, */
+	/* objects pass their instance node through here               */
+	task->data = data;
 
 	delay_seconds = delay_seconds + seconds;
 

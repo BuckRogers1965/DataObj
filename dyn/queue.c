@@ -165,8 +165,8 @@ queuePush (queuePtr queue, char * pointer, unsigned int length, unsigned int typ
 			return 0;
 		
 		buffReallocAdjustment( queue->dataBuffer, ReallocSize );
-			
-		buffAdd (queue->dataBuffer, pointer, length);
+
+		result = buffAdd (queue->dataBuffer, pointer, length);
 
 		if ( !result ) {
 
@@ -187,20 +187,22 @@ queuePush (queuePtr queue, char * pointer, unsigned int length, unsigned int typ
 				if(!result)
 					queue->FailedCount = 1;
 			}
+		}
+
+		// the data made it in, on the first try or the retry,
+		// so record its size and type beside it
+		if (result) {
+			sizeType.size = length;
+			sizeType.type = type;
+
+			result = buffAdd (queue->sizeBuffer, (char*) &sizeType, sizeof(SizeType));
 
 			if (result) {
-				sizeType.size = length;
-				sizeType.type = type;
-
-				result = buffAdd (queue->sizeBuffer, (char*) &sizeType, sizeof(SizeType));
-
-				if (result) {
-					queue->numPopsLIFO++;
-					result = 1;
-				} else {
-					// remove the first thing
-					// needs done
-				}
+				queue->numPushes++;
+				result = 1;
+			} else {
+				// remove the first thing
+				// needs done
 			}
 		}
 	}

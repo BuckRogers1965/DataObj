@@ -141,28 +141,181 @@ void MainLoop(NodeObj Main){
 		SetPropInt(Main, "State", Stopping);	
 }
 
+/*
+
+Hard coded test flow: emulate cat.
+
+The Reader reads test.txt a chunk at a time and sends each chunk as a
+message out its Out port.  The Writer's In port subscribes to that Out,
+buffers what arrives, and drains it to test.txt.back.
+
+At end of file the Reader sends EOF out the same port and deactivates.
+When the Writer has the EOF and its write buffers are done it closes
+the file and deactivates too.  Nobody calls exit: with both objects
+quiet the task list empties and the main loop shuts the program down.
+
+*/
 void CreateTestApp(NodeObj Main){
-	//NodeObj TestApp = CreateContainer(Main, "TestApp");
 
-	// Create a file writer object
-	//NodeObj WriteFile = CreateObject(TestApp, "File");
-	//SetPropStr (WriteFile, "Name", "Writer");
-	//SetPropStr (WriteFile, "Path", "out.txt");
-	//SetPropStr (WriteFile, "Mode", "w");
-	//SetPropInt (WriteFile, "State", 1);
+	NodeObj Reader, Writer, Probe;
 
-	// Create a file reader object
-	//NodeObj ReadFile = CreateInstanceOfClass("Reader");
-	//GetPropNode()
-	//GetPropNode (ReadFile, "Filename");
-	//SndMsg(ReadFile)
+	Reader = CreateObject(Main, "Reader");
+	Writer = CreateObject(Main, "Writer");
 
-	//SetPropStr (ReadFile, "Name", "Reader"); 
+	if (!Reader || !Writer) {
+		DebugPrint ( "Test flow needs the Reader and Writer classes, skipping.", __FILE__, __LINE__, ERROR);
+		return;
+	}
 
+	SetPropStr(Reader, "Filename", "test.txt");
+	SetPropStr(Writer, "Filename", "test.txt.back");
 
+	/* the sink subscribes to the source */
+	Connect(Reader, "Out", Writer, "In");
 
-	//Connect(ReadFile, "Out", WriteFile, "In");
-	//SetPropInt (ReadFile, "State", 1);
+	/* debug probe: a second subscriber on the same port, it prints    */
+	/* every message that passes and proves the fan out routing works  */
+	Probe = CreateObject(Main, "Out");
+	if (Probe) {
+		SetPropStr(Probe, "Label", "reader.Out");
+		Connect(Reader, "Out", Probe, "In");
+		ActivateInstance(Probe);
+	}
+
+	/* open the sinks first so they never miss a chunk, then start the source */
+	ActivateInstance(Writer);
+	ActivateInstance(Reader);
+
+	/* second flow: a pulse train fanned out to a probe and to a filter,   */
+	/* with a second pulse driving the filter's Enable line                */
+	/*                                                                     */
+	/*   Pulse (200ms, 3) --+--> probe "pulse.Out"                         */
+	/*                      +--> Filter (ones) --> probe "filter.Out"      */
+	/*   Gate (450ms, 1) -------> Filter.Enable                            */
+	/*                                                                     */
+	/* pulse ones arrive at 200, 600, 1000 ms                              */
+	/* the gate sends 1 at 450 (already enabled) and 0 at 900 (disable)    */
+	/* so filter.Out should show the ones from 200 and 600, drop the one   */
+	/* from 1000, and still pass the EOF at 1200: "after 2 messages"       */
+	/* this is the same wiring a 30 second timer will use to shut down     */
+	/* the TCP object later: anything can drive anything's Enable          */
+	/* the queue rides the same pulse: edges are pushed as they arrive   */
+	/* and a slower clock pulse pops them back out one per tick          */
+	/*                                                                   */
+	/*   Pulse ----------+--> Queue.In                                   */
+	/*   Clock (350ms,4) ----> Queue.Clock                               */
+	/*   Queue.Out ----------> probe "queue.Out"                         */
+	/*                                                                   */
+	/* pushes land at 200..1200ms, pops at 350,700,...  so queue.Out     */
+	/* replays 1 0 1 0 1 0 at the clock's pace and pops the in band      */
+	/* EOF at about 2450ms: "after 6 messages, 6 bytes"                  */
+	{
+		NodeObj Pulse, PulseProbe, Filter, FilterProbe, Gate;
+		NodeObj Queue, QueueProbe, Clock;
+		NodeObj FeedProbe, Stack, StackProbe;
+
+		Pulse       = CreateObject(Main, "Pulse");
+		PulseProbe  = CreateObject(Main, "Out");
+		Filter      = CreateObject(Main, "Filter");
+		FilterProbe = CreateObject(Main, "Out");
+		Gate        = CreateObject(Main, "Pulse");
+		Queue       = CreateObject(Main, "Queue");
+		QueueProbe  = CreateObject(Main, "Out");
+		Clock       = CreateObject(Main, "Pulse");
+		FeedProbe   = CreateObject(Main, "Out");
+		Stack       = CreateObject(Main, "Stack");
+		StackProbe  = CreateObject(Main, "Out");
+
+		if (Pulse && PulseProbe && Filter && FilterProbe && Gate
+			&& Queue && QueueProbe && Clock
+			&& FeedProbe && Stack && StackProbe) {
+
+			SetPropInt(Pulse, "Interval", 200);
+			SetPropInt(Pulse, "Count", 3);
+			SetPropStr(PulseProbe, "Label", "pulse.Out");
+
+			SetPropStr(Filter, "Mode", "ones");
+			SetPropStr(FilterProbe, "Label", "filter.Out");
+
+			SetPropInt(Gate, "Interval", 450);
+			SetPropInt(Gate, "Count", 1);
+
+			SetPropStr(QueueProbe, "Label", "queue.Out");
+			SetPropInt(Clock, "Interval", 350);
+			SetPropInt(Clock, "Count", 4);
+
+			/* the same pulse feeds the queue and the stack, this  */
+			/* probe shows exactly what both of them receive       */
+			SetPropStr(FeedProbe, "Label", "queue.In");
+			SetPropStr(StackProbe, "Label", "stack.Out");
+
+			Connect(Pulse, "Out", PulseProbe, "In");
+			Connect(Pulse, "Out", Filter, "In");
+			Connect(Filter, "Out", FilterProbe, "In");
+			Connect(Gate, "Out", Filter, "Enable");
+
+			Connect(Pulse, "Out", FeedProbe, "In");
+			Connect(Pulse, "Out", Queue, "In");
+			Connect(Clock, "Out", Queue, "Clock");
+			Connect(Queue, "Out", QueueProbe, "In");
+
+			/* the stack rides the same feed and the same clock,   */
+			/* it pops newest first, so expect the stream reversed */
+			/* piecewise, EOF included: that is what stacks do     */
+			Connect(Pulse, "Out", Stack, "In");
+			Connect(Clock, "Out", Stack, "Clock");
+			Connect(Stack, "Out", StackProbe, "In");
+
+			/* sinks and middle objects first, sources last */
+			ActivateInstance(PulseProbe);
+			ActivateInstance(FilterProbe);
+			ActivateInstance(QueueProbe);
+			ActivateInstance(FeedProbe);
+			ActivateInstance(StackProbe);
+			ActivateInstance(Filter);
+			ActivateInstance(Queue);
+			ActivateInstance(Stack);
+			ActivateInstance(Gate);
+			ActivateInstance(Clock);
+			ActivateInstance(Pulse);
+		}
+	}
+
+	/* third flow: a TCP echo server on port 8083 with a 30 second life   */
+	/*                                                                    */
+	/*   TCP (8083) --+--> probe "tcp.Out"                                */
+	/*                +--> back into TCP.In (echo to the peer)            */
+	/*   Timer (15s, 1) --> TCP.Enable                                    */
+	/*                                                                    */
+	/* everything a peer sends prints on the probe and echoes back        */
+	/* the timer's rising edge at 15s is a no-op enable, its falling      */
+	/* edge lands at 30 seconds and shuts the server down completely,     */
+	/* so the program keeps itself alive exactly 30 seconds and then      */
+	/* quiesces like every other flow                                     */
+	{
+		NodeObj Tcp, TcpProbe, Timer;
+
+		Tcp      = CreateObject(Main, "TCP");
+		TcpProbe = CreateObject(Main, "Out");
+		Timer    = CreateObject(Main, "Pulse");
+
+		if (Tcp && TcpProbe && Timer) {
+
+			SetPropInt(Tcp, "LocalPort", 8083);
+			SetPropStr(TcpProbe, "Label", "tcp.Out");
+
+			SetPropInt(Timer, "Interval", 15000);
+			SetPropInt(Timer, "Count", 1);
+
+			Connect(Tcp, "Out", TcpProbe, "In");
+			Connect(Tcp, "Out", Tcp, "In");		/* echo everything back */
+			Connect(Timer, "Out", Tcp, "Enable");
+
+			ActivateInstance(TcpProbe);
+			ActivateInstance(Tcp);
+			ActivateInstance(Timer);
+		}
+	}
 }
 
 /* return the current status of the Main execution thread */
@@ -191,6 +344,10 @@ void Init(NodeObj Main){
 	NodeObj RegObjList;
 
 	/* just hum along, add in the parts to initialize base object as I find we need them. */
+
+	/* apply the verbose level the command line parser stored, */
+	/* from here on DebugPrint filters by message type          */
+	DebugPrintSetLevel(GetValueInt(GetPropNode(Main, "loglevel")));
 
 	DebugPrint ( "Entering Init function.", __FILE__, __LINE__, PROG_FLOW);
 
@@ -245,6 +402,10 @@ void Init(NodeObj Main){
 	}
 	DebugPrint ( "Logging Level Set.", __FILE__, __LINE__, PROG_FLOW);
 	Tasks = CreateList();
+
+	/* hand the task list to the object layer so that */
+	/* loaded objects can schedule their own tasks    */
+	ObjSetTaskList(Tasks);
 
 }
 

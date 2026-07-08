@@ -355,6 +355,43 @@ long GetPropLong(NodeObj node, char *name)
 	return 0;
 }
 
+int GetPropInt(NodeObj node, char *name)
+{
+	if (!node || !name)
+		return 0;
+	NodeObj current = node->props;
+	while (current)
+	{
+		if (CmpName(current, name))
+			return GetValueInt(current);
+		current = current->nextSib;
+	}
+	return 0;
+}
+
+char *GetPropStr(NodeObj node, char *name)
+{
+	if (!node || !name)
+		return NULL;
+	NodeObj current = node->props;
+	while (current)
+	{
+		if (CmpName(current, name))
+			return GetValueStr(current);
+		current = current->nextSib;
+	}
+	return NULL;
+}
+
+/* returns the first property of a node so callers can iterate */
+/* the property list, walk the rest with GetNextSibling         */
+NodeObj GetNextProp(NodeObj node)
+{
+	if (!node)
+		return NULL;
+	return node->props;
+}
+
 void SetPropLong(NodeObj node, char *name, long value)
 {
 	NodeObj propnode;
@@ -364,13 +401,11 @@ void SetPropLong(NodeObj node, char *name, long value)
 	if (!node->props)
 		if ((propnode = GetPropNode(node, name)))
 		{
-			printf ("updating property %llu\nyy", value);
 			// if the node exists
 			SetLong(propnode->value, value);
 			return;
 		}
-	
-	printf ("Adding property %llu\nyy", value);
+
 	/* otherwise create the property */
 	propnode = NewNode(LONG);
 	SetStr(propnode->name, name);
