@@ -175,6 +175,14 @@ int Queue_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* the settings panel: what a Queue or Stack looks like, built once per */
+/* instance - the same table shape for both, since the whole difference */
+/* between them is pop direction (local->mode), not presentation        */
+static ControlSpec QueueControls[] = {
+	{ "LED",    "State", 10, 10, 20, 20 },
+	{ "Button", NULL,    10, 40, 60, 20 },
+};
+
 /* shared by both classes: the class name picks the pop direction */
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
@@ -189,6 +197,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, local->mode == pop_lifo ? "Stack" : "Queue");
 	SetPropInt(instance, "State", Starting);
+	WatchableProp(instance, "State");
 	SetPropInt(instance, "Out", 0);		/* popped entries leave here */
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Queue_Activate);
@@ -208,7 +217,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Queue_OnEnable);
 
+	InitPosition(instance);
+
 	RegisterInstance(class, instance);
+
+	BuildSettingsView(instance, QueueControls, sizeof(QueueControls) / sizeof(QueueControls[0]));
 
 	return rtrn_handled;
 }
@@ -239,11 +252,27 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 	QueueClass = RegisterClass(library, class);
 
+	PublishPosition(QueueClass);
+
+	PublishProp(QueueClass, "Enable", "in",  PROP_CHECKBOX, "1");
+	PublishProp(QueueClass, "In",     "in",  PROP_NULL, "");
+	PublishProp(QueueClass, "Clock",  "in",  PROP_NULL, "");
+	PublishProp(QueueClass, "Out",    "out", PROP_NULL, "");
+	PublishProp(QueueClass, "State",  "data", PROP_LED, "1");
+
 	class = NewNode(INTEGER);
 	SetName(class, "Stack");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 	StackClass = RegisterClass(library, class);
+
+	PublishPosition(StackClass);
+
+	PublishProp(StackClass, "Enable", "in",  PROP_CHECKBOX, "1");
+	PublishProp(StackClass, "In",     "in",  PROP_NULL, "");
+	PublishProp(StackClass, "Clock",  "in",  PROP_NULL, "");
+	PublishProp(StackClass, "Out",    "out", PROP_NULL, "");
+	PublishProp(StackClass, "State",  "data", PROP_LED, "1");
 
 	return rtrn_handled;
 }
@@ -265,6 +294,8 @@ void _init()
 	SetName(temp, "Queue");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c670");
+	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);

@@ -401,8 +401,29 @@ object.o: /usr/include/bits/types/__mbstate_t.h
 object.o: /usr/include/bits/types/__fpos64_t.h
 object.o: /usr/include/bits/types/__FILE.h /usr/include/bits/types/FILE.h
 object.o: /usr/include/bits/types/struct_FILE.h /usr/include/bits/stdio_lim.h
-object.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h node.h
-object.o: data.h object.h DebugPrint.h
+object.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
+object.o: /usr/include/stdlib.h /usr/include/bits/waitflags.h
+object.o: /usr/include/bits/waitstatus.h /usr/include/sys/types.h
+object.o: /usr/include/bits/types/clock_t.h
+object.o: /usr/include/bits/types/clockid_t.h
+object.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
+object.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
+object.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
+object.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
+object.o: /usr/include/sys/select.h /usr/include/bits/select.h
+object.o: /usr/include/bits/types/sigset_t.h
+object.o: /usr/include/bits/types/__sigset_t.h
+object.o: /usr/include/bits/types/struct_timeval.h
+object.o: /usr/include/bits/types/struct_timespec.h
+object.o: /usr/include/bits/pthreadtypes.h
+object.o: /usr/include/bits/thread-shared-types.h
+object.o: /usr/include/bits/pthreadtypes-arch.h
+object.o: /usr/include/bits/atomic_wide_counter.h
+object.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
+object.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
+object.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+object.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h node.h
+object.o: data.h object.h DebugPrint.h callback.h
 sched.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
 sched.o: /usr/include/features.h /usr/include/features-time64.h
 sched.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h

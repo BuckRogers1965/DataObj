@@ -39,5 +39,26 @@ writer.o: /usr/include/bits/types/__fpos64_t.h
 writer.o: /usr/include/bits/types/__FILE.h /usr/include/bits/types/FILE.h
 writer.o: /usr/include/bits/types/struct_FILE.h /usr/include/bits/stdio_lim.h
 writer.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
-writer.o: ../../node.h ../../data.h ../../object.h ../../DebugPrint.h
-writer.o: ../../callback.h
+writer.o: /usr/include/stdlib.h /usr/include/bits/waitflags.h
+writer.o: /usr/include/bits/waitstatus.h /usr/include/sys/types.h
+writer.o: /usr/include/bits/types/clock_t.h
+writer.o: /usr/include/bits/types/clockid_t.h
+writer.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
+writer.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
+writer.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
+writer.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
+writer.o: /usr/include/sys/select.h /usr/include/bits/select.h
+writer.o: /usr/include/bits/types/sigset_t.h
+writer.o: /usr/include/bits/types/__sigset_t.h
+writer.o: /usr/include/bits/types/struct_timeval.h
+writer.o: /usr/include/bits/types/struct_timespec.h
+writer.o: /usr/include/bits/pthreadtypes.h
+writer.o: /usr/include/bits/thread-shared-types.h
+writer.o: /usr/include/bits/pthreadtypes-arch.h
+writer.o: /usr/include/bits/atomic_wide_counter.h
+writer.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
+writer.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
+writer.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+writer.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
+writer.o: ../../node.h ../../data.h ../../object.h ../../sched.h
+writer.o: ../../callback.h ../../DebugPrint.h ../../dyn/buff.h

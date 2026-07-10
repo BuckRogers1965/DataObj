@@ -197,6 +197,13 @@ int Writer_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* the settings panel: what Writer looks like, built once per instance */
+static ControlSpec WriterControls[] = {
+	{ "Textbox", "Filename", 10, 10, 140, 20 },
+	{ "LED",     "State",    10, 40,  20, 20 },
+	{ "Button",  NULL,       10, 70,  60, 20 },
+};
+
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance, inPort;
@@ -213,7 +220,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "Writer");
 	SetPropStr(instance, "Filename", "");
+	WatchableProp(instance, "Filename");
 	SetPropInt(instance, "State", Starting);
+	WatchableProp(instance, "State");
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Writer_Activate);
 
@@ -228,7 +237,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	inPort = GetPropNode(instance, "Enable");
 	SetPropLong(inPort, "OnMsg", (long)Writer_OnEnable);
 
+	InitPosition(instance);
+
 	RegisterInstance(class, instance);
+
+	BuildSettingsView(instance, WriterControls, sizeof(WriterControls) / sizeof(WriterControls[0]));
 
 	return rtrn_handled;
 }
@@ -259,6 +272,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	PublishPosition(ClassSelf);
+
+	PublishProp(ClassSelf, "Filename", "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "In",       "in",   PROP_NULL, "");
+	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+
 	return rtrn_handled;
 }
 
@@ -277,6 +297,8 @@ void _init()
 	SetName(temp, "Writer");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c640");
+	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);

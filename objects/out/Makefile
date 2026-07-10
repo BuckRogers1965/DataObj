@@ -38,5 +38,25 @@ out.o: /usr/include/bits/types/__mbstate_t.h
 out.o: /usr/include/bits/types/__fpos64_t.h /usr/include/bits/types/__FILE.h
 out.o: /usr/include/bits/types/FILE.h /usr/include/bits/types/struct_FILE.h
 out.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
-out.o: /usr/include/bits/floatn-common.h ../../node.h ../../data.h
-out.o: ../../object.h ../../DebugPrint.h ../../callback.h
+out.o: /usr/include/bits/floatn-common.h /usr/include/stdlib.h
+out.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
+out.o: /usr/include/sys/types.h /usr/include/bits/types/clock_t.h
+out.o: /usr/include/bits/types/clockid_t.h /usr/include/bits/types/time_t.h
+out.o: /usr/include/bits/types/timer_t.h /usr/include/bits/stdint-intn.h
+out.o: /usr/include/endian.h /usr/include/bits/endian.h
+out.o: /usr/include/bits/endianness.h /usr/include/bits/byteswap.h
+out.o: /usr/include/bits/uintn-identity.h /usr/include/sys/select.h
+out.o: /usr/include/bits/select.h /usr/include/bits/types/sigset_t.h
+out.o: /usr/include/bits/types/__sigset_t.h
+out.o: /usr/include/bits/types/struct_timeval.h
+out.o: /usr/include/bits/types/struct_timespec.h
+out.o: /usr/include/bits/pthreadtypes.h
+out.o: /usr/include/bits/thread-shared-types.h
+out.o: /usr/include/bits/pthreadtypes-arch.h
+out.o: /usr/include/bits/atomic_wide_counter.h
+out.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
+out.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
+out.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+out.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
+out.o: ../../node.h ../../data.h ../../object.h ../../sched.h
+out.o: ../../callback.h ../../DebugPrint.h

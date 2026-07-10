@@ -17,6 +17,19 @@ NodeObj NewNode (int type);
 void    DelNode (NodeObj node);
 void PrintNode(NodeObj node);
 
+// serialization - node tree as text (JSON), and back
+int     GetValueType (NodeObj node);
+char *  NodeToText   (NodeObj node);
+
+/* a quoted, escaped JSON string literal (quotes included) - for code   */
+/* hand-building JSON objects instead of going through NodeToText       */
+char *  JsonEscapeStr(char * s);
+NodeObj TextToNode   (char * text);
+
+/* flat JSON object -> a node whose props are its key/value pairs; no  */
+/* nesting/arrays - for simple flat commands, not general trees        */
+NodeObj TextToProps  (char * text);
+
 void   SetName    (NodeObj node, char * name);
 char * GetNameStr (NodeObj node);
 int    CmpName    (NodeObj node, char * name);
@@ -27,6 +40,10 @@ int     GetValueInt  (NodeObj node);
 void    SetValueInt  (NodeObj node, int value);
 char *  GetValueStr  (NodeObj node);
 void    SetValueStr  (NodeObj node, char * Value);
+
+/* binary-safe: copies exactly `length` bytes, embedded NULs included */
+void    SetValueStrLen (NodeObj node, char * value, int length);
+int     GetValueLen    (NodeObj node);
 long    GetValueLong (NodeObj node);
 void    SetValueLong (NodeObj node, long value);
 
@@ -45,7 +62,9 @@ long    GetPropLong (NodeObj node, char * Name);
 // need more child handling functions here
 void    SetChild     (NodeObj node,   NodeObj child);
 void    AddChild     (NodeObj parent, NodeObj child);
+void    AppendChild  (NodeObj parent, NodeObj child);
 NodeObj GetChild     (NodeObj node);
+NodeObj GetParent    (NodeObj node);
 NodeObj GetNextChild (NodeObj node);
 
 // sibling handling

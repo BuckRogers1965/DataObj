@@ -157,34 +157,53 @@ quiet the task list empties and the main loop shuts the program down.
 */
 void CreateTestApp(NodeObj Main){
 
-	NodeObj Reader, Writer, Probe;
+	NodeObj Reader, Writer, Probe, StateProbe;
 
-	Reader = CreateObject(Main, "Reader");
-	Writer = CreateObject(Main, "Writer");
+	/* recorded as a flow script so this cat flow can be saved and       */
+	/* reloaded instead of hard-coded here - see default.flow after a    */
+	/* run. Flow* wrappers have the exact same live effect as the plain  */
+	/* CreateObject/SetPropStr/Connect/ActivateInstance calls they wrap. */
+	NodeObj flow = NewFlow("cat");
+
+	Reader = FlowCreateObject(flow, Main, "Reader");
+	Writer = FlowCreateObject(flow, Main, "Writer");
 
 	if (!Reader || !Writer) {
 		DebugPrint ( "Test flow needs the Reader and Writer classes, skipping.", __FILE__, __LINE__, ERROR);
 		return;
 	}
 
-	SetPropStr(Reader, "Filename", "test.txt");
-	SetPropStr(Writer, "Filename", "test.txt.back");
+	FlowSetProp(flow, Reader, "Filename", "test.txt");
+	FlowSetProp(flow, Writer, "Filename", "test.txt.back");
 
 	/* the sink subscribes to the source */
-	Connect(Reader, "Out", Writer, "In");
+	FlowConnect(flow, Reader, "Out", Writer, "In");
 
 	/* debug probe: a second subscriber on the same port, it prints    */
 	/* every message that passes and proves the fan out routing works  */
-	Probe = CreateObject(Main, "Out");
+	Probe = FlowCreateObject(flow, Main, "Out");
 	if (Probe) {
-		SetPropStr(Probe, "Label", "reader.Out");
-		Connect(Reader, "Out", Probe, "In");
-		ActivateInstance(Probe);
+		FlowSetProp(flow, Probe, "Label", "reader.Out");
+		FlowConnect(flow, Reader, "Out", Probe, "In");
+		FlowActivateInstance(flow, Probe);
+	}
+
+	/* proving Phase 2.4's skin works: State is a plain property, not a  */
+	/* port, but WatchableProp made it Connect()-able exactly like one - */
+	/* this probe should print Reader's Starting/Running/Stopping        */
+	/* transitions live, the same way reader.Out prints its data         */
+	StateProbe = FlowCreateObject(flow, Main, "Out");
+	if (StateProbe) {
+		FlowSetProp(flow, StateProbe, "Label", "reader.State");
+		FlowConnect(flow, Reader, "State", StateProbe, "In");
+		FlowActivateInstance(flow, StateProbe);
 	}
 
 	/* open the sinks first so they never miss a chunk, then start the source */
-	ActivateInstance(Writer);
-	ActivateInstance(Reader);
+	FlowActivateInstance(flow, Writer);
+	FlowActivateInstance(flow, Reader);
+
+	SaveFlow(flow, "default.flow");
 
 	/* second flow: a pulse train fanned out to a probe and to a filter,   */
 	/* with a second pulse driving the filter's Enable line                */
@@ -281,9 +300,9 @@ void CreateTestApp(NodeObj Main){
 		}
 	}
 
-	/* third flow: a TCP echo server on port 8083 with a 30 second life   */
+	/* third flow: a TCP echo server on port 8094 with a 30 second life   */
 	/*                                                                    */
-	/*   TCP (8083) --+--> probe "tcp.Out"                                */
+	/*   TCP (8094) --+--> probe "tcp.Out"                                */
 	/*                +--> back into TCP.In (echo to the peer)            */
 	/*   Timer (15s, 1) --> TCP.Enable                                    */
 	/*                                                                    */
@@ -301,7 +320,7 @@ void CreateTestApp(NodeObj Main){
 
 		if (Tcp && TcpProbe && Timer) {
 
-			SetPropInt(Tcp, "LocalPort", 8083);
+			SetPropInt(Tcp, "LocalPort", 8094);
 			SetPropStr(TcpProbe, "Label", "tcp.Out");
 
 			SetPropInt(Timer, "Interval", 15000);
@@ -314,6 +333,143 @@ void CreateTestApp(NodeObj Main){
 			ActivateInstance(TcpProbe);
 			ActivateInstance(Tcp);
 			ActivateInstance(Timer);
+		}
+	}
+
+	/* fourth flow: the web GUI, HTTP and WebSocket sharing one TCP port - */
+	/* Phases 3.1/3.2/3.3 together, and what a browser (or a firewall     */
+	/* with exactly one hole punched in it) actually talks to. Router     */
+	/* sniffs each connection's first message for the WebSocket upgrade   */
+	/* header and sends it to Http or to WebSocket->Bridge accordingly;   */
+	/* neither of those two is aware the other, or Router, exists. No     */
+	/* shutdown timer - this is meant to stay up for as long as someone   */
+	/* is actually browsing it; Ctrl+C stops it, same as any dev server   */
+	/*                                                                    */
+	/*   TCP (8083) --> Router --+--> Http (Root="web") --> TCP.In        */
+	/*                           +--> WebSocket.Wire                      */
+	/*                                 WebSocket.Send --> TCP.In          */
+	/*                                 WebSocket.Out --> Bridge.In        */
+	/*                                 Bridge.Out --> WebSocket.In        */
+	/*                                              +--> probe "web.Out"  */
+	{
+		NodeObj WebTcp, Router, Http, Ws, WebBridge, WebProbe, FileMenu;
+
+		WebTcp    = CreateObject(Main, "TCP");
+		Router    = CreateObject(Main, "Router");
+		Http      = CreateObject(Main, "Http");
+		Ws        = CreateObject(Main, "WebSocket");
+		WebBridge = CreateObject(Main, "Bridge");
+		WebProbe  = CreateObject(Main, "Out");
+
+		if (WebTcp && Router && Http && Ws && WebBridge && WebProbe) {
+
+			SetPropInt(WebTcp, "LocalPort", 8083);
+			SetPropStr(Http, "Root", "web");
+			SetPropStr(WebProbe, "Label", "web.Out");
+
+			SetPropLong(Router, "HttpTarget", (long) Http);
+			SetPropLong(Router, "WsTarget", (long) Ws);
+
+			Connect(WebTcp, "Out", Router, "Wire");
+			Connect(Http, "Out", WebTcp, "In");
+			Connect(Ws, "Send", WebTcp, "In");
+			Connect(Ws, "Out", WebBridge, "In");
+			Connect(WebBridge, "Out", Ws, "In");
+			Connect(WebBridge, "Out", WebProbe, "In");
+
+			/* the File menu's Selected drives Bridge's own Save/Load/  */
+			/* Import handling - an ordinary property wired to an       */
+			/* ordinary port, same as anything else (see                */
+			/* Bridge_OnFileCmd's doc comment, bridge.c)                 */
+			FileMenu = (NodeObj) GetPropLong(GetChrome(), "FileMenu");
+			if (FileMenu) {
+				SetPropLong(WebBridge, "FileMenu", (long) FileMenu);
+				Connect(FileMenu, "Selected", WebBridge, "FileCmd");
+			}
+
+			ActivateInstance(WebProbe);
+			ActivateInstance(WebBridge);
+			ActivateInstance(Ws);
+			ActivateInstance(Http);
+			ActivateInstance(Router);
+			ActivateInstance(WebTcp);
+		}
+	}
+
+	/* fifth flow: the Bridge control protocol, also on top of TCP - the  */
+	/* roadmap's Phase 3.3. A remote client sends JSON commands and gets  */
+	/* JSON events back; every command is a direct CreateObject/Connect/  */
+	/* SetPropStr/ActivateInstance call, same as everywhere else in this  */
+	/* file - the protocol is a thin veneer, not a second implementation  */
+	/*                                                                    */
+	/*   TCP (8091) --> Bridge --+--> back into TCP.In (events to client) */
+	/*                           +--> probe "bridge.Out" (events on the   */
+	/*                                server's own log, same fan-out      */
+	/*                                reader.Out already proved)          */
+	/*   Timer (20s, 1) --> TCP.Enable                                    */
+	{
+		NodeObj BridgeTcp, Bridge, BridgeProbe, BridgeTimer;
+
+		BridgeTcp   = CreateObject(Main, "TCP");
+		Bridge      = CreateObject(Main, "Bridge");
+		BridgeProbe = CreateObject(Main, "Out");
+		BridgeTimer = CreateObject(Main, "Pulse");
+
+		if (BridgeTcp && Bridge && BridgeProbe && BridgeTimer) {
+
+			SetPropInt(BridgeTcp, "LocalPort", 8091);
+			SetPropStr(BridgeProbe, "Label", "bridge.Out");
+
+			SetPropInt(BridgeTimer, "Interval", 20000);
+			SetPropInt(BridgeTimer, "Count", 1);
+
+			Connect(BridgeTcp, "Out", Bridge, "In");
+			Connect(Bridge, "Out", BridgeTcp, "In");
+			Connect(Bridge, "Out", BridgeProbe, "In");
+			Connect(BridgeTimer, "Out", BridgeTcp, "Enable");
+
+			ActivateInstance(BridgeProbe);
+			ActivateInstance(Bridge);
+			ActivateInstance(BridgeTcp);
+			ActivateInstance(BridgeTimer);
+		}
+	}
+
+	/* sixth flow: the Bridge with RequireAuth on - the roadmap's         */
+	/* Phase 3.5. One registered test user, Main/Users/jim, token         */
+	/* "secret". Every command but login gets rejected until it succeeds. */
+	/*                                                                    */
+	/*   TCP (8093) --> Bridge (RequireAuth=1, Main=Main) --+--> TCP.In   */
+	/*                                                       +--> probe   */
+	/*   Timer (20s, 1) --> TCP.Enable                                    */
+	CreateUser(Main, "jim", "secret");
+	{
+		NodeObj AuthTcp, AuthBridge, AuthProbe, AuthTimer;
+
+		AuthTcp    = CreateObject(Main, "TCP");
+		AuthBridge = CreateObject(Main, "Bridge");
+		AuthProbe  = CreateObject(Main, "Out");
+		AuthTimer  = CreateObject(Main, "Pulse");
+
+		if (AuthTcp && AuthBridge && AuthProbe && AuthTimer) {
+
+			SetPropInt(AuthTcp, "LocalPort", 8093);
+			SetPropStr(AuthBridge, "RequireAuth", "1");
+			SetPropLong(AuthBridge, "Main", (long) Main);
+			SetPropStr(AuthProbe, "Label", "authbridge.Out");
+
+			SetPropInt(AuthTimer, "Interval", 20000);
+			SetPropInt(AuthTimer, "Count", 1);
+
+			Connect(AuthTcp, "Out", AuthBridge, "In");
+			Connect(AuthBridge, "Out", AuthTcp, "In");
+			Connect(AuthBridge, "Out", AuthProbe, "In");
+			Connect(AuthTimer, "Out", AuthTcp, "Enable");
+
+			ActivateInstance(AuthProbe);
+			ActivateInstance(AuthBridge);
+			ActivateInstance(AuthTcp);
+			ActivateInstance(AuthTimer);
 		}
 	}
 }
@@ -333,6 +489,7 @@ void PerformTesting(){
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 	DataTest();
 	NodeTest();
+	PropertyWatchTest();
 	BuffTest();
 	//NameSpaceTest();
 	SchedTest();
@@ -564,6 +721,24 @@ int main ( int argc, char* argv[] ){
 	Init(Main);
 
 	InstallObjects();
+
+	/* one inert instance per registered class, so a connecting client's */
+	/* palette is real instances to walk, not a class-description dump  */
+	/* (see BuildPalette's own comment in object.c) - also needs every   */
+	/* class already loaded, same reason FlowTest waits below            */
+	BuildPalette();
+
+	/* the topbar's own File/Mode menus - real instances too, discovered */
+	/* the same way the Palette is (see BuildChrome's comment, object.c) */
+	BuildChrome();
+
+	/* needs the classes InstallObjects() just loaded, so it can't run   */
+	/* from PerformTesting() inside Init() alongside the other -t tests  */
+	if (GetValueInt(GetPropNode(Main, "UnitTest"))) {
+		FlowTest(Main);
+		InterfaceTest();
+		SkinTest();
+	}
 
 	LoadDefaultApp(Main);
 
