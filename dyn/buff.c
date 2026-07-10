@@ -641,12 +641,60 @@ buffGetBlockFromTail (buff buffer, char ** pointer, unsigned int length) {
 	charPoint = (char *)obj->buffer + obj->tail;
 	obj->savedTailChar = charPoint[0];
 	charPoint[0] = 0;
-	
+
 	/* accumulate statistics about buff operation */
 	obj->countRetrievals++;
 
 	/* keep track of number of created buffers */
 	return actualLength;
+}
+
+/********************************************
+
+  undo a buffGetBlockFromTail (or buffGetLine) - puts the last `length`
+  bytes handed out back at the tail, so the next get sees them again.
+  Declared in buff.h and relied on by objects/network/tcp.c for a
+  partial or EAGAIN'd send, but never implemented until now - nothing
+  on loopback exercises the partial-send path, which is exactly why
+  this went unnoticed.
+
+  give a buff, and how many of the most recently returned bytes to
+  put back (must be <= the tail's current position)
+
+  return 0 if that would rewind past the start of the buffer, 1 on
+  success
+*/
+
+int
+buffGetUndoTail (buff buffer, unsigned int length) {
+
+	/* dereference from a handle to an object pointer */
+	struct object * obj = (object *) buffer;
+
+	/* this allows us to access the buffer without compiler warnings */
+	char * charPoint;
+
+	/* valid memory check */
+	if (!obj)
+		return 0;
+
+	if (length > obj->tail)
+		return 0;
+
+	/* put back the byte the last get overwrote with a 0 at the tail */
+	charPoint = (char *)obj->buffer + obj->tail;
+	charPoint[0] = obj->savedTailChar;
+
+	/* rewind - the bytes themselves were never touched, only tail moved */
+	obj->tail = obj->tail - length;
+
+	/* re-establish the "0 at tail, real byte saved" invariant every get */
+	/* function expects to find and restore as its own first step        */
+	charPoint = (char *)obj->buffer + obj->tail;
+	obj->savedTailChar = charPoint[0];
+	charPoint[0] = 0;
+
+	return 1;
 }
 
 /********************************************

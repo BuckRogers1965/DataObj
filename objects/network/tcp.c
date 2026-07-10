@@ -23,45 +23,82 @@
 TCP object, ported from the VNOS TCPObject (see TCPObject.c in this
 directory for the reference implementation this descends from).
 
-Server mode, one connection at a time:
+Server mode, any number of simultaneous connections:
 
 	LocalPort	the port to listen on
-	Out		bytes received from the peer go out here as messages
-	In		messages arriving here are buffered and sent to the peer
+	Out		bytes received from a peer go out here as messages,
+			each carrying a Conn property identifying which one
+	In		messages arriving here are buffered and sent to a peer -
+			a Conn property picks which one, or broadcasts to
+			every connected peer if it's absent/0
 	Enable		1 enables, 0 shuts the server down completely
 
-A polling task runs every POLL_MS milliseconds: it accepts a waiting
-connection if we have none, receives what the peer sent (each recv
-becomes one message out the Out port), and drains the send buffer to
-the peer.  When the peer closes we go back to listening for the next
-connection.
+TCPObject.c's own ring is the model for this - a linked list of active
+connections serviced by one shared polling task - but the reference
+takes a shortcut its own comment admits: when a listening socket accepts,
+it repurposes ITS OWN ring entry for the new client ("for now we can only
+service one connection at a time") instead of giving the accepted
+connection a ring entry of its own. That shortcut is exactly what's fixed
+here: the listening socket keeps listening, and every accepted connection
+gets its own entry in local->conns, so a second, third, thousandth peer
+connecting never displaces the ones already being serviced.
 
-Enable=0 is a full shutdown, not a pause: sockets close, msg_eof goes
-out the Out port, and the polling task is not re-armed, so the object
-stops holding the program open.  This is the wiring for a timed
-server: connect a pulse to Enable and the falling edge shuts it down.
+A polling task runs every POLL_MS milliseconds: it accepts every waiting
+connection (not just one - a listening socket can hand out several in a
+single tick), then for each connection in local->conns: receives what
+that peer sent (each recv becomes one message out Out, tagged with that
+connection's Conn id), and drains that connection's own send buffer to
+it. When a peer closes we send msg_eof out Out tagged with just that
+Conn id and remove it from the list - the only signal anything sitting
+on top of TCP gets that THIS ONE peer is gone (as opposed to the server
+itself shutting down, below, which sends an untagged msg_eof meaning
+everyone is gone). Objects that carry per-connection state across a
+sequence of peers (WebSocket's handshake flag, Router's sniffed mode,
+a Bridge's login) key it off Conn and reset just that Conn's entry on
+this, not the Enable-driven shutdown below.
 
-Payloads are null terminated strings for now, like the rest of the
-flow: fine for text protocols, a binary payload needs a length carried
-beside the data node.
+Enable=0 is a full shutdown, not a pause: every connection's socket
+closes, the listening socket closes, an untagged (Conn 0, meaning
+"everyone") msg_eof goes out Out, and the polling task is not re-armed,
+so the object stops holding the program open. This is the wiring for a
+timed server: connect a pulse to Enable and the falling edge shuts it
+down.
 
-Client mode and multiple connections are still to come, the reference
-TCPObject.c has the connecting state machine and the ring pattern.
+Payloads carry a Length property beside the data (SetValueStrLen/
+GetValueLen in node.c) so embedded NULs survive - needed once anything
+binary sits on top of this, a WebSocket frame's masking key being the
+first example. A plain text payload with no Length property falls back
+to strlen(), same as before.
+
+Client mode is still to come, the reference TCPObject.c has the
+connecting state machine for it.
 
 */
 
 #define TCP_CHUNK_SIZE 2048
 #define POLL_MS 10
 
+/* one accepted peer - local->conns is the head of a linked list of      */
+/* these, the "ring" TCPObject.c's own comments describe, minus the      */
+/* single-connection shortcut its accept path took                       */
+typedef struct Connection
+{
+	int    fd;
+	buff   sendbuf;
+	int    peerClosed;	/* peer half-closed (recv==0); finish draining sendbuf, don't discard it */
+	long   id;		/* never 0 and never reused - 0 is reserved to mean "every connection" */
+	struct Connection *next;
+} Connection;
+
 typedef struct InstanceData
 {
-	int     listenfd;
-	int     clientfd;
-	buff    sendbuf;
-	TaskObj task;
-	int     active;
-	int     enabled;
-	int     scheduled;
+	int        listenfd;
+	Connection *conns;
+	long       nextConnId;
+	TaskObj    task;
+	int        active;
+	int        enabled;
+	int        scheduled;
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -79,7 +116,7 @@ void Tcp_SetNonBlocking(int fd)
 	fcntl(fd, F_SETFL, O_NONBLOCK);
 }
 
-/* scheduler callback: accept, receive, send, re-arm */
+/* scheduler callback: accept everyone waiting, service every connection, re-arm */
 int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 {
 	char buffer[TCP_CHUNK_SIZE + 1];
@@ -90,6 +127,7 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 	struct sockaddr_in peer;
 	socklen_t peerlen;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+	Connection *conn, **link;
 
 	if (reason == task_deactivate)
 		return rtrn_handled;
@@ -99,74 +137,124 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 
 	local->scheduled = 0;
 
-	/* accept a waiting connection if we have none */
-	if (local->clientfd < 0)
+	/* accept every connection currently waiting, not just one - several  */
+	/* can show up between poll ticks, and the listening socket itself    */
+	/* never stops listening to service them                              */
+	for (;;)
 	{
 		peerlen = sizeof(peer);
 		fd = accept(local->listenfd, (struct sockaddr *)&peer, &peerlen);
-		if (fd >= 0)
-		{
-			Tcp_SetNonBlocking(fd);
-			local->clientfd = fd;
-			DebugPrint ( "TCP accepted a connection.", __FILE__, __LINE__, OBJMSGHANDLING);
-		}
+		if (fd < 0)
+			break;
+
+		Tcp_SetNonBlocking(fd);
+
+		conn = malloc(sizeof(Connection));
+		conn->fd = fd;
+		conn->sendbuf = buffCreate(4 * TCP_CHUNK_SIZE);
+		conn->peerClosed = 0;
+		conn->id = ++local->nextConnId;
+		conn->next = local->conns;
+		local->conns = conn;
+
+		DebugPrint ( "TCP accepted a connection.", __FILE__, __LINE__, OBJMSGHANDLING);
 	}
 
-	/* receive: each recv becomes one message out the Out port */
-	if (local->clientfd >= 0)
+	/* service every accepted connection */
+	link = &local->conns;
+	while (*link)
 	{
-		bytes = recv(local->clientfd, buffer, TCP_CHUNK_SIZE, 0);
+		conn = *link;
 
-		if (bytes > 0)
+		/* receive: each recv becomes one message out the Out port,   */
+		/* tagged with which connection it came from                  */
+		if (conn->fd >= 0)
 		{
-			buffer[bytes] = 0;
+			bytes = recv(conn->fd, buffer, TCP_CHUNK_SIZE, 0);
+
+			if (bytes > 0)
+			{
+				/* binary-safe: recv'd bytes may contain embedded NULs (a  */
+				/* WebSocket masking key, for instance) - the exact count  */
+				/* travels as a Length property beside the data itself     */
+				chunk = NewNode(STRING);
+				SetName(chunk, "Data");
+				SetValueStrLen(chunk, buffer, bytes);
+				SetPropInt(chunk, "Length", bytes);
+				SetPropLong(chunk, "Conn", conn->id);
+				SndMsg(instance, "Out", msg_send, chunk);
+				DelNode(chunk);
+			}
+			else if (bytes == 0)
+			{
+				/* the peer half-closed (their write side; recv==0 is EOF on   */
+				/* OUR read side, nothing more about their read side) - a      */
+				/* client that finishes sending before reading its response    */
+				/* (nc -q does exactly this) is completely ordinary, not gone. */
+				/* Closing outright here would abandon whatever is still       */
+				/* queued in sendbuf mid-transfer. Only the drain step below,  */
+				/* once sendbuf is actually empty, closes for real.            */
+				conn->peerClosed = 1;
+			}
+			else if (errno != EAGAIN && errno != EWOULDBLOCK)
+			{
+				close(conn->fd);
+				conn->fd = -1;
+				conn->peerClosed = 1;	/* fall through: close-and-remove below, sendbuf is moot with fd gone */
+				DebugPrint ( "TCP receive error, connection dropped.", __FILE__, __LINE__, ERROR);
+			}
+		}
+
+		/* drain this connection's own send buffer to its peer */
+		if (conn->fd >= 0 && buffGetLength(conn->sendbuf) > 0)
+		{
+			length = buffGetBlockFromTail(conn->sendbuf, &block, TCP_CHUNK_SIZE);
+			if (length)
+			{
+				sent = send(conn->fd, block, length, 0);
+
+				if (sent < 0)
+				{
+					if (errno == EAGAIN || errno == EWOULDBLOCK)
+						buffGetUndoTail(conn->sendbuf, length);
+					else
+					{
+						close(conn->fd);
+						conn->fd = -1;
+						conn->peerClosed = 1;
+						DebugPrint ( "TCP send error, connection dropped.", __FILE__, __LINE__, ERROR);
+					}
+				}
+				else if ((unsigned int)sent < length)
+				{
+					/* put the unsent part back at the front */
+					buffGetUndoTail(conn->sendbuf, length - sent);
+				}
+			}
+		}
+
+		/* the peer half-closed (or errored) and everything queued for it */
+		/* has now gone out - safe to actually close, tell downstream just */
+		/* this one connection is done, and drop it from the list          */
+		if (conn->peerClosed && (conn->fd < 0 || buffGetLength(conn->sendbuf) == 0))
+		{
+			if (conn->fd >= 0)
+				close(conn->fd);
 
 			chunk = NewNode(STRING);
 			SetName(chunk, "Data");
-			SetValueStr(chunk, buffer);
-			SndMsg(instance, "Out", msg_send, chunk);
+			SetPropLong(chunk, "Conn", conn->id);
+			SndMsg(instance, "Out", msg_eof, chunk);
 			DelNode(chunk);
-		}
-		else if (bytes == 0)
-		{
-			/* peer closed, go back to listening */
-			close(local->clientfd);
-			local->clientfd = -1;
+
+			*link = conn->next;
+			buffDestroy(conn->sendbuf);
+			free(conn);
 			DebugPrint ( "TCP peer closed the connection.", __FILE__, __LINE__, OBJMSGHANDLING);
+			continue;
 		}
-		else if (errno != EAGAIN && errno != EWOULDBLOCK)
-		{
-			close(local->clientfd);
-			local->clientfd = -1;
-			DebugPrint ( "TCP receive error, connection dropped.", __FILE__, __LINE__, ERROR);
-		}
-	}
 
-	/* drain the send buffer to the peer */
-	if (local->clientfd >= 0 && buffGetLength(local->sendbuf) > 0)
-	{
-		length = buffGetBlockFromTail(local->sendbuf, &block, TCP_CHUNK_SIZE);
-		if (length)
-		{
-			sent = send(local->clientfd, block, length, 0);
-
-			if (sent < 0)
-			{
-				if (errno == EAGAIN || errno == EWOULDBLOCK)
-					buffGetUndoTail(local->sendbuf, length);
-				else
-				{
-					close(local->clientfd);
-					local->clientfd = -1;
-					DebugPrint ( "TCP send error, connection dropped.", __FILE__, __LINE__, ERROR);
-				}
-			}
-			else if ((unsigned int)sent < length)
-			{
-				/* put the unsent part back at the front */
-				buffGetUndoTail(local->sendbuf, length - sent);
-			}
-		}
+		link = &conn->next;
 	}
 
 	AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
@@ -175,11 +263,18 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 	return rtrn_handled;
 }
 
-/* subscription callback: buffer whatever arrives, the poll task sends it */
+/* subscription callback: buffer whatever arrives, the poll task sends it. */
+/* A Conn property picks one connection; absent or 0 broadcasts to every   */
+/* connected peer - what a Bridge's own shared-view event traffic wants,   */
+/* so every viewer sees the same thing, while a targeted reply (an HTTP    */
+/* response, a WebSocket handshake) reaches only the peer that asked.      */
 int Tcp_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	char * str;
+	int length;
+	long connId;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+	Connection *conn;
 
 	if (!local || !local->active)
 		return rtrn_dropped;
@@ -187,9 +282,33 @@ int Tcp_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	if (message != msg_send)
 		return rtrn_dropped;
 
+	/* a Length property means the sender already knows its exact byte  */
+	/* count (raw bytes that may hold embedded NULs, a WebSocket frame  */
+	/* for instance) - fall back to strlen for a plain text message     */
 	str = GetValueStr(data);
-	if (str && str[0])
-		buffAdd(local->sendbuf, str, strlen(str));
+	length = GetPropInt(data, "Length");
+	if (!length && str)
+		length = strlen(str);
+
+	if (!str || length <= 0)
+		return rtrn_handled;
+
+	connId = GetPropLong(data, "Conn");
+
+	if (connId)
+	{
+		for (conn = local->conns; conn; conn = conn->next)
+			if (conn->id == connId)
+			{
+				buffAdd(conn->sendbuf, str, length);
+				break;
+			}
+	}
+	else
+	{
+		for (conn = local->conns; conn; conn = conn->next)
+			buffAdd(conn->sendbuf, str, length);
+	}
 
 	return rtrn_handled;
 }
@@ -216,11 +335,18 @@ int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 
 		if (local->active)
 		{
-			if (local->clientfd >= 0)
+			Connection *conn, *next;
+
+			for (conn = local->conns; conn; conn = next)
 			{
-				close(local->clientfd);
-				local->clientfd = -1;
+				next = conn->next;
+				if (conn->fd >= 0)
+					close(conn->fd);
+				buffDestroy(conn->sendbuf);
+				free(conn);
 			}
+			local->conns = NULL;
+
 			if (local->listenfd >= 0)
 			{
 				close(local->listenfd);
@@ -230,8 +356,8 @@ int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 			local->active = 0;
 			SetPropInt(instance, "State", Stopping);
 
-			/* the stream is over for everyone downstream, and the */
-			/* poll task, already armed, sees active 0 and stops    */
+			/* untagged (Conn 0): every connection is gone, not just one, */
+			/* and the poll task, already armed, sees active 0 and stops  */
 			SndMsg(instance, "Out", msg_eof, NULL);
 
 			DebugPrint ( "TCP server shut down by its Enable line.", __FILE__, __LINE__, OBJMSGHANDLING);
@@ -309,8 +435,8 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InstanceData * local = malloc(sizeof(InstanceData));
 
 	local->listenfd = -1;
-	local->clientfd = -1;
-	local->sendbuf = buffCreate(4 * TCP_CHUNK_SIZE);
+	local->conns = NULL;
+	local->nextConnId = 0;
 	local->task = NULL;
 	local->active = 0;
 	local->enabled = 1;
@@ -319,7 +445,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "TCP");
 	SetPropInt(instance, "LocalPort", 8080);
+	WatchableProp(instance, "LocalPort");
 	SetPropInt(instance, "State", Starting);
+	WatchableProp(instance, "State");
 	SetPropInt(instance, "Out", 0);		/* received bytes go out here */
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Tcp_Activate);
@@ -345,12 +473,19 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	if (local)
 	{
-		if (local->clientfd >= 0)
-			close(local->clientfd);
+		Connection *conn, *next;
+
+		for (conn = local->conns; conn; conn = next)
+		{
+			next = conn->next;
+			if (conn->fd >= 0)
+				close(conn->fd);
+			buffDestroy(conn->sendbuf);
+			free(conn);
+		}
+
 		if (local->listenfd >= 0)
 			close(local->listenfd);
-		if (local->sendbuf)
-			buffDestroy(local->sendbuf);
 		free(local);
 	}
 
@@ -374,6 +509,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	PublishProp(ClassSelf, "LocalPort", "data", PROP_TEXTBOX, "8080");
+	PublishProp(ClassSelf, "Enable",    "in",   PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "In",        "in",   PROP_NULL, "");
+	PublishProp(ClassSelf, "Out",       "out",  PROP_NULL, "");
+	PublishProp(ClassSelf, "State",     "data", PROP_LED, "1");
+
 	return rtrn_handled;
 }
 
@@ -392,6 +533,8 @@ void _init()
 	SetName(temp, "TCP");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c660");
+	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);

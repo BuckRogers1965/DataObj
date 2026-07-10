@@ -1,0 +1,523 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #1e1f24;
+  color: #e6e6e6;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#topbar {
+  padding: 10px 16px;
+  background: #16171b;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+#title {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+}
+
+#status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: auto;
+}
+#status.status-connecting { background: #4a3f1a; color: #e6c66b; }
+#status.status-ready      { background: #1a4a2a; color: #6be69a; }
+#status.status-error      { background: #4a1a1a; color: #e66b6b; }
+
+/* topbar chrome: File/Mode, real MenuButton instances (Chrome, object.c), */
+/* rendered with the exact same makeMenuButtonEl a dropped-in MenuButton   */
+/* anywhere else uses - "eat our own dog food"                             */
+#topbar-menus {
+  display: flex;
+  gap: 6px;
+}
+
+.menu-button-wrap {
+  position: relative;
+}
+
+.menu-button {
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.menu-button:hover { background: #2e313c; }
+
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 120px;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 20;
+  overflow: hidden;
+}
+
+.menu-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.menu-item:hover { background: #2c4a6b; }
+
+#main {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* the container primitive - a real, resizable panel. The Palette is just  */
+/* one of these (Mode="Clone", Deletable="0", set server-side - object.c),  */
+/* nothing here is palette-specific.                                       */
+.view-panel {
+  position: absolute;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
+  min-height: 60px;
+  z-index: 5;
+}
+
+.view-header {
+  padding: 5px 8px;
+  background: #2c2f38;
+  border-bottom: 1px solid #3a3d47;
+  border-radius: 8px 8px 0 0;
+  cursor: move;
+  font-weight: 600;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* position:relative so children (position:absolute, their own X/Y) place  */
+/* themselves relative to THIS view, not the top-level canvas - no          */
+/* coordinate math needed anywhere, just correct DOM nesting                */
+.view-inner {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
+}
+
+.view-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #6b9fe6 50%);
+}
+
+#canvas-wrap {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: auto;
+  background:
+    linear-gradient(#26282f 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, #26282f 1px, transparent 1px) 0 0 / 24px 24px,
+    #1a1b20;
+}
+
+#wires {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+#wires line {
+  stroke: #6b9fe6;
+  stroke-width: 2;
+}
+#wires line.pending {
+  stroke: #e6c66b;
+  stroke-dasharray: 4 3;
+}
+
+#canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+
+/* a composite instance's own absolutely-positioned wrapper - the icon and  */
+/* the panel are both children of this, only one visible at a time (see      */
+/* registerCard's setExpanded); dragging/deleting/cloning/copying always       */
+/* target this element, regardless of which child is currently showing.      */
+.instance-wrap {
+  position: absolute;
+}
+
+.node-box {
+  width: 190px;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  font-size: 12px;
+}
+
+.node-collapse {
+  cursor: pointer;
+  color: #999;
+  padding: 0 2px;
+  font-weight: 700;
+}
+.node-collapse:hover { color: #e6e6e6; }
+
+/* the collapsed face of a composite instance - class name, its own live    */
+/* State LED, and a small dot per bare port (see registerCard) - clicking    */
+/* it (Operate mode, or whatever a containing View's Mode override resolves  */
+/* to) opens the panel; nothing else is different about it, right down to     */
+/* the port dots being the identical alias+prop the panel's own rows use.    */
+.instance-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  padding: 8px 12px;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.instance-icon:hover { border-color: #6b9fe6; }
+
+.instance-icon-label {
+  font-weight: 600;
+}
+
+.icon-dot.in {
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.icon-dot.out {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* a widget primitive standing on its own - a control (or a dot, for LED) */
+/* and a label, nothing else: no panel, no header, no ports                */
+.widget-atom {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  cursor: move;
+  user-select: none;
+}
+
+/* Connect-mode-only wiring dots, pinned to the edge they wire from/to -   */
+/* absolutely positioned against the atom itself so they don't disturb its  */
+/* centered control+label column. Visibility/pointer-events still come      */
+/* entirely from the shared .port-dot rules (mode-connect gating).          */
+.widget-atom-dot.in {
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.widget-atom-dot.out {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.widget-atom-label {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widget-atom input[type=text],
+.widget-atom input[type=number] {
+  width: 70px;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  cursor: auto;
+}
+.widget-atom input[type=range] {
+  width: 70px;
+  cursor: auto;
+}
+.widget-atom input[type=checkbox] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.widget-atom .activate-btn {
+  width: auto;
+  padding: 4px 14px;
+}
+
+.node-header {
+  padding: 6px 8px;
+  background: #2c2f38;
+  border-bottom: 1px solid #3a3d47;
+  border-radius: 8px 8px 0 0;
+  cursor: move;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.node-title {
+  font-weight: 600;
+}
+.node-class {
+  color: #888;
+  font-size: 10px;
+}
+
+.node-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  flex: 0 0 auto;
+}
+.node-led.state-0 { background: #666; }              /* Stopping */
+.node-led.state-1 { background: #e6c66b; }            /* Starting */
+.node-led.state-2 { background: #6be69a; box-shadow: 0 0 6px #6be69a; } /* Running */
+
+.node-body {
+  padding: 6px 8px;
+}
+
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.prop-row label {
+  width: 62px;
+  flex: 0 0 62px;
+  color: #999;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prop-row input[type=text] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+.prop-row input[type=checkbox] {
+  margin: 0;
+}
+.prop-row input[type=range] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.prop-row input[type=number] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.widget-readout {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #8bb8e6;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.port-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #bbb;
+}
+.port-row.out { justify-content: flex-end; }
+
+/* a bare wiring row (no control of its own, e.g. Reader's "Out") is        */
+/* clutter outside Connect mode and disappears entirely; a row that also     */
+/* carries a real control (Enable's checkbox) stays, since that control is   */
+/* normal operation, not wiring - full connect mode, no permanent dots.      */
+.port-row:not(.has-control) { display: none; }
+body.mode-connect .port-row:not(.has-control) { display: flex; }
+
+.node-footer {
+  padding: 6px 8px;
+  border-top: 1px solid #3a3d47;
+}
+
+button.activate-btn {
+  width: 100%;
+  background: #2c4a6b;
+  color: #d6e6f6;
+  border: 1px solid #3a5f8a;
+  border-radius: 4px;
+  padding: 4px 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+button.activate-btn:hover { background: #35597f; }
+
+
+/* Mode governs how the canvas responds to the mouse (applyMode, app.js) - */
+/* one body class at a time (mode-operate/mode-move/mode-connect/etc),      */
+/* synced from a real property so every window is in the same mode.        */
+
+/* every rendered control (however it's nested) is a real, separately       */
+/* wireable object - see wireable() in app.js. Outside Operate mode, the     */
+/* control itself (whatever wireable() wrapped) stops taking clicks so a     */
+/* checkbox can't be toggled by accident while wiring/moving/deleting; the    */
+/* wrapper stays fully clickable regardless of what ancestor it sits in, so   */
+/* that click reaches the wire/move/delete gesture instead of being lost.     */
+body:not(.mode-operate) .wireable > * {
+  pointer-events: none;
+}
+.wireable {
+  display: inline-flex;
+  align-items: center;
+  pointer-events: auto;
+}
+.prop-row .wireable,
+.port-row .wireable {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wireable > input,
+.wireable > .widget-readout,
+.wireable > .node-led {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wireable.armed,
+.widget-atom.armed {
+  outline: 2px solid #e6c66b;
+  outline-offset: 2px;
+}
+
+/* a top-level widget atom's own control isn't wrapped in .wireable (the    */
+/* whole atom is already the click target - see registerWidgetAtom), it      */
+/* just needs the same "control itself doesn't eat the click" treatment      */
+body:not(.mode-operate) .widget-atom-control {
+  pointer-events: none;
+}
+
+body.mode-move .instance-icon,
+body.mode-move .node-box,
+body.mode-move .widget-atom,
+body.mode-move .view-panel {
+  cursor: move;
+}
+
+body.mode-delete .instance-icon,
+body.mode-delete .node-box,
+body.mode-delete .widget-atom,
+body.mode-delete .view-panel {
+  cursor: crosshair;
+}
+body.mode-delete .instance-icon:hover,
+body.mode-delete .node-box:hover,
+body.mode-delete .widget-atom:hover,
+body.mode-delete .view-panel:hover {
+  outline: 2px solid #e66b6b;
+  outline-offset: 2px;
+}
+
+body.mode-clone .instance-icon,
+body.mode-clone .node-box,
+body.mode-clone .widget-atom,
+body.mode-clone .view-panel {
+  cursor: copy;
+}
+body.mode-clone .instance-icon:hover,
+body.mode-clone .node-box:hover,
+body.mode-clone .widget-atom:hover,
+body.mode-clone .view-panel:hover {
+  outline: 2px solid #6be69a;
+  outline-offset: 2px;
+}
+
+body.mode-copy .instance-icon,
+body.mode-copy .node-box,
+body.mode-copy .widget-atom,
+body.mode-copy .view-panel {
+  cursor: copy;
+}
+body.mode-copy .instance-icon:hover,
+body.mode-copy .node-box:hover,
+body.mode-copy .widget-atom:hover,
+body.mode-copy .view-panel:hover {
+  outline: 2px dashed #8bb8e6;
+  outline-offset: 2px;
+}
+
+/* a View with its own Mode override (the Palette, permanently, via         */
+/* BuildPalette - object.c) needs everything inside it to stop taking        */
+/* normal clicks too, the same reason body:not(.mode-operate) does - but     */
+/* scoped to the view, not the whole page, since the session's own mode      */
+/* might genuinely be Operate while this one view overrides it.              */
+.view-inner[data-view-mode]:not([data-view-mode=""]):not([data-view-mode="Operate"]) .wireable > * {
+  pointer-events: none;
+}
+.view-inner[data-view-mode]:not([data-view-mode=""]):not([data-view-mode="Operate"]) .widget-atom-control {
+  pointer-events: none;
+}

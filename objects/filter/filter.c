@@ -147,6 +147,13 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* the settings panel: what Filter looks like, built once per instance */
+static ControlSpec FilterControls[] = {
+	{ "Textbox", "Mode",  10, 10, 80, 20 },
+	{ "LED",     "State", 10, 40, 20, 20 },
+	{ "Button",  NULL,    10, 70, 60, 20 },
+};
+
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance, port;
@@ -160,7 +167,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "Filter");
 	SetPropStr(instance, "Mode", "all");
+	WatchableProp(instance, "Mode");
 	SetPropInt(instance, "State", Starting);
+	WatchableProp(instance, "State");
 	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Filter_Activate);
@@ -175,7 +184,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Filter_OnEnable);
 
+	InitPosition(instance);
+
 	RegisterInstance(class, instance);
+
+	BuildSettingsView(instance, FilterControls, sizeof(FilterControls) / sizeof(FilterControls[0]));
 
 	return rtrn_handled;
 }
@@ -204,6 +217,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	PublishPosition(ClassSelf);
+
+	PublishProp(ClassSelf, "Mode",   "data", PROP_TEXTBOX, "all");
+	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
+	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+
 	return rtrn_handled;
 }
 
@@ -222,6 +243,8 @@ void _init()
 	SetName(temp, "Filter");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c650");
+	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);

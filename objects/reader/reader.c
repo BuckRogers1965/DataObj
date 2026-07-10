@@ -172,6 +172,15 @@ int Reader_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* the settings panel: what Reader looks like, built once per instance -  */
+/* see BuildSettingsView's doc comment (object.h) and the VNOS panel-     */
+/* builder pattern (objects/demo/pulsegenerator/pulsepb.c) it comes from  */
+static ControlSpec ReaderControls[] = {
+	{ "Textbox", "Filename", 10, 10, 140, 20 },
+	{ "LED",     "State",    10, 40,  20, 20 },
+	{ "Button",  NULL,       10, 70,  60, 20 },
+};
+
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance, port;
@@ -186,8 +195,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "Reader");
 	SetPropStr(instance, "Filename", "");
+	WatchableProp(instance, "Filename");
 	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
 	SetPropInt(instance, "State", Starting);
+	WatchableProp(instance, "State");
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Reader_Activate);
 
@@ -196,7 +207,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Reader_OnEnable);
 
+	InitPosition(instance);
+
 	RegisterInstance(class, instance);
+
+	BuildSettingsView(instance, ReaderControls, sizeof(ReaderControls) / sizeof(ReaderControls[0]));
 
 	return rtrn_handled;
 }
@@ -225,6 +240,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	PublishPosition(ClassSelf);
+
+	PublishProp(ClassSelf, "Filename", "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "Out",      "out",  PROP_NULL, "");
+	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+
 	return rtrn_handled;
 }
 
@@ -243,6 +265,8 @@ void _init()
 	SetName(temp, "Reader");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c639");
+	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);

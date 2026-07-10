@@ -49,6 +49,8 @@ struct Data {
 		
 	int str_set;
 	char * str_val;
+	int str_len;	/* actual byte count of str_val - may exceed strlen() if it */
+			/* holds bytes set through SetStrLen, which allows embedded NULs */
 
 	int int_set;
 	int int_val;
@@ -166,6 +168,7 @@ char * dup (char * val){
 void clear (DataObj this){
 	this->str_set=0;
 	this->str_val=NULL;
+	this->str_len=0;
 	this->int_set=0;
 	this->int_val=0;
 	this->hex_set=0;
@@ -228,6 +231,7 @@ int convert(DataObj this, int type){
 			if (!this->str_set) {
 				this->str_val = Int2Str(this->int_val);
 				this->str_set=1;
+				this->str_len = strlen(this->str_val);
 			}
 			return 1;
 		case HEX:
@@ -252,6 +256,7 @@ int convert(DataObj this, int type){
 			if (!this->str_set) {
 				this->str_val = dup(this->hex_val);
 				this->str_set = 1;
+				this->str_len = strlen(this->str_val);
 			}
 			return 1;
 		case INTEGER:
@@ -277,6 +282,7 @@ int convert(DataObj this, int type){
 			if (!this->str_set) {
 				this->str_val=Real2Str(this->real_val);
 				this->str_set=1;
+				this->str_len = strlen(this->str_val);
 			}
 			return 1;
 		case INTEGER:
@@ -302,6 +308,7 @@ int convert(DataObj this, int type){
 			if (!this->str_set) {
 				this->str_val=Long2Str(this->long_val);
 				this->str_set=1;
+				this->str_len = strlen(this->str_val);
 			}
 			return 1;
 		default:
@@ -350,6 +357,12 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 	} else {
 		clearAll(this);
 
+		/* whichever type is being written becomes the authoritative     */
+		/* representation convert() derives everything else from - without */
+		/* this, a DataObj created as one type and later Set as another   */
+		/* keeps converting from its stale birth type and finds no path   */
+		this->type = type;
+
 		switch (type){
 
 		case INTEGER:
@@ -361,6 +374,7 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 			if (!this->str_val)
 				return 0;
 			this->str_set = 1;
+			this->str_len = strlen(val);
 			return 1;
 		case HEX:
 			this->hex_val = dup(val);
@@ -375,6 +389,7 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 		case LONG:
 			this->long_val=(long)val;
 			this->long_set=1;
+			return 1;
 		default:
 			return 0;
 		}
@@ -421,6 +436,13 @@ NewData(int type){
 	return ret_val;
 }
 
+int
+GetDataType(DataObj this){
+	if (!this)
+		return STRING;
+	return this->type;
+}
+
 char *
 GetStr(DataObj this){
 	if (!this)
@@ -434,6 +456,39 @@ SetStr(DataObj this, char * value){
 	if (!this)
 		return 0;
 	return this->call(this, SET, STRING, value);
+}
+
+/*
+ * Like SetStr, but copies exactly `length` bytes via memcpy instead of
+ * stopping at the first NUL - for payloads that may contain embedded NULs
+ * (raw TCP bytes, WebSocket frames). Bypasses the call() dispatch since
+ * that interface has no way to pass a length through; str_val still gets
+ * a defensive trailing NUL so GetStr's text view keeps working, but only
+ * GetStrLen bytes are guaranteed to be the real content.
+ */
+int
+SetStrLen(DataObj this, char * value, int length){
+	if (!this || length < 0)
+		return 0;
+	clearAll(this);
+	this->type = STRING;
+	this->str_val = malloc(length + 1);
+	if (!this->str_val)
+		return 0;
+	memcpy(this->str_val, value, length);
+	this->str_val[length] = 0;
+	this->str_len = length;
+	this->str_set = 1;
+	return 1;
+}
+
+int
+GetStrLen(DataObj this){
+	if (!this)
+		return 0;
+	if (!this->str_set)
+		convert(this, STRING);
+	return this->str_len;
 }
 
 int
