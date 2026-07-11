@@ -383,7 +383,28 @@ int WS_OnWire(NodeObj instance, MsgId message, NodeObj data)
 		/* just this one peer is gone (or, Conn 0, every peer is - the   */
 		/* server shut down) - either way the next connection to use a   */
 		/* given Conn id (never reused) still needs its own handshake    */
+		buff b = (buff) GetConnState(local->connRecvBufs, connId);
+		if (b)
+		{
+			/* Conn ids are never reused, so this buff will never be   */
+			/* looked up again - without this every connection left    */
+			/* its accumulating recv buffer behind for the life of the */
+			/* instance (InstanceEnd was the only thing freeing them)  */
+			buffDestroy(b);
+			SetConnState(local->connRecvBufs, connId, 0);
+		}
 		SetConnState(local->connHandshakes, connId, 0);
+
+		/* forward the close out Out tagged with its Conn - eof is just  */
+		/* another message, and downstream owns per-connection state too  */
+		/* (the Bridge deletes the dead connection's hidden helper        */
+		/* widgets when it sees this - see Bridge_ConnClosed, bridge.c)   */
+		{
+			NodeObj chunk = NewNode(STRING);
+			SetName(chunk, "Frame");
+			SetPropLong(chunk, "Conn", connId);
+			SndMsg(instance, "Out", msg_eof, chunk);
+		}
 		return rtrn_handled;
 	}
 

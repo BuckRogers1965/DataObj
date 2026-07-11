@@ -313,7 +313,18 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	if (hidden)
+	{
 		SetPropInt(inst, "_Hidden", 1);
+
+		/* hidden helpers are one client's chrome, not shared session   */
+		/* state - remember which connection built this one so its      */
+		/* close can take it along (Bridge_ConnClosed). User-built      */
+		/* session objects are never stamped and survive their          */
+		/* creator's browser closing, which is the point of the shared  */
+		/* session.                                                      */
+		if (local->replyConn)
+			SetPropLong(inst, "_OwnerConn", local->replyConn);
+	}
 
 	SetPropLong(local->aliases, alias, (long) inst);
 	Bridge_InstanceEvent(instance, alias, classname, GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
@@ -509,14 +520,36 @@ void Bridge_DoActivate(NodeObj instance, InstanceData *local, NodeObj command)
  * enough to make the alias unresolvable without touching node shape,
  * the same pragmatic non-cleanup UnregisterLibrary already accepts.
  *
- * Known gap: anything still Connect()ed TO this instance keeps a
- * Subscriber pointing at now-freed memory - there is no backward-link
- * or prop-chain removal to clean that up yet. Low risk today (nothing
- * builds deep wiring before Connect mode exists to see it), but real;
- * the client-side fix is that Connect mode only ever draws a wire
- * between two instances it currently knows about (app.js), so a stale
- * subscriber at least never becomes a stale wire on screen.
+ * Stale-subscriber gap, closed July 2026: DeleteInstance itself now
+ * scrubs every Subscriber registry-wide that points at the dying
+ * instance (ScrubRegistrySubscriptions, object.c) and cancels its
+ * queued sends, so wiring TO a deleted instance no longer dangles.
+ * The one thing DeleteInstance can't know about is taps - they're
+ * bare bookkeeping nodes, not registered instances - so they're freed
+ * here first (Bridge_FreeTaps).
  */
+
+/* free every tap subscribed to any of inst's ports, ahead of deleting  */
+/* inst - the Subscriber props pointing at them die with the instance,  */
+/* and a tap is a bare node nothing else owns (Bridge_MakeTap mallocs   */
+/* it, no registry, no parent), so each one would otherwise leak        */
+void Bridge_FreeTaps(NodeObj inst)
+{
+	NodeObj port, sub, tap;
+
+	for (port = GetNextProp(inst); port; port = GetNextSibling(port))
+	{
+		for (sub = GetNextProp(port); sub; sub = GetNextSibling(sub))
+		{
+			if (!CmpName(sub, "Subscriber"))
+				continue;
+			tap = (NodeObj) GetPropLong(sub, "Instance");
+			if (tap && CmpName(tap, "Tap"))
+				DelNode(tap);
+		}
+	}
+}
+
 void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *alias, *escAlias, *deletable;
@@ -539,6 +572,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
+	Bridge_FreeTaps(inst);
 	SetPropLong(local->aliases, alias, 0);
 	DeleteInstance(inst);
 
@@ -551,6 +585,108 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 	SetValueStr(chunk, buf);
 	SetPropLong(chunk, "Conn", 0);
 	SndMsg(instance, "Out", msg_send, chunk);
+}
+
+/*
+ * A connection died (msg_eof arrived on In, tagged with its Conn id -
+ * forwarded up from TCP through WebSocket, or straight from TCP on the
+ * raw-JSON bridges; Conn 0 means the transport itself shut down, every
+ * peer at once): delete every instance that connection owned. Only
+ * hidden helper widgets ever carry _OwnerConn (Bridge_Create), and the
+ * client rebuilds its helpers from scratch on its next page load
+ * anyway - before this, every reconnect left a full set of them behind
+ * forever, the memory growth visible on each browser reload.
+ *
+ * Each deletion also compacts the flow log: every recorded command that
+ * mentions the dead helper's alias is removed, so the session record
+ * (and session.flow on the next Save) stays the size of what actually
+ * exists instead of accreting one dead create-instance per page load
+ * forever. Compacting rather than appending a delete-instance is safe
+ * here precisely because a swept instance was created live through
+ * Bridge_OnIn (that's where _OwnerConn comes from), so its create is
+ * guaranteed to be in this same log - not true of instances that
+ * arrived via Load, which is why Bridge_Delete still records deletes.
+ */
+
+/* drop every command in the flow log that references alias in any of   */
+/* the fields the wire protocol uses to name an instance                */
+void Bridge_CompactFlow(InstanceData *local, char *alias)
+{
+	NodeObj entry, next;
+	char *fields[] = { "as", "instance", "from", "to" };
+	int i, hit;
+	char *v;
+
+	if (!local->flow)
+		return;
+
+	entry = GetChild(local->flow);
+	while (entry)
+	{
+		next = GetNextSibling(entry);
+
+		hit = 0;
+		for (i = 0; i < 4 && !hit; i++)
+		{
+			v = GetPropStr(entry, fields[i]);
+			if (v && strcmp(v, alias) == 0)
+				hit = 1;
+		}
+
+		if (hit)
+		{
+			DelSibling(entry);
+			DelNode(entry);
+		}
+
+		entry = next;
+	}
+}
+
+void Bridge_ConnClosed(NodeObj instance, InstanceData *local, long connId)
+{
+	NodeObj entry, next, inst, chunk;
+	long owner;
+	char *alias, *escAlias;
+	char buf[256];
+
+	entry = GetNextProp(local->aliases);
+	while (entry)
+	{
+		next = GetNextSibling(entry);
+
+		alias = GetNameStr(entry);
+		inst  = (NodeObj) GetValueLong(entry);
+
+		/* live entries only: zeroing an alias prepends a shadow (see    */
+		/* Bridge_Delete), so an entry only counts while it is still     */
+		/* what a lookup of its own name resolves to - anything older    */
+		/* holds a stale pointer that must not be dereferenced           */
+		if (inst && alias && (NodeObj) GetPropLong(local->aliases, alias) == inst)
+		{
+			owner = GetPropLong(inst, "_OwnerConn");
+			if (owner && (connId == 0 || owner == connId))
+			{
+				Bridge_FreeTaps(inst);
+				SetPropLong(local->aliases, alias, 0);
+				DeleteInstance(inst);
+
+				escAlias = JsonEscapeStr(alias);
+				snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escAlias);
+				free(escAlias);
+
+				chunk = NewNode(STRING);
+				SetName(chunk, "Event");
+				SetValueStr(chunk, buf);
+				SetPropLong(chunk, "Conn", 0);
+				SndMsg(instance, "Out", msg_send, chunk);
+
+				Bridge_CompactFlow(local, alias);
+			}
+		}
+
+		entry = next;
+	}
 }
 
 /*
@@ -670,13 +806,46 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 		prop = GetNextSibling(prop);
 	}
 
-	tap = Bridge_MakeTap(instance, inst, alias, port, eventType);
-
-	if (!Connect(inst, port, tap, "In"))
+	/* reconnects re-subscribe to everything they can see, so without    */
+	/* this check every page load stacked another identical tap on the   */
+	/* same port - N taps after N reloads, N copies of every event to    */
+	/* every client, N-1 of them leaked. Taps broadcast (Conn 0), so     */
+	/* one tap per port+event already serves every client at once.       */
+	tap = NULL;
 	{
-		DelNode(tap);
-		Bridge_Error(instance, "subscribe", "connect failed");
-		return;
+		NodeObj portNode, sub, cand;
+		char *tPort, *tEvent;
+
+		portNode = GetPropNode(inst, port);
+		for (sub = portNode ? GetNextProp(portNode) : NULL; sub; sub = GetNextSibling(sub))
+		{
+			if (!CmpName(sub, "Subscriber"))
+				continue;
+			cand = (NodeObj) GetPropLong(sub, "Instance");
+			if (!cand || !CmpName(cand, "Tap"))
+				continue;
+			if ((NodeObj) GetPropLong(cand, "Owner") != instance)
+				continue;
+			tPort  = GetPropStr(cand, "Port");
+			tEvent = GetPropStr(cand, "EventType");
+			if (tPort && strcmp(tPort, port) == 0 && tEvent && strcmp(tEvent, eventType) == 0)
+			{
+				tap = cand;
+				break;
+			}
+		}
+	}
+
+	if (!tap)
+	{
+		tap = Bridge_MakeTap(instance, inst, alias, port, eventType);
+
+		if (!Connect(inst, port, tap, "In"))
+		{
+			DelNode(tap);
+			Bridge_Error(instance, "subscribe", "connect failed");
+			return;
+		}
 	}
 
 	/* subscribing is truth-on-demand, not just a promise of future deltas -  */
@@ -925,10 +1094,16 @@ int Bridge_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	if (!local || !local->active || !local->enabled)
 		return rtrn_dropped;
 
-	/* msg_eof: nothing to reset here anymore - the alias table is shared */
-	/* for this Bridge instance's whole lifetime (see the doc comment     */
-	/* above InstanceData), and a Conn id is never reused, so there is no */
-	/* stale per-connection state that closing one peer needs to clear    */
+	/* a peer closed: take its owned (hidden helper) instances with it -  */
+	/* see Bridge_ConnClosed. The alias table itself stays for the        */
+	/* Bridge's whole lifetime and Conn ids are never reused, so this is  */
+	/* the only per-connection state there is to clear.                    */
+	if (message == msg_eof)
+	{
+		Bridge_ConnClosed(instance, local, GetPropLong(data, "Conn"));
+		return rtrn_handled;
+	}
+
 	if (message != msg_send)
 		return rtrn_dropped;
 

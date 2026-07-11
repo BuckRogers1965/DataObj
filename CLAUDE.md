@@ -24,8 +24,10 @@ Three governing principles:
 - **Everything is a message**: objects interact only by messages routed through
   subscriptions between ports. Delivery is in-process pointer-passing (function
   pointer call with a node handle — no copies, no serialization, no thread
-  handoffs), so the decoupling is essentially free and the system stays highly
-  responsive.
+  handoffs) **queued through the scheduler**: `SndMsg` costs one task insert,
+  and each hop is dispatched breadth-first from `ExecTasks`, so downstream work
+  never nests inside the sender's call stack and the decoupling is essentially
+  free.
 - **The app is an empty view**: the executable is a hollow host; the objects ARE
   the functionality, and an *application* is nothing but a set of objects plus
   their wiring (eventually a flow file — `CreateTestApp()` hard-coding is interim
@@ -49,8 +51,12 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.
 ./framework          # or ./framework.sh
 ```
 
-CLI options (parsed in `main.c:ProcessCmdLine`): `-h` help, `-d` daemonize, `-l <logfile>`,
-`-p` print node tree on exit, `-t` run unit tests, `-v <0-9>` verbose level.
+CLI options (parsed in `main.c:ProcessCmdLine`): `-h` help, `-d` daemonize,
+`-ip <address>` web GUI bind address (127.0.0.1 local-only, default 0.0.0.0),
+`-l <logfile>`, `-p` print node tree on exit, `-port <n>` web GUI port (default
+8083), `-t` run unit tests, `-v <0-9>` verbose level. The ip/port land as `ip`/
+`port` properties on Main; CreateTestApp feeds them to the web flow's TCP as
+`LocalAddr`/`LocalPort`.
 
 ### Build structure — two sides, one library
 
@@ -222,13 +228,19 @@ get sub-properties (properties on properties) carrying a `graphics` widget type
   list, children, and siblings. **Properties are themselves nodes**, so properties can
   have properties (used by the sub-property/widget mechanism above). This is the
   single data structure the whole system is built on.
-- **Scheduler** (`sched.c/h`, `timer.c`): a TaskList of delayed/immediate callbacks.
-  `MainLoop()` updates time, adjusts delays, and runs due tasks. When the task count
-  hits zero, Main's `State` is set to `Stopping` and the process exits. Objects are
-  expected to drive ongoing behavior by scheduling tasks.
+- **Scheduler** (`sched.c/h`, `timer.c`): a TaskList of delayed/immediate callbacks,
+  **microsecond resolution** (task_entry stores seconds+micros; `AddTaskDelay`'s
+  third arg is micros, `AddTaskMilli` converts). Every SndMsg rides through here,
+  so it's tuned for bursts: a task_entry freelist (`GetTask`/`RemoveTask` recycle
+  instead of malloc/free per message) and an `insertHint` making same-timestamp
+  inserts O(1) amortized. `MainLoop()` updates time, runs due tasks, and sleeps
+  via `SchedNextWakeMicros()` — exactly until the next due task, **capped at 1ms**
+  because all I/O is polled (a longer sleep is a floor on input latency; the cap
+  is what makes dragged sliders feel smooth). When the task count hits zero,
+  Main's `State` is set to `Stopping` and the process exits.
 - **Object layer** (`object.c/h`): registration callbacks described above plus
-  `CreateContainer` / `CreateObject` / `Connect` — the user-facing composition API.
-  These are still skeletal (Connect doesn't yet wire subscriptions).
+  `CreateContainer` / `CreateObject` / `Connect` / `SndMsg` / `DeleteInstance` —
+  the user-facing composition API, all working.
 - **DebugPrint** (`DebugPrint.c/h`): all logging goes through
   `DebugPrint(msg, __FILE__, __LINE__, type)` with types `PROG_FLOW`, `ERROR`,
   `CMDLINEOPTS`, `REGISTER`, `OBJMSGHANDLING`. The `-v` level gates output
@@ -275,9 +287,9 @@ The near-term milestone is the first end-to-end dataflow, composed in
   lives as sub-nodes on `Out` — see the `AddSubscription()` stub in object.c).
   Data flows as **routed messages**, not stored property values: the reader's task
   reads one chunk, wraps it in a data node, and sends it as a message out its `Out`
-  port; the routing layer (the not-yet-built `SndMsg`/`Propagate` referenced in
-  out.c and main.c comments) walks `Out`'s subscription list and delivers that
-  message to every subscriber's handler as `(instance, msgid, data)`. The
+  port; the routing layer (`SndMsg`/`DispatchMsg` in object.c) walks `Out`'s
+  subscription list and delivers that message to every subscriber's handler as
+  `(instance, msgid, data)`. The
   `rtrn_handled`/`rtrn_propagate`/`rtrn_dropped` codes in callback.h are the
   per-delivery verdicts. `Out` is a named output port — it exists to hold the
   subscription list and give `Connect()` an endpoint; chunks flow through it, they
@@ -299,13 +311,31 @@ This milestone is implemented and **verified working** (July 2026): with a test.
 in place, `./framework` copies it to test.txt.back through the Reader → Writer
 message flow and exits on its own when the flow drains. How the pieces landed:
 
-- **Routing** (`object.c`): `SndMsg(instance, "Out", msgid, data)` walks the
-  `Subscriber` sub-nodes on the named port and calls each subscriber's handler as
-  `handler(sinkInstance, msgid, data)`. `Connect()` builds the subscription: it
-  reads the handler the sink registered as an `OnMsg` long-property on its input
-  port and records `{Instance, Callback}` on the source port via
-  `AddSubscription()`. Delivery is synchronous — sinks must copy payloads before
-  returning; the source deletes the chunk node after `SndMsg` returns.
+- **Routing** (`object.c`): `SndMsg(instance, "Out", msgid, data)` queues a
+  `MsgEnvelope` on the scheduler (one `AddTaskNow`, nothing more); when the task
+  fires, `DispatchMsg` walks the `Subscriber` sub-nodes on the named port and
+  calls each subscriber's handler as `handler(sinkInstance, msgid, data)`.
+  `Connect()` builds the subscription: it reads the handler the sink registered
+  as an `OnMsg` long-property on its input port and records `{Instance,
+  Callback}` on the source port via `AddSubscription()`.
+  **Ownership contract (changed July 2026 with queued dispatch): SndMsg takes
+  ownership of `data`** — DispatchMsg frees it after the last subscriber; the
+  sender must NOT DelNode it after SndMsg (the old synchronous contract said
+  the opposite). Handlers still run synchronously *within* a delivery and must
+  copy anything they keep; anything forwarding a message it received sends a
+  fresh copy, since the original belongs to the upstream sender's own queued
+  delivery (see Filter_OnIn). DispatchMsg re-reads the port's live Subscriber
+  list at delivery time, not a snapshot.
+- **Deletion safety** (`object.c`): because messages can be in flight when
+  either end dies, `DeleteInstance` runs `ScrubRegistrySubscriptions` (strips
+  every Subscriber entry targeting the dead instance, registry-wide and
+  recursively through sub-properties) and `CancelPendingSends` (blanks the
+  outPort on any queued envelope the dead instance sent, including the
+  mid-tick runnow bucket). Both fix ASan-confirmed use-after-frees. Supporting
+  primitives added for this: `RemoveProp(owner, prop)` in node.c (unlink
+  without freeing; props have no parent back-pointer, hence the owner arg),
+  `DelData` in data.c, and `DelNode` now frees the name/value DataObjs every
+  node owns (was a two-struct leak per deleted node).
 - **Instantiation** (`object.c`): `CreateObject()` finds the class via
   `FindClass()` (walks RegObjList → libraries → classes), calls its
   `InstanceStart` pointer, and returns the new instance which `RegisterInstance()`
@@ -336,8 +366,9 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   Reader's `Out` alongside the Writer — two subscribers on one port, exercising
   fan-out.
 - **Filter** (`objects/filter/filter.c`): a mid-flow object — `In` handler tests
-  each message and forwards passers out its own `Out` via a nested synchronous
-  `SndMsg` (same data node, no copy; chains are just nested calls). `Mode`
+  each message and forwards passers out its own `Out` with a fresh **copy** of
+  the data node (the received original is owned by the upstream sender's queued
+  delivery; chains are hops through the scheduler, one queued send each). `Mode`
   property: `all` / `change` (dedupe against last seen) / `ones` / `zeros`.
   `msg_eof` always passes, even through a disabled filter, so streams can always
   finish downstream. No tasks; never holds the program open.
@@ -360,18 +391,22 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   itself, as the Enable handlers do. (Ports are created as STRING props where
   state is mirrored, since `SetValueInt(node, 0)` is a no-op — see below.)
 - **TCP** (`objects/network/tcp.c`, built as `tcp.object`; `TCPObject.c` in the
-  same directory stays as the uncompiled VNOS reference): server mode, one
-  connection at a time. `LocalPort` property; received bytes go out `Out` (one
-  message per recv), messages on `In` are buffered (dyn buff) and drained to the
-  peer by the 10ms polling task; peer close returns it to listening.
+  same directory stays as the uncompiled VNOS reference): server mode, any
+  number of simultaneous connections (a linked ring serviced by one shared
+  polling task, each message tagged with a `Conn` property identifying its
+  connection — TCPObject's ring pattern, done right). `LocalPort` picks the
+  port; `LocalAddr` (optional) picks the interface to bind — e.g. `127.0.0.1`
+  for local-only; absent/empty means all interfaces (this is what the `-ip`
+  option feeds). Received bytes go out `Out` (one message per recv), messages
+  on `In` are buffered (dyn buff) and drained to the peer by the polling task;
+  peer close returns it to listening.
   `Enable=0` is a **full shutdown**, not a pause: sockets close, `msg_eof` goes
   out `Out`, the poll task stops re-arming (re-enabling does not restart it —
   activation is one-shot). A timed server is therefore just a Pulse wired to
   `Enable`; note Pulse emits rising-then-falling, so a 30s lifetime uses
   `Interval=15000, Count=1` (falling edge at 30s). `SO_REUSEADDR` is set;
-  `SIGPIPE` is ignored (set in ClassStart). Client mode / multi-connection are
-  still to come — the ring pattern and connecting state machine live in
-  TCPObject.c.
+  `SIGPIPE` is ignored (set in ClassStart). Client mode is still to come — the
+  connecting state machine lives in TCPObject.c.
 - **msg_eof** added to callback.h (appended, existing values unshifted).
 - **Bug fixed in sched.c**: `AddTaskDelay` never stored its `data` argument
   (`task->data` stayed uninitialized; `ExecTasks` passes it to the callback).
