@@ -52,6 +52,7 @@ NodeObj GetPropNode (NodeObj node, char * name);
 NodeObj GetNextProp (NodeObj node);
 void    SetProp     (NodeObj node, char * name, int value);
 void    AddProp     (NodeObj node, NodeObj prop);
+void    RemoveProp  (NodeObj owner, NodeObj prop);
 void    SetPropInt  (NodeObj node, char * Name, int Value);
 int     GetPropInt  (NodeObj node, char * Name); 
 void    SetPropStr  (NodeObj node, char * Name, char * Value); 

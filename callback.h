@@ -1,4 +1,6 @@
 
+#ifndef Callback_H_
+#define Callback_H_
 
 // the function parameter for message passing
 // instance, data, and msg_id
@@ -21,4 +23,6 @@ enum { msg_change=0, msg_update, msg_initialize, msg_send, msg_eof };
 //
 
 enum { rtrn_handled=0, rtrn_propagate, rtrn_dropped };
+
+#endif
 

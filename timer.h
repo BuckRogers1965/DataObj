@@ -14,8 +14,12 @@ Should only ever be updated by the main thread just before the scheduled tasks a
 int
 TimeUpdate ();
 
+/* microsecond resolution, not millisecond - sched.c is the only caller,   */
+/* and needs real precision now that SndMsg queues every message through   */
+/* it (many same-tick sends need distinguishable timestamps, and the main  */
+/* loop's adaptive sleep needs a real due-time to sleep up to)             */
 void
-GetCurrentTime (unsigned long * seconds, unsigned long * milliseconds);
+GetCurrentTime (unsigned long * seconds, unsigned long * microseconds);
 
 char *
 FormatDate(time_t theTime);

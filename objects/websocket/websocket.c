@@ -214,7 +214,6 @@ void WS_SendRaw(NodeObj instance, char *port, char *text, int length, long connI
 	SetPropInt(chunk, "Length", length);
 	SetPropLong(chunk, "Conn", connId);
 	SndMsg(instance, port, msg_send, chunk);
-	DelNode(chunk);
 }
 
 int WS_TryHandshake(NodeObj instance, InstanceData *local, char *request, long connId)

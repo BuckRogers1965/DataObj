@@ -183,7 +183,6 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 				SetPropInt(chunk, "Length", bytes);
 				SetPropLong(chunk, "Conn", conn->id);
 				SndMsg(instance, "Out", msg_send, chunk);
-				DelNode(chunk);
 			}
 			else if (bytes == 0)
 			{
@@ -245,7 +244,6 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 			SetName(chunk, "Data");
 			SetPropLong(chunk, "Conn", conn->id);
 			SndMsg(instance, "Out", msg_eof, chunk);
-			DelNode(chunk);
 
 			*link = conn->next;
 			buffDestroy(conn->sendbuf);
@@ -371,6 +369,7 @@ int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	int port, one = 1;
+	char * bindaddr;
 	struct sockaddr_in addr;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
@@ -397,6 +396,22 @@ int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	/* LocalAddr picks the interface to listen on (e.g. 127.0.0.1); */
+	/* absent or empty means all interfaces, same as 0.0.0.0        */
+	bindaddr = GetPropStr(instance, "LocalAddr");
+	if (bindaddr && strlen(bindaddr))
+	{
+		addr.sin_addr.s_addr = inet_addr(bindaddr);
+		if (addr.sin_addr.s_addr == INADDR_NONE)
+		{
+			DebugPrint ( "TCP has an unusable LocalAddr.", __FILE__, __LINE__, ERROR);
+			close(local->listenfd);
+			local->listenfd = -1;
+			return rtrn_dropped;
+		}
+	}
+
 	addr.sin_port = htons(port);
 
 	if (bind(local->listenfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)

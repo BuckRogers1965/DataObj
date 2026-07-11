@@ -76,7 +76,6 @@ int Button_Activate(NodeObj instance, MsgId message, NodeObj data)
 	SetName(chunk, "Press");
 	SetValueStr(chunk, "1");
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 
 	return rtrn_handled;
 }

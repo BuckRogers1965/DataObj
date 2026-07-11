@@ -78,10 +78,9 @@ int Reader_ReadChunk(NodeObj instance, NodeObj data, int reason)
 		SetName(chunk, "Data");
 		SetValueStr(chunk, buffer);
 
-		/* delivery is synchronous, subscribers copy what they  */
-		/* need before this returns, so the chunk node can go   */
+		/* SndMsg takes ownership of chunk and frees it once it's */
+		/* been delivered to every subscriber                     */
 		SndMsg(instance, "Out", msg_send, chunk);
-		DelNode(chunk);
 	}
 
 	if (feof(local->file) || ferror(local->file))

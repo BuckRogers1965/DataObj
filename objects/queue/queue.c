@@ -143,7 +143,6 @@ int Queue_OnClock(NodeObj instance, MsgId message, NodeObj data)
 	SetName(entry, "Data");
 	SetValueStr(entry, payload);
 	SndMsg(instance, "Out", msg_send, entry);
-	DelNode(entry);
 
 	return rtrn_handled;
 }

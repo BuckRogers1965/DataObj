@@ -12,6 +12,11 @@ ExecTasks();
 void
 AdjustDelayedTasks(TaskList list, unsigned long offset);
 
+/* microseconds until the list's next due task - 0 if something is already */
+/* due or the list is empty. See sched.c for the full comment.             */
+unsigned long
+SchedNextWakeMicros(TaskList list);
+
 TaskList
 CreateList();
 
@@ -33,8 +38,31 @@ AddTaskSec(TaskObj task, int delay_seconds, FuncPtr func, int mesgid, NodeObj da
 int
 RemoveTask(TaskObj task);
 
+TaskObj
+GetTask(TaskList list);
+
 int
 DeleteTask(TaskObj task);
+
+/* minimal read-only introspection for walking a list's pending tasks   */
+/* from outside sched.c - used by object.c to find and neutralize a     */
+/* queued message dispatch whose source instance is being deleted       */
+/* (TaskList/TaskObj stay opaque; these just expose the chain and the   */
+/* two fields needed to identify a task without exposing task_entry)    */
+TaskObj
+GetTaskListHead(TaskList list);
+
+TaskList
+GetTaskListRunnow(TaskList list);
+
+TaskObj
+GetTaskNext(TaskObj task);
+
+FuncPtr
+GetTaskCallback(TaskObj task);
+
+NodeObj
+GetTaskData(TaskObj task);
 
 void
 SchedTest ();

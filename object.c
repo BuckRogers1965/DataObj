@@ -6,6 +6,7 @@
 #include "object.h"
 #include "DebugPrint.h"
 #include "callback.h"
+#include "sched.h"
 
 NodeObj RegObjList;
 
@@ -496,32 +497,147 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	return ConnectToProperty(fromNode, from, toNode, to) != NULL;
 }
 
-/* route one message out a port to every subscriber of that port */
+/* one of these rides on a queued dispatch task between SndMsg (which   */
+/* builds it) and DispatchMsg (which reads it back out when the task    */
+/* comes due) - see the comment on SndMsg for why sends are queued.     */
+/* Not to be confused with DeliverMsg below, which is a separate,       */
+/* synchronous, single-target mechanism (bypasses the subscriber list   */
+/* entirely) used by Router and SetOrDeliverProp.                       */
+typedef struct {
+	NodeObj instance;	/* the source instance that owns outPort - see  */
+				/* DeleteInstance's CancelPendingSends, which    */
+				/* matches on this to catch a queued send whose  */
+				/* source is deleted before delivery fires        */
+	NodeObj outPort;
+	MsgId   message;
+	NodeObj data;
+	TaskObj task;
+} MsgEnvelope;
+
+/* scheduler callback: actually walk the subscriber list and deliver.   */
+/* Runs from ExecTasks, so every hop is a flat call from the scheduler, */
+/* never nested inside the sender's own call stack the way a direct    */
+/* SndMsg call used to be                                               */
+static int
+DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
+
+	MsgEnvelope * env = (MsgEnvelope *) envArg;
+	NodeObj sub, toInstance;
+	msgobj handler;
+
+	/* outPort is NULL if CancelPendingSends neutralized this envelope   */
+	/* because its source instance was deleted before this fired - the   */
+	/* port (and everything else the deleted instance owned) is already  */
+	/* gone, so there is nothing left to walk, just the payload to free  */
+	if (reason == task_callback && env->outPort) {
+		sub = GetNextProp(env->outPort);
+		while (sub) {
+			if (CmpName(sub, "Subscriber")) {
+				handler    = (msgobj)  GetPropLong(sub, "Callback");
+				toInstance = (NodeObj) GetPropLong(sub, "Instance");
+				if (handler)
+					handler(toInstance, env->message, env->data);
+			}
+			sub = GetNextSibling(sub);
+		}
+	}
+
+	if (reason == task_callback)
+		/* fired normally through ExecTasks, which does not free this  */
+		/* task itself - park it for GetTask to hand back out          */
+		RemoveTask(env->task);
+	/* else task_deactivate: the list was torn down with this message  */
+	/* still queued - DeleteTask frees the task_entry itself right     */
+	/* after this returns, so it must not go back on the reuse pool    */
+
+	if (env->data)
+		DelNode(env->data);
+
+	free(env);
+
+	return rtrn_handled;
+}
+
+/* called by DeleteInstance before it frees deadInstance: a message      */
+/* deadInstance already sent may still be queued (SndMsg only costs an   */
+/* AddTaskNow, delivery happens later), and that queued envelope holds a */
+/* raw pointer to one of deadInstance's own ports - about to be freed    */
+/* along with the rest of it. Walk every pending DispatchMsg task (both  */
+/* the main list and the in-flight runnow bucket - a message can be      */
+/* mid-delivery-batch, due this tick but not yet run, when a callback    */
+/* earlier in the same batch deletes its source) and blank out outPort   */
+/* on any envelope whose source is deadInstance, so DispatchMsg finds    */
+/* nothing to walk instead of dereferencing freed memory.                */
+static void CancelPendingSends(NodeObj deadInstance)
+{
+	TaskList tasks = ObjGetTaskList();
+	TaskObj task;
+	MsgEnvelope * env;
+
+	for (task = GetTaskListHead(tasks); task; task = GetTaskNext(task)) {
+		if (GetTaskCallback(task) != (FuncPtr)DispatchMsg)
+			continue;
+		env = (MsgEnvelope *) GetTaskData(task);
+		if (env->instance == deadInstance)
+			env->outPort = NULL;
+	}
+
+	for (task = GetTaskListHead(GetTaskListRunnow(tasks)); task; task = GetTaskNext(task)) {
+		if (GetTaskCallback(task) != (FuncPtr)DispatchMsg)
+			continue;
+		env = (MsgEnvelope *) GetTaskData(task);
+		if (env->instance == deadInstance)
+			env->outPort = NULL;
+	}
+}
+
+/* route one message out a port to every subscriber of that port.       */
+/*                                                                       */
+/* Delivery is queued through the scheduler rather than called          */
+/* synchronously: SndMsg only ever costs one AddTaskNow, and actual     */
+/* delivery (walking the subscriber list, calling each handler) happens */
+/* later from ExecTasks.  This keeps causality flat - a message and     */
+/* everything it causes downstream can never nest inside the call stack */
+/* of the object that sent it, so a dense subscriber web (or a filter/  */
+/* queue chain that re-sends what it receives) can't starve the         */
+/* scheduler by monopolizing the stack; every hop gets its own turn     */
+/* through ExecTasks, breadth-first, in the order it was caused.        */
+/*                                                                       */
+/* SndMsg takes ownership of `data`: DispatchMsg frees it once every     */
+/* subscriber has had it, so callers must drop the DelNode they used to  */
+/* call right after SndMsg under the old synchronous contract - and      */
+/* anything that forwards a message it received (rather than a freshly   */
+/* built one) must build its own copy to send onward, since the original */
+/* is owned by the sender's own queued delivery, not by whoever received */
+/* it (see Filter_OnIn for the pattern).                                 */
 int
 SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 
-	NodeObj outPort, sub, toInstance;
-	msgobj handler;
-	int delivered = 0;
+	NodeObj outPort;
+	MsgEnvelope * env;
+	TaskObj task;
 
 	outPort = GetPropNode(instance, port);
-	if (!outPort)
+	if (!outPort) {
+		if (data)
+			DelNode(data);
 		return 0;
-
-	sub = GetNextProp(outPort);
-	while (sub) {
-		if (CmpName(sub, "Subscriber")) {
-			handler    = (msgobj)  GetPropLong(sub, "Callback");
-			toInstance = (NodeObj) GetPropLong(sub, "Instance");
-			if (handler) {
-				handler(toInstance, message, data);
-				delivered++;
-			}
-		}
-		sub = GetNextSibling(sub);
 	}
 
-	return delivered;
+	env = malloc(sizeof(MsgEnvelope));
+	env->instance = instance;
+	env->outPort = outPort;
+	env->message = message;
+	env->data    = data;
+
+	task = GetTask(ObjGetTaskList());
+	env->task = task;
+
+	/* env rides through the generic NodeObj slot - not a real node,   */
+	/* DispatchMsg is the only thing that ever reads it back out       */
+	AddTaskNow(task, (FuncPtr)DispatchMsg, message, (NodeObj)env);
+
+	return 1;
 }
 
 /*
@@ -1448,6 +1564,53 @@ UnRegisterInstance(NodeObj class, NodeObj Instance){
 	//DelNode(node);
 }
 
+/* recursively remove any "Subscriber" property under `node` (properties   */
+/* can themselves carry sub-properties, e.g. widget metadata) that targets */
+/* deadInstance - see DeleteInstance for why                               */
+static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
+{
+	NodeObj prop, next;
+
+	if (!node)
+		return;
+
+	prop = GetNextProp(node);
+	while (prop) {
+		next = GetNextSibling(prop);
+
+		if (CmpName(prop, "Subscriber") && (NodeObj)GetPropLong(prop, "Instance") == deadInstance) {
+			RemoveProp(node, prop);
+			DelNode(prop);
+		} else {
+			ScrubSubscriberProps(prop, deadInstance);
+		}
+
+		prop = next;
+	}
+}
+
+/* walk every live instance (library -> class -> instance, the same shape */
+/* FindClass walks) scrubbing any Subscriber entry that targets           */
+/* deadInstance - see DeleteInstance                                       */
+static void ScrubRegistrySubscriptions(NodeObj deadInstance)
+{
+	NodeObj library, class, instance;
+
+	library = GetChild(RegObjList);
+	while (library) {
+		class = GetChild(library);
+		while (class) {
+			instance = GetChild(class);
+			while (instance) {
+				ScrubSubscriberProps(instance, deadInstance);
+				instance = GetNextSibling(instance);
+			}
+			class = GetNextSibling(class);
+		}
+		library = GetNextSibling(library);
+	}
+}
+
 /* the actual, working removal UnRegisterInstance's own stub never did -  */
 /* DelSibling first (unlinks Instance from its class's child chain without */
 /* touching the instances after it), then DelNode (frees just this one,   */
@@ -1457,6 +1620,20 @@ UnRegisterInstance(NodeObj class, NodeObj Instance){
 /* scheduled tasks outlived the node that owned them: DelNode would free  */
 /* the instance out from under a still-armed task, and the next time it   */
 /* fired it would hand the callback a dangling NodeObj as its data        */
+/*                                                                         */
+/* ScrubRegistrySubscriptions and CancelPendingSends close two related    */
+/* holes from the same root cause: messages are queued (SndMsg/           */
+/* DispatchMsg in this file), not delivered synchronously, so a message   */
+/* can still be in flight - already queued but not yet delivered - when   */
+/* either end of it is deleted out from under it. DispatchMsg re-reads    */
+/* its outPort's live Subscriber list at delivery time rather than a      */
+/* frozen snapshot, so stripping every Subscriber entry that points at    */
+/* this instance is enough to make an already-queued delivery TO it find  */
+/* nothing and safely skip it; CancelPendingSends handles the other       */
+/* direction, a message this instance already sent whose envelope still   */
+/* points at one of its own (about to be freed) ports. Both are confirmed */
+/* against real use-after-frees ASan caught in exactly these scenarios    */
+/* before this existed.                                                   */
 void DeleteInstance(NodeObj instance)
 {
 	NodeObj class;
@@ -1472,6 +1649,9 @@ void DeleteInstance(NodeObj instance)
 		if (instanceEnd)
 			instanceEnd(instance, msg_update, NULL);
 	}
+
+	ScrubRegistrySubscriptions(instance);
+	CancelPendingSends(instance);
 
 	DelSibling(instance);
 	DelNode(instance);

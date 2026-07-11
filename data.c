@@ -436,6 +436,18 @@ NewData(int type){
 	return ret_val;
 }
 
+/* free a data object created by NewData - str_val/hex_val included.  Every */
+/* NodeObj owns two of these (name, value) that NewNode allocates but never */
+/* frees on its own; DelNode calls this for both when a node is deleted     */
+void
+DelData(DataObj this){
+	if (!this)
+		return;
+
+	clearAll(this);
+	free(this);
+}
+
 int
 GetDataType(DataObj this){
 	if (!this)

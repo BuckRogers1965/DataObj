@@ -44,14 +44,14 @@ O  cached time in timer.c
 */
 
 static unsigned long global_seconds = 0;
-static unsigned long global_milliseconds = 0;
+static unsigned long global_microseconds = 0;
 static unsigned long global_start_seconds = 0;
 
 
 void
-GetCurrentTime (unsigned long * seconds, unsigned long * milliseconds){
+GetCurrentTime (unsigned long * seconds, unsigned long * microseconds){
 	*seconds = global_seconds;
-	*milliseconds = global_milliseconds;
+	*microseconds = global_microseconds;
 }
 
 time_t
@@ -98,7 +98,7 @@ TimeUpdate (){
 	}
 
 	global_seconds  = tv.tv_sec;
-	global_milliseconds = tv.tv_usec/1000;
+	global_microseconds = tv.tv_usec;
 
         offset = global_seconds - prevSecs;
 

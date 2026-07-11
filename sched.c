@@ -43,13 +43,18 @@ struct task_entry {
 
    TaskList owner;	 /* which list is this entry in? */
 
-			 /* Scheduled time to run */
+			 /* Scheduled time to run - micros, not millisecs: */
+			 /* SndMsg queues every message through here now,  */
+			 /* millisecond resolution was too coarse to tell   */
+			 /* same-tick sends apart or to size an adaptive    */
+			 /* main-loop sleep accurately (see AddTaskDelay,   */
+			 /* SchedNextWakeMicros)                             */
    unsigned long seconds;
-   unsigned long millisecs;
+   unsigned long micros;
 
 			 /* Start Time */
    unsigned long start_seconds;
-   unsigned long start_millisecs;
+   unsigned long start_micros;
 
    FuncPtr  callback;    /* Task active function */
    NodeObj  data;       /* passed to func as fData */
@@ -78,6 +83,19 @@ struct task_list {
 	/* never has to malloc a scratch list per tick                      */
 	TaskList runnow;
 
+	/* freelist of spare, currently-unowned task_entries (linked via    */
+	/* ->next, same as runnow's chain) - GetTask/RemoveTask recycle     */
+	/* through here so short-lived one-shot tasks (like queued message  */
+	/* dispatch) don't malloc/free a task_entry per use                 */
+	TaskPtr pool;
+
+	/* last task successfully inserted by AddTaskDelay - lets a burst of  */
+	/* same-timestamp inserts (0-delay messages queued in the same tick,  */
+	/* now the common case since SndMsg routes every send this way) find  */
+	/* their spot in O(1) amortized instead of walking the whole run from */
+	/* head every time; see AddTaskDelay for the correctness argument     */
+	TaskPtr insertHint;
+
 } task_list;
 
 
@@ -94,6 +112,8 @@ CreateList(){
 	list->entry_count = 0;
 
 	list->runnow = NULL;
+	list->pool = NULL;
+	list->insertHint = NULL;
 
 	return list;
 }
@@ -153,6 +173,46 @@ RemoveTaskFromList(TaskPtr task){
 	task->linked = 0;
 }
 
+/* hand back a task_entry: reuse a spare from the pool if one exists,      */
+/* otherwise malloc a fresh one - the counterpart to RemoveTask, which     */
+/* returns a retired task to this same pool instead of freeing it          */
+TaskPtr
+GetTask(TaskList list){
+
+	TaskPtr task;
+
+	if (list->pool) {
+		task = list->pool;
+		list->pool = task->next;
+		task->next = NULL;
+		return task;
+	}
+
+	return CreateTask(list);
+}
+
+/* retire a task without freeing it: unlink it from wherever it's         */
+/* currently scheduled (safe no-op if it isn't linked) and park it on     */
+/* owner's pool for GetTask to hand back out later. Callers that are      */
+/* mid-teardown (DeleteTask, which frees the task_entry itself right      */
+/* after calling back with task_deactivate) must not use this - it would  */
+/* recycle a task_entry that's about to be freed out from under the pool  */
+int
+RemoveTask(TaskPtr task){
+
+	TaskList list = task->owner;
+
+	RemoveTaskFromList(task);
+
+	task->callback = NULL;
+	task->data = NULL;
+
+	task->next = list->pool;
+	list->pool = task;
+
+	return 1;
+}
+
 
 int
 DeactivateTask(TaskPtr task){
@@ -170,8 +230,14 @@ DeactivateTask(TaskPtr task){
 int
 DeleteTask(TaskPtr task){
 
+	TaskList owner = task->owner;
+
 	/* Remove task from any list it is in */
 	DeactivateTask(task);
+
+	/* about to free task - insertHint must never point at freed memory   */
+	if (owner->insertHint == task)
+		owner->insertHint = NULL;
 
 	free(task);
 
@@ -200,6 +266,15 @@ DeleteList(TaskList list){
 	if (list->runnow)
 		free(list->runnow);
 
+	/* pool holds retired-but-reusable task_entries (RemoveTask) - unlike */
+	/* runnow these are real, if inert, allocations and must be walked    */
+	current = list->pool;
+	while (current) {
+		next = current->next;
+		free(current);
+		current = next;
+	}
+
 	free (list);
 
 	list = NULL;
@@ -207,21 +282,52 @@ DeleteList(TaskList list){
 	return 1;
 }
 
-/* adds a task to the list with a delay */
+/* minimal read-only introspection, see sched.h - lets a caller walk a  */
+/* list's pending tasks (both the main chain and the in-flight runnow   */
+/* bucket) without exposing struct task_entry/task_list themselves      */
+TaskPtr
+GetTaskListHead(TaskList list){
+	if (!list)
+		return NULL;
+	return list->head;
+}
+
+TaskList
+GetTaskListRunnow(TaskList list){
+	return list->runnow;
+}
+
+TaskPtr
+GetTaskNext(TaskPtr task){
+	return task->next;
+}
+
+FuncPtr
+GetTaskCallback(TaskPtr task){
+	return task->callback;
+}
+
+NodeObj
+GetTaskData(TaskPtr task){
+	return task->data;
+}
+
+/* adds a task to the list with a delay. delay_micros is microseconds, not */
+/* milliseconds - see the task_entry.micros comment                        */
 int
-AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func, int mesgid, NodeObj data){
+AddTaskDelay(TaskPtr task, int delay_seconds, int delay_micros, FuncPtr func, int mesgid, NodeObj data){
 
 
 
-//	printf("Add task with delay of % d seconds %d milliseconds\n", delay_seconds, delay_millisecs);
+//	printf("Add task with delay of % d seconds %d microseconds\n", delay_seconds, delay_micros);
 	TaskList list = task->owner;
 	TaskPtr current;
 
 	unsigned long seconds;
-	unsigned long millisecs;
+	unsigned long micros;
 
 	/* Get the time */
-	GetCurrentTime(&seconds, &millisecs);
+	GetCurrentTime(&seconds, &micros);
 
 	task->callback = func;
 
@@ -231,18 +337,18 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func,
 
 	delay_seconds = delay_seconds + seconds;
 
-	delay_millisecs = delay_millisecs + millisecs;
+	delay_micros = delay_micros + micros;
 
 
-	if (delay_millisecs > 1000) {
-		delay_millisecs = delay_millisecs - 1000;
+	if (delay_micros > 1000000) {
+		delay_micros = delay_micros - 1000000;
 		delay_seconds += 1;
 	}
-//	printf("\n\n*** Schedule %d %d\n\n", seconds, millisecs);
-//	printf("\n\n*** Schedule %d %d\n\n", delay_seconds, delay_millisecs);
+//	printf("\n\n*** Schedule %d %d\n\n", seconds, micros);
+//	printf("\n\n*** Schedule %d %d\n\n", delay_seconds, delay_micros);
 
 	task->seconds = delay_seconds;
-	task->millisecs = delay_millisecs;
+	task->micros = delay_micros;
 	task->next=NULL;
 	task->prev=NULL;
 	task->linked=1;
@@ -252,13 +358,37 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func,
 	if (!list->head) {
 		list->head = list->tail = task;
 		task->next = task->prev = NULL;
+		list->insertHint = task;
 		return 1;
 	}
 
-	/* insert the task into the time task list in the order that it is sleeping */
-   
-	for ( current = list->head; current && (current->seconds < delay_seconds 
-		|| (current->seconds == delay_seconds && current->millisecs < delay_millisecs)); ) {
+	/* insert the task into the time task list in the order that it is sleeping. */
+	/* <= on the microsecond tie-break, not < : this must walk PAST every       */
+	/* existing entry at the same timestamp, not stop in front of the first     */
+	/* one, or same-tick insertions land in LIFO order instead of FIFO. That    */
+	/* was invisible when only recurring task rearms went through here (they    */
+	/* essentially never collide on the exact microsecond), but SndMsg now      */
+	/* queues every message this way, and a burst of same-tick sends - a        */
+	/* client's WebSocket commands forwarded back-to-back, notably - reversing  */
+	/* their own delivery order is a real, user-visible correctness bug, not    */
+	/* just a tie-break nicety.                                                  */
+	/*                                                                            */
+	/* Walking that past-the-ties every time is O(n) per insert, though, and a   */
+	/* burst of same-tick sends is exactly what piles up many ties in a row -    */
+	/* O(n) per insert times n inserts is O(n^2) for one burst, measured at      */
+	/* over 600x slower on a 200k-message burst. insertHint remembers where the  */
+	/* last insert landed and resumes the walk from there instead of from head:  */
+	/* safe whenever the hint's timestamp is <= the new one, since every task    */
+	/* between head and the hint is then still guaranteed <= the new timestamp   */
+	/* too (the list stays sorted), and free/pool-recycle both go through paths  */
+	/* that invalidate the hint first, so it never dangles onto freed memory.    */
+	current = (list->insertHint && list->insertHint->linked
+		&& (list->insertHint->seconds < delay_seconds
+			|| (list->insertHint->seconds == delay_seconds && list->insertHint->micros <= delay_micros)))
+		? list->insertHint : list->head;
+
+	for ( ; current && (current->seconds < delay_seconds
+		|| (current->seconds == delay_seconds && current->micros <= delay_micros)); ) {
         current = current->next;
     }
 
@@ -286,6 +416,8 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func,
 		task->prev->next = task;
 	}
 
+	list->insertHint = task;
+
 	return 1;
 }
 
@@ -299,7 +431,7 @@ AddTaskNow(TaskPtr task, FuncPtr func, int mesgid, NodeObj data){
 int
 AddTaskMilli(TaskPtr task, unsigned long delay_millisecs, FuncPtr func, int mesgid, NodeObj data){
 //	printf("Add task with delay of %d milliseconds\n", (int) delay_millisecs);
-	return AddTaskDelay(task, delay_millisecs/1000, delay_millisecs%1000, func, mesgid, data);
+	return AddTaskDelay(task, delay_millisecs/1000, (delay_millisecs%1000)*1000, func, mesgid, data);
 }
 
 /* convenience function to make Add Task easier */
@@ -338,22 +470,22 @@ void
 ActivateTimedTasks(TaskList list, TaskList runnow){
 
 	unsigned long seconds;
-	unsigned long millisecs;
+	unsigned long micros;
 
 	TaskPtr current = list->head;
 	TaskPtr next= NULL;
 
 	/* Get the time */
-	GetCurrentTime(&seconds, &millisecs);
+	GetCurrentTime(&seconds, &micros);
 
-//	printf("\n\n*** Activate Time %d %d\n\n", seconds, millisecs);
+//	printf("\n\n*** Activate Time %d %d\n\n", seconds, micros);
 
 	while (current) {
-        	if ((current->seconds > seconds) || 
-				(current->seconds == seconds && current->millisecs > millisecs))
+        	if ((current->seconds > seconds) ||
+				(current->seconds == seconds && current->micros > micros))
 			break;
 
-//		printf("\n\n*** TASK Activate %d %d\n\n", current->seconds, current->millisecs);
+//		printf("\n\n*** TASK Activate %d %d\n\n", current->seconds, current->micros);
 
 		next=current->next;
 		RemoveTaskFromList(current);
@@ -414,13 +546,37 @@ ExecTasks(TaskList list){
 void
 AdjustDelayedTasks(TaskList list, unsigned long offset){
 
-	TaskPtr current = list->head; 
+	TaskPtr current = list->head;
 
 	while (current) {
 		current->seconds += offset;
 		current = current->next;
 	}
 
+}
+
+/* microseconds until list->head is due - the list stays time-sorted, so   */
+/* head is always the soonest-due entry, and this is all the main loop     */
+/* needs to sleep exactly that long instead of spinning on a fixed poll    */
+/* interval. Returns 0 if something is already due (or overdue) or if the  */
+/* list is empty - an empty list means ExecTasks is about to report 0 and  */
+/* the program is quiescing anyway, so there is nothing meaningful to wait */
+/* for.                                                                     */
+unsigned long
+SchedNextWakeMicros(TaskList list){
+
+	unsigned long seconds, micros;
+	long due;
+
+	if (!list->head)
+		return 0;
+
+	GetCurrentTime(&seconds, &micros);
+
+	due = ((long)list->head->seconds - (long)seconds) * 1000000L
+	    + ((long)list->head->micros  - (long)micros);
+
+	return (due > 0) ? (unsigned long) due : 0;
 }
 
 int
@@ -451,7 +607,7 @@ SchedTest (){
 	SetPropInt(testdata, "TestData", 1);
 
 
-	AddTaskDelay(testtask1, 5, 500, &testcallback, 1000, testdata);
+	AddTaskDelay(testtask1, 5, 500000, &testcallback, 1000, testdata);  /* 5.5s: 500000us */
 	AddTaskNow(testtask2, &testcallback, 1001, testdata);
 	AddTaskMilli(testtask3, 100, &testcallback, 1002, testdata);
 	AddTaskSec(testtask4, 10, &testcallback, 1003, testdata);

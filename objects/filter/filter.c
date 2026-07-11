@@ -14,8 +14,10 @@ Filter object: sits in the middle of a flow.
 
 Its In port subscribes to a source, and whatever passes the test is
 forwarded out its Out port to the filter's own subscribers.  Delivery
-is synchronous all the way down, so the same data node is forwarded
-without copying and a chain of filters costs a few function calls.
+is queued through the scheduler (see SndMsg in object.c), so what
+passes is copied into a fresh node rather than forwarding the one
+this handler received - that one belongs to the queued delivery that
+handed it to us, and will be freed once that delivery finishes.
 
 The Mode property picks the test:
 
@@ -104,7 +106,17 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	}
 
 	if (pass)
-		SndMsg(instance, "Out", msg_send, data);
+	{
+		/* SndMsg now queues delivery and takes ownership of what it's  */
+		/* given, freeing it once sent - data here belongs to whatever  */
+		/* queued send delivered it to us, so it must be copied rather  */
+		/* than forwarded, or two independent deliveries would each     */
+		/* try to free the same node                                    */
+		NodeObj forward = NewNode(STRING);
+		SetName(forward, "Data");
+		SetValueStr(forward, str);
+		SndMsg(instance, "Out", msg_send, forward);
+	}
 
 	return rtrn_handled;
 }

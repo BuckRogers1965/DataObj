@@ -77,7 +77,6 @@ int Pulse_Tick(NodeObj instance, NodeObj data, int reason)
 	SetName(edge, "Data");
 	SetValueStr(edge, local->next ? "1" : "0");
 	SndMsg(instance, "Out", msg_send, edge);
-	DelNode(edge);
 
 	if (local->next)
 	{

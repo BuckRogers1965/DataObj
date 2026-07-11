@@ -126,6 +126,11 @@ void DelNode(NodeObj node)
 	if (node->parent && node->parent->child == node)
 		node->parent = NULL;
 
+	/* NewNode allocates both of these; nothing else ever frees them -  */
+	/* every node deleted without this leaked two DataObj structs       */
+	DelData(node->name);
+	DelData(node->value);
+
 	free(node);
 }
 
@@ -339,6 +344,35 @@ void AddProp(NodeObj node, NodeObj prop)
 	{
 		node->props = prop;
 	}
+}
+
+/* unlink prop from owner's property chain, relinking around it - does   */
+/* NOT free it. Properties don't carry a parent back-pointer the way      */
+/* children do (AddProp never sets ->parent), so unlike DelSibling this   */
+/* needs the owner passed in explicitly. Leaves prop's own nextSib        */
+/* cleared so a caller can safely DelNode() it afterward without          */
+/* cascading into whatever property used to follow it in the chain.       */
+void RemoveProp(NodeObj owner, NodeObj prop)
+{
+	NodeObj current;
+
+	if (!owner || !prop)
+		return;
+
+	if (owner->props == prop)
+	{
+		owner->props = prop->nextSib;
+	}
+	else
+	{
+		current = owner->props;
+		while (current && current->nextSib != prop)
+			current = current->nextSib;
+		if (current)
+			current->nextSib = prop->nextSib;
+	}
+
+	prop->nextSib = NULL;
 }
 
 void AddSibling(NodeObj node, NodeObj sib)

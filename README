@@ -1,32 +1,91 @@
+DataObj / GrokThink framework
+==============================
 
-in order to find the core library you have to run this command:
+A C framework for a node-based dataflow object system. Loadable object
+modules (.object files) are discovered on disk at startup, dlopen'd, and
+register themselves into a live node tree. Everything - metadata, state,
+wiring, even function pointers - is stored as properties on nodes. It's a
+ground-up rewrite of VNOS (Singlestep Technologies, early 2000s).
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.
+Three rules the whole system is built on:
+  - Everything is a node: one tree structure holds the registry,
+    configuration, and wiring.
+  - Everything is a message: objects only ever talk to each other through
+    subscriptions between ports.
+  - The app is an empty view: the executable is a hollow host, the loaded
+    objects are the functionality. A different product is different
+    objects and a different flow, never a different binary.
 
-Then you can run the framework by typing:
-
-./framework
-
-or just run 
-
-./framework.sh 
-
-If you want help run 
-
-./framework.sh --help
-
-
-
-test
-
-
-To build:
-
-make depend
-make
-
-To clean up: 
-make clean
+See CLAUDE.md for the full architecture writeup and ROADMAP.md for where
+this is headed.
 
 
-I just fixed this so it would build and run again.  It had a problem when we switched to 64 bit OS a decade ago. 
+Build
+-----
+
+    make depend
+    make
+
+To clean up:
+
+    make clean
+
+
+Run
+---
+
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.
+    ./framework
+
+or just
+
+    ./framework.sh
+
+For help:
+
+    ./framework.sh --help
+
+Options:
+
+    -h              This help screen
+    -d              Become a server process
+    -ip <address>   Address to bind the web GUI to: 127.0.0.1 for
+                    this machine only, 0.0.0.0 to be reachable from
+                    the network (default 0.0.0.0)
+    -l <logfile>    Logfile to output debug info
+    -p              Print Main Nodes on exit
+    -port <number>  Port to serve the web GUI on (default 8083)
+    -t              Perform unit testing of library functions
+    -v <number>     Verbose level from 0 to 9, inclusive
+
+
+Web GUI
+-------
+
+`./framework` also brings up a browser-based visual canvas on
+http://localhost:8083 by default - the bind address and port are set
+with the -ip and -port options above, so e.g.
+
+    ./framework -ip 0.0.0.0 -port 8083
+
+serves the canvas to the whole LAN at http://<your-ip>:8083. Drag
+object classes out of the palette, drop them
+on the canvas, wire ports together by clicking, and watch/drive them
+through live instrument widgets (sliders, LEDs, checkboxes, VU meters,
+buttons). Every drag, wire, and value change is a real message through the
+same object graph the C side runs on - there is no separate client-side
+simulation of the flow.
+
+The whole session (every instance, wire, and property value) can be saved
+to and reloaded from a flow file (the File menu in the UI), so a canvas
+you build survives a restart.
+
+Everything on the canvas is live: chaining widgets together (e.g. a
+slider driving a dozen others in sequence) propagates each change through
+the scheduler's message queue immediately, so a rapid drag on the first
+control snaps every downstream one in lock-step with no visible lag, even
+over a plain browser WebSocket connection.
+
+There's also a raw JSON control protocol on port 8091 (and an
+authenticated variant on 8093) for driving the same object graph without
+a browser - see the Bridge section of CLAUDE.md.

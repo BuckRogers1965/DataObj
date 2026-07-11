@@ -204,7 +204,6 @@ void Bridge_InstanceEvent(NodeObj instance, char *alias, char *className, NodeOb
 	SetValueStr(chunk, buf);
 	SetPropLong(chunk, "Conn", connId);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 
 	free(buf);
 }
@@ -234,7 +233,6 @@ void Bridge_Error(NodeObj instance, char *cmd, char *message)
 	if (local)
 		SetPropLong(chunk, "Conn", local->replyConn);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 /*
@@ -451,7 +449,6 @@ static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias,
 	SetName(chunk, "Event");
 	SetValueStr(chunk, buf);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
@@ -554,7 +551,6 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 	SetValueStr(chunk, buf);
 	SetPropLong(chunk, "Conn", 0);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 /*
@@ -612,7 +608,6 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 	SetName(chunk, "Event");
 	SetValueStr(chunk, buf);
 	SndMsg(owner, "Out", msg_send, chunk);
-	DelNode(chunk);
 
 	return rtrn_propagate;
 }
@@ -710,7 +705,6 @@ void Bridge_LoggedIn(NodeObj instance, InstanceData *local, char *user)
 	SetValueStr(chunk, buf);
 	SetPropLong(chunk, "Conn", local->replyConn);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 /* token auth: {"cmd":"login","user":"<Main/Users name>","token":"..."} */
@@ -785,7 +779,6 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local)
 	SetValueStr(chunk, "{\"event\":\"instances-done\"}");
 	SetPropLong(chunk, "Conn", local->replyConn);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 /* targeted, one per genuine Connect() the flow ever recorded (see          */
@@ -831,7 +824,6 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 			SetValueStr(chunk, buf);
 			SetPropLong(chunk, "Conn", local->replyConn);
 			SndMsg(instance, "Out", msg_send, chunk);
-			DelNode(chunk);
 		}
 
 		instr = GetNextSibling(instr);
@@ -842,7 +834,6 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 	SetValueStr(chunk, "{\"event\":\"connections-done\"}");
 	SetPropLong(chunk, "Conn", local->replyConn);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 }
 
 /* the command switch itself, factored out of Bridge_OnIn so Load/Import  */

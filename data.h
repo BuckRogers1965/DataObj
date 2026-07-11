@@ -19,6 +19,9 @@ typedef  void * DataObj;
 /* Create a new data object to hold data */
 DataObj NewData(int type);
 
+/* Free a data object created by NewData, including its string/hex buffers */
+void DelData(DataObj this);
+
 /* Get the native type (STRING/INTEGER/HEX/REAL/LONG) this object was created as */
 int GetDataType(DataObj this);
 

@@ -110,7 +110,6 @@ void Http_SendResponse(NodeObj instance, char *status, char *contentType, char *
 	SetValueStr(chunk, response);
 	SetPropLong(chunk, "Conn", connId);
 	SndMsg(instance, "Out", msg_send, chunk);
-	DelNode(chunk);
 
 	free(response);
 }

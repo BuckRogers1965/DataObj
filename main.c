@@ -347,7 +347,8 @@ void CreateTestApp(NodeObj Main){
 	/* shutdown timer - this is meant to stay up for as long as someone   */
 	/* is actually browsing it; Ctrl+C stops it, same as any dev server   */
 	/*                                                                    */
-	/*   TCP (8083) --> Router --+--> Http (Root="web") --> TCP.In        */
+	/*   TCP (-ip/-port, default 0.0.0.0:8083) --> Router                 */
+	/*                           +--> Http (Root="web") --> TCP.In        */
 	/*                           +--> WebSocket.Wire                      */
 	/*                                 WebSocket.Send --> TCP.In          */
 	/*                                 WebSocket.Out --> Bridge.In        */
@@ -365,9 +366,17 @@ void CreateTestApp(NodeObj Main){
 
 		if (WebTcp && Router && Http && Ws && WebBridge && WebProbe) {
 
-			SetPropInt(WebTcp, "LocalPort", 8083);
+			SetPropStr(WebTcp, "LocalAddr", GetPropStr(Main, "ip"));
+			SetPropInt(WebTcp, "LocalPort", GetPropInt(Main, "port"));
 			SetPropStr(Http, "Root", "web");
 			SetPropStr(WebProbe, "Label", "web.Out");
+			/* off by default: list-instances replays every existing   */
+			/* instance (including every hidden helper widget) to each */
+			/* freshly-connecting client, and a grown session.flow      */
+			/* makes that dump big enough to flood stdout on every page */
+			/* load/reconnect. Still a real Echo checkbox in the UI -   */
+			/* flip it on from there when actually debugging this wire. */
+			SetPropInt(WebProbe, "Echo", 0);
 
 			SetPropLong(Router, "HttpTarget", (long) Http);
 			SetPropLong(Router, "WsTarget", (long) Ws);
@@ -421,6 +430,7 @@ void CreateTestApp(NodeObj Main){
 
 			SetPropInt(BridgeTcp, "LocalPort", 8091);
 			SetPropStr(BridgeProbe, "Label", "bridge.Out");
+			SetPropInt(BridgeProbe, "Echo", 0);	/* see web.Out comment above */
 
 			SetPropInt(BridgeTimer, "Interval", 20000);
 			SetPropInt(BridgeTimer, "Count", 1);
@@ -459,6 +469,7 @@ void CreateTestApp(NodeObj Main){
 			SetPropStr(AuthBridge, "RequireAuth", "1");
 			SetPropLong(AuthBridge, "Main", (long) Main);
 			SetPropStr(AuthProbe, "Label", "authbridge.Out");
+			SetPropInt(AuthProbe, "Echo", 0);	/* see web.Out comment above */
 
 			SetPropInt(AuthTimer, "Interval", 20000);
 			SetPropInt(AuthTimer, "Count", 1);
@@ -534,7 +545,7 @@ void Init(NodeObj Main){
 
 	/* print out the help text if printhelp is turned on */
 	if (GetValueInt(GetPropNode(Main, "printhelp"))) {
-		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -t              : Perform Unit Testing of library functions\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
+		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -ip   <address> : Address to bind the web GUI to, e.g. 127.0.0.1 or 0.0.0.0 (default 0.0.0.0)\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -port <number>  : Port to serve the web GUI on (default 8083)\n       -t              : Perform Unit Testing of library functions\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
 	}
 
 	/* if -t command line argument is set, perform unit test */
@@ -578,7 +589,7 @@ void InstallObjects(void)
 	loadClasses();
 }
 
-enum { STORE_FILENAME=0, STORE_LOGNAME, STORE_OPTION, STORE_LOGLEVEL };
+enum { STORE_FILENAME=0, STORE_LOGNAME, STORE_OPTION, STORE_LOGLEVEL, STORE_IP, STORE_PORT };
 void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 	/* skip the process name */
@@ -589,6 +600,12 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 	DebugPrint ( "Store default verbose logging level of 1.", __FILE__, __LINE__, CMDLINEOPTS);
 	SetPropInt(Main, "loglevel", 1);
+
+	DebugPrint ( "Store default ip address of 0.0.0.0.", __FILE__, __LINE__, CMDLINEOPTS);
+	SetPropStr(Main, "ip", "0.0.0.0");
+
+	DebugPrint ( "Store default port of 8083.", __FILE__, __LINE__, CMDLINEOPTS);
+	SetPropStr(Main, "port", "8083");
 
 	while(i < argc){
 
@@ -628,12 +645,36 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 			
 		case STORE_LOGNAME:
 			if ( argv[i][0]=='-' ) {
-				DebugPrint ( "Option found instead of filename.", __FILE__, __LINE__, ERROR);	
+				DebugPrint ( "Option found instead of filename.", __FILE__, __LINE__, ERROR);
 				SetPropInt(Main, "printhelp", 1);
 				return;
 			} else {
 				DebugPrint ( "Store log name.", __FILE__, __LINE__, CMDLINEOPTS);
 				SetPropStr(Main, "logname", argv[i]);
+			}
+			state=STORE_OPTION;
+			break;
+
+		case STORE_IP:
+			if ( argv[i][0]=='-' ) {
+				DebugPrint ( "Option found instead of ip address.", __FILE__, __LINE__, ERROR);
+				SetPropInt(Main, "printhelp", 1);
+				return;
+			} else {
+				DebugPrint ( "Store ip address.", __FILE__, __LINE__, CMDLINEOPTS);
+				SetPropStr(Main, "ip", argv[i]);
+			}
+			state=STORE_OPTION;
+			break;
+
+		case STORE_PORT:
+			if ( argv[i][0]=='-' ) {
+				DebugPrint ( "Option found instead of port.", __FILE__, __LINE__, ERROR);
+				SetPropInt(Main, "printhelp", 1);
+				return;
+			} else {
+				DebugPrint ( "Store port.", __FILE__, __LINE__, CMDLINEOPTS);
+				SetPropStr(Main, "port", argv[i]);
 			}
 			state=STORE_OPTION;
 			break;
@@ -648,6 +689,16 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 
 				if ( strcmp ( argv[i], "-l" ) == 0 ) {
 					state=STORE_LOGNAME;
+					break;
+				}
+
+				if ( strcmp ( argv[i], "-ip" ) == 0 ) {
+					state=STORE_IP;
+					break;
+				}
+
+				if ( strcmp ( argv[i], "-port" ) == 0 ) {
+					state=STORE_PORT;
 					break;
 				}
 
@@ -747,9 +798,30 @@ int main ( int argc, char* argv[] ){
 	DebugPrint ( "Entering Main Loop.", __FILE__, __LINE__, PROG_FLOW);
 
 	while(IsRunning(Main)>0){
+		unsigned long wake;
+
 		MainLoop(Main);
-		// improvement: get delay from next scheduled item, min of 10 usecs
-		usleep(22);
+
+		/* sleep exactly until the next scheduled task is due instead of  */
+		/* polling on a fixed interval - SchedNextWakeMicros reads the    */
+		/* (already time-sorted) list's head, so this is 0 during any     */
+		/* burst of due-now work and only actually sleeps once the list   */
+		/* is caught up.                                                   */
+		/*                                                                  */
+		/* Capped at 1ms, and it has to be a small cap: nothing in this    */
+		/* fabric is interrupt-driven, every I/O source (TCP included)     */
+		/* is a polling task that only notices new data when its own turn */
+		/* comes up. usleep() can't be woken early by a socket becoming    */
+		/* readable, so however long this sleeps is a floor on input      */
+		/* latency for anything arriving with nothing else already due -  */
+		/* confirmed live: three bound sliders felt chunky against a bare */
+		/* uncapped wake, silky smooth once something was due every 1ms   */
+		/* (a fast Pulse). 1ms is that same ceiling applied unconditionally*/
+		/* instead of relying on a coincidentally-busy scheduler.         */
+		wake = SchedNextWakeMicros(Tasks);
+		if (wake > 1000UL)
+			wake = 1000UL;
+		usleep(wake);
 	}
 
 	DebugPrint ( "No more tasks scheduled, cleaning up and exiting", __FILE__, __LINE__, PROG_FLOW);
