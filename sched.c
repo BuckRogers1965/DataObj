@@ -56,6 +56,14 @@ struct task_entry {
 
    int      trace;	 /* Turn on extra debugging output for this task */
    DataObj  name;	 /* task name */
+
+   int      linked;	 /* currently spliced into owner's head/tail chain? */
+			 /* guards RemoveTaskFromList against unlinking a   */
+			 /* task that isn't actually in the list right now  */
+			 /* (already fired-and-not-rescheduled, or never     */
+			 /* armed) - without this a delete of such a task    */
+			 /* would still zero out owner's head/tail as if it  */
+			 /* were the last entry, wiping out unrelated tasks  */
    } task_entry;
 
 struct task_list {
@@ -64,6 +72,11 @@ struct task_list {
 	TaskPtr tail;
 
 	unsigned long entry_count;
+
+	/* reusable due-task bucket for ExecTasks - always empty at rest,   */
+	/* swapped in and drained back to empty every call, so ExecTasks    */
+	/* never has to malloc a scratch list per tick                      */
+	TaskList runnow;
 
 } task_list;
 
@@ -79,6 +92,8 @@ CreateList(){
 	list->tail = NULL;
 
 	list->entry_count = 0;
+
+	list->runnow = NULL;
 
 	return list;
 }
@@ -97,6 +112,7 @@ CreateTask(TaskList list){
 	task->data = NULL;
 	task->name = NULL;
 	task->trace = 0;
+	task->linked = 0;
 
 	return task;
 
@@ -113,6 +129,13 @@ RemoveTaskFromList(TaskPtr task){
 	/* this is needed when an item that is running is being deleted. */
 	/* Or when it is being moved to another list */
 
+	/* not currently spliced into any chain (already fired and never  */
+	/* rescheduled, or never armed) - nothing to unlink. Without this  */
+	/* guard the branches below would treat it as the sole entry and  */
+	/* null out list->head/tail, losing every other scheduled task    */
+	if (!task->linked)
+		return;
+
 	if (!task->prev){
 		list->head = task->next;
 	} else {
@@ -127,6 +150,7 @@ RemoveTaskFromList(TaskPtr task){
 
 	task->prev = NULL;
 	task->next = NULL;
+	task->linked = 0;
 }
 
 
@@ -135,9 +159,11 @@ DeactivateTask(TaskPtr task){
 
 	RemoveTaskFromList(task);
 
-	/* call function assigned to task with data */
-	(*task->callback)(task, task->data, task_deactivate);
-	
+	/* a task that was created but never armed (Activate never ran)   */
+	/* has no callback yet                                             */
+	if (task->callback)
+		(*task->callback)(task->data, task->data, task_deactivate);
+
 	return 1;
 }
 
@@ -168,6 +194,11 @@ DeleteList(TaskList list){
 		DeleteTask(current);
 		current = next;
 	}
+
+	/* runnow is always empty at rest (ExecTasks fully drains it before */
+	/* returning), so it just needs freeing, not walking                */
+	if (list->runnow)
+		free(list->runnow);
 
 	free (list);
 
@@ -214,6 +245,7 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_millisecs, FuncPtr func,
 	task->millisecs = delay_millisecs;
 	task->next=NULL;
 	task->prev=NULL;
+	task->linked=1;
 
 
 	// just add the task if the task list is empty.
@@ -280,6 +312,8 @@ AddTaskSec(TaskPtr task, unsigned long delay_seconds, FuncPtr func, int mesgid, 
 void
 AddTaskToTail(TaskList list, TaskPtr task){
 
+	task->linked = 1;
+
 	/* add first task */
 	if (!list->head){
 		list->head = list->tail = task;
@@ -333,33 +367,43 @@ ActivateTimedTasks(TaskList list, TaskList runnow){
 int
 ExecTasks(TaskList list){
 
-	TaskList runlist = CreateList();
 	TaskPtr current;
 
 	int taskcount = 0;
 
+	/* due tasks land here instead of a freshly malloc'd list every call - */
+	/* runnow is always empty at rest (drained below), so it's created     */
+	/* once per TaskList, ever, and just reused tick after tick            */
+	if (!list->runnow)
+		list->runnow = CreateList();
+
 	/* move all the items whose timer has expired to the execute now list */
 	/* this prevents there from being confusion between what we are currently doing and what we will be doing next time */
 
-	ActivateTimedTasks(list, runlist);
+	ActivateTimedTasks(list, list->runnow);
 
 	/* iterate through the list of items to execute */
 
-	while (runlist->head){
+	while (list->runnow->head){
 
 		/* remove task from list */
 		/* tasks must reschedule each time they are called */
-		current = runlist->head;
-		runlist->head = current->next;
+		current = list->runnow->head;
+		list->runnow->head = current->next;
 		current->next = NULL;
 		current->prev = NULL;
-	
-		/* call function assigned to task with data */
+		current->linked = 0;
+
+		/* a callback that reschedules itself calls AddTaskDelay, which  */
+		/* inserts via task->owner - the real `list`, not runnow - so    */
+		/* rescheduled/new tasks land pre-merged into `list` in sorted   */
+		/* order with no separate merge step needed                     */
 		if(current->callback)
 			(*current->callback)(current->data, current->data, task_callback);
 
 		taskcount++;
 	}
+	list->runnow->tail = NULL;
 
 	if (list->head || taskcount)
 		return 1;

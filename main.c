@@ -78,25 +78,27 @@ These modules register themselves on library load and unregister on Library exit
 
 ToDo:
 
-Create a pulse generator that outputs a 1 followed by a 0 at specified millisecond intervals.
+X Create a pulse generator that outputs a 1 followed by a 0 at specified millisecond intervals.
 Create a timer object that outputs the time between events it receives on it's input.
 Create a random object that will output a random value between a high and low value.
 Create a filter object that only passes items when the value changes.
 Create a filter object that only passes 1's
 Create a filter object that only passes a 0
-Create a file object that can read and write files.
+X Create a file object that can read and write files.
 
 
 
 improvement:
 
 Allow objects to subclass from other objects, making them depend on those
-other objects.  Load objects in proper order, so that their dependencies are 
+other objects.  
+
+X Load objects in proper order, so that their dependencies are 
 all satisfied or they will be unloaded.
 
 improvement:
 
-The objects will publish their own interface.
+X The objects will publish their own interface.
 
 Later when I add dynamically loaded language objects the objects will 
 work with the language modules to automatically generate the 
@@ -747,7 +749,7 @@ int main ( int argc, char* argv[] ){
 	while(IsRunning(Main)>0){
 		MainLoop(Main);
 		// improvement: get delay from next scheduled item, min of 10 usecs
-		usleep(10);
+		usleep(22);
 	}
 
 	DebugPrint ( "No more tasks scheduled, cleaning up and exiting", __FILE__, __LINE__, PROG_FLOW);

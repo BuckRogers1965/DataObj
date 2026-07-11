@@ -219,7 +219,13 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
 	if (local)
+	{
+		/* stop the tick task before freeing local, or a still-scheduled */
+		/* task fires later with a dangling instance pointer as its data */
+		if (local->task)
+			DeleteTask(local->task);
 		free(local);
+	}
 
 	return rtrn_handled;
 }

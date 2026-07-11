@@ -30,8 +30,11 @@ AddTaskMilli(TaskObj task, int delay_milliseconds, FuncPtr func, int mesgid, Nod
 int
 AddTaskSec(TaskObj task, int delay_seconds, FuncPtr func, int mesgid, NodeObj data);
 
-int 
+int
 RemoveTask(TaskObj task);
+
+int
+DeleteTask(TaskObj task);
 
 void
 SchedTest ();

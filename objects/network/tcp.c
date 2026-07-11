@@ -475,6 +475,11 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	{
 		Connection *conn, *next;
 
+		/* stop the poll task before freeing local, or a still-scheduled */
+		/* task fires later with a dangling instance pointer as its data */
+		if (local->task)
+			DeleteTask(local->task);
+
 		for (conn = local->conns; conn; conn = next)
 		{
 			next = conn->next;

@@ -252,6 +252,10 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	if (local)
 	{
+		/* stop the drain task before freeing local, or a still-scheduled */
+		/* task fires later with a dangling instance pointer as its data  */
+		if (local->task)
+			DeleteTask(local->task);
 		if (local->file)
 			fclose(local->file);
 		if (local->buffer)

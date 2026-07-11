@@ -1452,10 +1452,26 @@ UnRegisterInstance(NodeObj class, NodeObj Instance){
 /* DelSibling first (unlinks Instance from its class's child chain without */
 /* touching the instances after it), then DelNode (frees just this one,   */
 /* its own properties and children, now that it's isolated).              */
+/* InstanceEnd runs first - every object registers one (RegisterClass),   */
+/* but until now nothing ever called it back, so local structs and their  */
+/* scheduled tasks outlived the node that owned them: DelNode would free  */
+/* the instance out from under a still-armed task, and the next time it   */
+/* fired it would hand the callback a dangling NodeObj as its data        */
 void DeleteInstance(NodeObj instance)
 {
+	NodeObj class;
+	msgobj instanceEnd;
+
 	if (!instance)
 		return;
+
+	/* instances are registered as children of their class (RegisterInstance) */
+	class = GetParent(instance);
+	if (class) {
+		instanceEnd = (msgobj)GetPropLong(class, "InstanceEnd");
+		if (instanceEnd)
+			instanceEnd(instance, msg_update, NULL);
+	}
 
 	DelSibling(instance);
 	DelNode(instance);
