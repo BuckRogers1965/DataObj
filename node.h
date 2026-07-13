@@ -60,6 +60,14 @@ char *  GetPropStr  (NodeObj node, char * Name);
 void    SetPropLong (NodeObj node, char * Name, long Value);
 long    GetPropLong (NodeObj node, char * Name);
 
+/* symlinks: a node can stand for another node (an alias's control     */
+/* property links to the original's - value, subscribers, and wiring   */
+/* live only on the target). LinkNode(n, NULL) unlinks; ResolveNode    */
+/* follows chains with a depth cap; a plain node resolves to itself.   */
+void    LinkNode    (NodeObj node, NodeObj target);
+NodeObj GetNodeLink (NodeObj node);
+NodeObj ResolveNode (NodeObj node);
+
 // need more child handling functions here
 void    SetChild     (NodeObj node,   NodeObj child);
 void    AddChild     (NodeObj parent, NodeObj child);

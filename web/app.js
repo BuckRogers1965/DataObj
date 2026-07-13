@@ -57,12 +57,17 @@ let aliasCounters = {};    // className -> next number, for user-placed palette 
 let widgetAliasCounters = {}; // widgetClass -> next number, for internally-wired widget instances
 let pendingPort = null;    // {alias, port, dotEl} - first end of a wire being drawn
 let dragState = null;      // {alias, offsetX, offsetY}
+let gestureDrag = null;    // {kind:'clone'|'alias', data, ghost} - a Clone/Alias carry in progress (the ghost, not the source)
+let panelDrag = null;      // {alias, el, offsetX, offsetY} - a view PANEL being moved by its titlebar (PanelX/PanelY, not X/Y)
 let nextPos = { x: 250, y: 30 }; /* clear of the palette panel's own top-left corner */
 let pendingPositions = {}; // alias -> {x,y}, staged by createInstance() for an instance this client is about to create
+let pendingContainers = {}; // alias -> view alias, staged the same way - the drop target of the gesture that created it
 let livePositions = {};    // alias -> {el}, a card whose X/Y are real properties kept in sync like anything else
 let menuButtons = {};      // alias -> {label,items,selected,btn,dropdown}, any MenuButton (topbar chrome or dropped-in)
 let propertyValues = {};   // "alias.propName" -> last known value, from property-changed - what Clone reads to copy a source's configuration
-let copyRenderings = {};   // alias -> [el, el, ...], every extra rendering Copy has made of an alias, beyond the one tracked in instances{}
+let aliasAtoms = {};       // alias -> {el, slot, labelEl, target, targetProp, widget, label, control}, a real Alias instance's rendering
+let loadedContainers = {}; // view alias -> 1, containers whose members this client has already fetched (lazy - on first open)
+let panels = {};           // alias -> {el, setOpen, openApplied} - EVERY thing's open panel, view or card alike: icons nest in the hierarchy, panels are all peers at the root
 let views = {};             // alias -> {el, innerEl, mode}, a real View instance's own rendering
 let pendingContainer = {};  // containerAlias -> [el, el, ...], elements waiting for a View that hasn't rendered yet
 
@@ -74,6 +79,24 @@ let pendingContainer = {};  // containerAlias -> [el, el, ...], elements waiting
 let currentMode = 'Operate';
 
 function $(id) { return document.getElementById(id); }
+
+/* what a thing is CALLED on screen is just its name - the path is where   */
+/* it lives, and you can see that from the view you found it in. The full  */
+/* path exists for scripting (it IS the alias every command uses); it's    */
+/* just not smeared across every label.                                     */
+function baseName(alias) {
+  const i = alias.lastIndexOf('/');
+  return i < 0 ? alias : alias.slice(i + 1);
+}
+
+/* gestures were built with the alias a thing was BORN with - but moving   */
+/* into a view (or editing Name) RENAMES it, and a command sent to the old  */
+/* name is a command sent to nothing. Resolve the element's CURRENT alias   */
+/* at gesture time, so a thing can be renamed and moved forever.             */
+function aliasOfEl(el, fallback) {
+  for (const k in instances) if (instances[k].el === el) return k;
+  return fallback;
+}
 
 /* mode governs how the canvas responds to the mouse - a body class drives */
 /* the CSS side (port dots/rows only in mode-connect, inline controls only */
@@ -137,20 +160,55 @@ function flushPendingContainer(viewAlias) {
   for (const el of pending) views[viewAlias].innerEl.appendChild(el);
 }
 
-/* a View can override the session's own mode for everything directly       */
-/* inside it (view.c's own doc comment - Mode="" means "use the session's    */
-/* current mode", anything else wins regardless) - this is the entire        */
-/* mechanism that makes the Palette a permanent Clone station (BuildPalette, */
-/* object.c sets its Mode to "Clone") with nothing view.c or app.js needs     */
-/* to know about "palette" specifically. Every gesture (onPortClick,          */
-/* attachDeleteGesture, attachCloneGesture, attachCopyGesture, startDrag)     */
-/* reads this instead of currentMode directly.                                */
+/* every thing works identically: its icon lives in the containment       */
+/* hierarchy, and its open panel is a peer of every other panel at the     */
+/* ROOT - never nested. One mechanism for views and cards alike: PanelX/   */
+/* PanelY are shared properties (where the panel sits, for everyone),      */
+/* Open's stored value is only the INITIAL presentation, and whether this   */
+/* window currently shows the panel is its own business after that.         */
+function registerPanel(alias, panelEl, display, onToggle) {
+  panelEl.style.position = 'absolute';
+  panelEl.style.left = '240px';
+  panelEl.style.top = '60px';
+  panelEl.style.display = 'none';
+  panelEl.style.zIndex = '40';
+  $('canvas').appendChild(panelEl);
+
+  const rec = {
+    el: panelEl,
+    openApplied: false,
+    setOpen(open) {
+      /* an explicit open/close IS a presentation decision - a late-      */
+      /* arriving initial Open value must never override it               */
+      rec.openApplied = true;
+      panelEl.style.display = open ? display : 'none';
+      if (onToggle) onToggle(open);
+      updateWiresFor(alias);
+    },
+  };
+  panels[alias] = rec;
+
+  send({ cmd: 'subscribe', instance: alias, port: 'Open' });
+  send({ cmd: 'subscribe', instance: alias, port: 'PanelX' });
+  send({ cmd: 'subscribe', instance: alias, port: 'PanelY' });
+  return rec;
+}
+
+/* dragging any panel by its titlebar moves the PANEL (PanelX/PanelY,     */
+/* shared) - never the icon; two things, two independent lives            */
+function startPanelDrag(ev, alias, panelEl) {
+  const rect = panelEl.getBoundingClientRect();
+  panelDrag = { alias, el: panelEl, offsetX: ev.clientX - rect.left, offsetY: ev.clientY - rect.top };
+  ev.preventDefault();
+}
+
+/* one session mode, everywhere - a View used to be able to override the   */
+/* mode for its contents (the old "the Palette is a permanent Clone         */
+/* station" mechanism), but there are no special views anymore: the         */
+/* palette is just a View, Root is just a View, and every gesture works     */
+/* the same inside all of them. Kept as a function because every gesture    */
+/* already calls it.                                                         */
 function effectiveMode(el) {
-  const container = el.closest('.view-inner');
-  if (container && container.dataset.viewAlias) {
-    const view = views[container.dataset.viewAlias];
-    if (view && view.mode) return view.mode;
-  }
   return currentMode;
 }
 
@@ -232,6 +290,9 @@ function handleEvent(msg) {
     case 'instance-renamed':
       onInstanceRenamed(msg.from, msg.to);
       break;
+    case 'internals':
+      onInternals(msg.view);
+      break;
     case 'error':
       log('error (' + msg.cmd + '): ' + msg.message, 'error');
       break;
@@ -258,7 +319,7 @@ function parseInterface(interfaceNode) {
 /* bridge.c) - a client re-keys everything it has stored under the old        */
 /* alias to the new one (onInstanceRenamed) rather than the name staying      */
 /* fixed while only Container moves underneath it.                            */
-function createInstance(className) {
+function createInstance(className, container, pos) {
   aliasCounters[className] = (aliasCounters[className] || 0) + 1;
   const alias = '/Root/' + className + aliasCounters[className];
   send({ cmd: 'create-instance', class: className, as: alias });
@@ -270,11 +331,17 @@ function createInstance(className) {
   /* is just as real an object as one dragged a minute ago, so where it   */
   /* first appears has to be written back immediately, not held only as   */
   /* local placement the server (and every other window) never learns.   */
-  const pos = nextPos;
-  nextPos = { x: (nextPos.x + 40) % 500 + 30, y: nextPos.y + (nextPos.x > 460 ? 130 : 0) + 0 };
+  /* Position and container come from the drop that created it - where    */
+  /* you release IS where it lives, in whatever view that happens to be.  */
+  if (!pos) {
+    pos = nextPos;
+    nextPos = { x: (nextPos.x + 40) % 500 + 30, y: nextPos.y + (nextPos.x > 460 ? 130 : 0) + 0 };
+  }
   pendingPositions[alias] = pos;
+  pendingContainers[alias] = container || '';
   send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(pos.x) });
   send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(pos.y) });
+  if (container) send({ cmd: 'set-property', instance: alias, prop: 'Container', value: container });
   return alias;
 }
 
@@ -395,9 +462,10 @@ document.addEventListener('click', () => {
 function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit) {
   const el = buildValueControl(widgetClass, defaultValue, onCommit);
   send({ cmd: 'subscribe', instance: subscribeAlias, port: subscribeProp });
-  /* more than one rendering can subscribe to the same alias.prop (Copy -   */
-  /* see renderCopy) - every one of them has to keep getting updated, not   */
-  /* just whichever registered last, so this is a list, not a single slot   */
+  /* more than one rendering can subscribe to the same alias.prop (an       */
+  /* Alias atom binds to its target's prop alongside the target's own       */
+  /* rendering) - every one has to keep getting updated, not just            */
+  /* whichever registered last, so this is a list, not a single slot        */
   const key = subscribeAlias + '.' + subscribeProp;
   (liveControls[key] = liveControls[key] || []).push({ el, widgetClass });
   return el;
@@ -519,17 +587,10 @@ function makeButtonWidget(targetAlias) {
 /* a standalone widget instance: its own natural control (or dot) plus a  */
 /* label, positioned and draggable exactly like any other card - no        */
 /* header, no property rows, no footer, and its wiring dots (below) only    */
-/* ever show up in Connect mode, same as everything else's.                */
-/*                                                                          */
-/* isCopy is what makes this the SAME rendering path serve Copy mode too    */
-/* (see renderCopy): a copy binds every control to the SAME alias (so       */
-/* editing it edits the one real object, exactly like Clone doesn't but      */
-/* Copy does - "still hooked to its original source") except position,      */
-/* which is inherently per-rendering once more than one exists - a copy      */
-/* drags locally (like the palette panel, startDrag's alias:null form)       */
-/* instead of subscribing to/writing the shared instance's X/Y, and is       */
-/* tracked in copyRenderings instead of instances so deleting the shared     */
-/* object (from any rendering) can find and remove every copy of it too.     */
+/* ever show up in Connect mode, same as everything else's. (The old Copy   */
+/* mode's client-local second renderings are gone - a second doorway to     */
+/* the same object is now a real Alias instance, shared and savable; see    */
+/* registerAliasAtom.)                                                      */
 function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   const el = document.createElement('div');
   el.className = 'widget-atom';
@@ -560,7 +621,8 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   if (className !== 'MenuButton') {
     const label = document.createElement('span');
     label.className = 'widget-atom-label';
-    label.textContent = alias + (isCopy ? ' (copy)' : '');
+    label.textContent = baseName(alias);
+    label.title = alias;
     el.appendChild(label);
   }
 
@@ -569,23 +631,14 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   /* it in Connect mode and it arms/completes a wire on primaryProp         */
   el.addEventListener('click', () => onPortClick(alias, primaryProp, el));
 
-  /* dragging the atom moves it; the control itself keeps its own gesture  */
-  /* (a click, a slider drag) - only the chrome around it starts a move    */
-  el.onmousedown = (ev) => { if (ev.target !== control) startDrag(ev, el, isCopy ? null : alias); };
+  /* dragging the atom: Move moves it, Clone ghosts a new independent      */
+  /* instance, Alias ghosts an Alias of its primary control - one           */
+  /* mousedown, mode decides (startDrag). The control itself keeps its own  */
+  /* gesture (a click, a slider drag) - only the chrome around it drags.    */
+  el.onmousedown = (ev) => { if (ev.target !== control) startDrag(ev, el, alias, className, primaryProp); };
 
   attachDeleteGesture(el, alias);
-  attachCloneGesture(el, alias, className);
-  attachCopyGesture(el, alias, className);
-
-  if (isCopy) {
-    /* a copy manages its own local position independent of the source     */
-    /* (see registerCard's matching comment) - always top-level, never       */
-    /* container-aware, for the same reason                                 */
-    $('canvas').appendChild(el);
-    (copyRenderings[alias] = copyRenderings[alias] || []).push(el);
-    log('copied ' + alias, 'event');
-    return;
-  }
+  attachOptionsGesture(el, alias);
 
   /* instance-created already carries Container inline (Bridge_InstanceEvent, */
   /* bridge.c) so this places straight into the real parent on first paint -  */
@@ -609,65 +662,102 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
 /* built by the server with Mode="Clone" and Deletable="0" already set        */
 /* (BuildPalette, object.c) - nothing here knows or cares that any            */
 /* particular View happens to be "the palette".                              */
-function registerView(alias, props, pos, isCopy, container) {
-  const el = document.createElement('div');
-  el.className = 'view-panel';
-  el.style.left = pos.x + 'px';
-  el.style.top = pos.y + 'px';
-  el.style.width = '190px';
-  el.style.height = '220px';
+function registerView(alias, props, pos, hidden, container) {
+  /* the icon IS the view's permanent presence - it never goes away.        */
+  /* Opening shows the panel as a separate element with its own position    */
+  /* (PanelX/PanelY, real shared properties independent of the icon's        */
+  /* X/Y) - two placements of one thing, not two things. A HIDDEN view is    */
+  /* a panel with no icon at all: an object's internals view, whose          */
+  /* presence on the canvas is the object's own icon.                        */
+  const wrap = document.createElement('div');
+  wrap.className = 'instance-wrap';
+  wrap.style.left = pos.x + 'px';
+  wrap.style.top = pos.y + 'px';
+  if (hidden) wrap.style.display = 'none';
+
+  const icon = document.createElement('div');
+  icon.className = 'instance-icon';
+  const iconLabel = document.createElement('span');
+  iconLabel.className = 'instance-icon-label';
+  iconLabel.textContent = baseName(alias);
+  iconLabel.title = alias;
+  icon.appendChild(iconLabel);
+  wrap.appendChild(icon);
+
+  /* the panel floats at the ROOT wherever PanelX/PanelY say, whatever    */
+  /* container the icon itself lives in - registerPanel, the exact same    */
+  /* mechanism every other thing's panel uses                              */
+  const panel = document.createElement('div');
+  panel.className = 'view-panel';
+  panel.style.width = '190px';
+  panel.style.height = '220px';
 
   const header = document.createElement('div');
   header.className = 'view-header';
-  header.textContent = alias + (isCopy ? ' (copy)' : '');
-  el.appendChild(header);
+  const headerTitle = document.createElement('span');
+  headerTitle.textContent = baseName(alias);
+  headerTitle.title = alias;
+  header.appendChild(headerTitle);
+  const collapseBtn = document.createElement('span');
+  collapseBtn.className = 'node-collapse';
+  collapseBtn.textContent = '−';
+  collapseBtn.title = 'Close';
+  collapseBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    /* close over the panel record, not the name - the thing may have    */
+    /* been renamed since this button was built                           */
+    p.setOpen(false);
+  });
+  header.appendChild(collapseBtn);
+  panel.appendChild(header);
 
   const innerEl = document.createElement('div');
   innerEl.className = 'view-inner';
   innerEl.dataset.viewAlias = alias;
-  innerEl.dataset.viewMode = '';
-  el.appendChild(innerEl);
+  panel.appendChild(innerEl);
 
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'view-resize-handle';
   resizeHandle.style.display = 'none'; /* shown once Resizeable arrives as "1" */
   resizeHandle.onmousedown = (ev) => startResize(ev, alias);
-  el.appendChild(resizeHandle);
+  panel.appendChild(resizeHandle);
 
-  header.onmousedown = (ev) => startDrag(ev, el, isCopy ? null : alias);
-  attachDeleteGesture(el, alias);
-  attachCloneGesture(el, alias, 'View');
-  attachCopyGesture(el, alias, 'View');
+  /* a view's only extra behavior on open: a closed view's contents were  */
+  /* never sent here - the GUI only holds what it can see - so first open  */
+  /* fetches the members; live events keep them current after that         */
+  const p = registerPanel(alias, panel, 'flex', (open) => {
+    if (open && !loadedContainers[alias]) {
+      loadedContainers[alias] = 1;
+      send({ cmd: 'list-instances', container: alias });
+    }
+  });
 
-  if (isCopy) {
-    /* a copied View is a real second rendering of the panel chrome, but    */
-    /* not a second container - its children stay wherever the original     */
-    /* View's own innerEl is (views{} is single-slot, deliberately not       */
-    /* extended for this: nesting a live container inside two places at      */
-    /* once is a bigger feature than "click to see another view of a         */
-    /* value"). Scope decision, not an oversight.                            */
-    $('canvas').appendChild(el);
-    (copyRenderings[alias] = copyRenderings[alias] || []).push(el);
-    log('copied ' + alias, 'event');
-    return;
-  }
+  icon.addEventListener('click', () => {
+    if (effectiveMode(icon) === 'Operate') p.setOpen(true);
+  });
 
-  const view = { el, innerEl, header, resizeHandle, mode: '' };
+  /* aliasing a view aliases its Open - the alias renders as another icon */
+  /* that opens this same panel (see renderAliasControl)                   */
+  icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'Open'); };
+  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, alias, panel); };
+  attachDeleteGesture(wrap, alias);
+  attachOptionsGesture(wrap, alias);
+
+  const view = { el: wrap, panel, innerEl, header, resizeHandle, icon, setOpen: p.setOpen };
   views[alias] = view;
   /* instance-created carries Container inline - see registerWidgetAtom's   */
   /* matching comment                                                       */
-  placeInContainer(el, container || '');
+  placeInContainer(wrap, container || '');
   flushPendingContainer(alias);
 
-  instances[alias] = { className: 'View', el, ports: {} };
-  livePositions[alias] = { el };
+  instances[alias] = { className: 'View', el: wrap, ports: {} };
+  livePositions[alias] = { el: wrap };
 
   send({ cmd: 'subscribe', instance: alias, port: 'X' });
   send({ cmd: 'subscribe', instance: alias, port: 'Y' });
   send({ cmd: 'subscribe', instance: alias, port: 'W' });
   send({ cmd: 'subscribe', instance: alias, port: 'H' });
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Mode' });
   send({ cmd: 'subscribe', instance: alias, port: 'Resizeable' });
 
   log('created ' + alias + ' (View)', 'event');
@@ -680,8 +770,8 @@ function startResize(ev, alias) {
   if (!view || view.resizeHandle.style.display === 'none') return;
   ev.stopPropagation();
   ev.preventDefault();
-  const rect = view.el.getBoundingClientRect();
-  resizeState = { alias, el: view.el, startW: rect.width, startH: rect.height, startX: ev.clientX, startY: ev.clientY };
+  const rect = view.panel.getBoundingClientRect();
+  resizeState = { alias, el: view.panel, startW: rect.width, startH: rect.height, startX: ev.clientX, startY: ev.clientY };
 }
 
 document.addEventListener('mousemove', (ev) => {
@@ -706,6 +796,11 @@ document.addEventListener('mouseup', () => {
 });
 
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container) {
+  /* replays are idempotent - a container listed twice (or an instance     */
+  /* that arrived live before its container's members were fetched) never  */
+  /* renders twice                                                          */
+  if (instances[alias] || views[alias]) return;
+
   /* plumbing widget instances (created by makeInputWidget/makeDisplayWidget/  */
   /* makeButtonWidget to back some other node's control) are already fully    */
   /* wired and rendered into their parent's card by the time this event       */
@@ -715,8 +810,11 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
 
   /* the same plumbing, but replayed to a client that never created it (a  */
   /* fresh page load, a different browser) and so has no local widgets{}   */
-  /* record - hidden is real server-side state precisely for this case     */
-  if (hidden) return;
+  /* record - hidden is real server-side state precisely for this case.    */
+  /* A hidden VIEW is different: it is a panel with no icon of its own      */
+  /* (an object's internals view - the object's icon is its presence), so   */
+  /* it registers normally minus the canvas icon.                           */
+  if (hidden && className !== 'View') return;
 
   /* every instance-created event carries its class's Interface inline -  */
   /* cache it once per class (every instance of the same class has the    */
@@ -732,12 +830,14 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   }
 
   const props = classes[className] || [];
-  /* self-created: the position createInstance() already staged and told  */
-  /* the server about. Replayed (list-instances, or another client's       */
-  /* create-instance): no local stake in it yet - place it anywhere, the   */
-  /* X/Y subscribe below corrects it to the real value almost immediately. */
+  /* self-created: the position/container createInstance() already staged  */
+  /* and told the server about. Replayed (list-instances, or another        */
+  /* client's create-instance): no local stake in it yet - place it         */
+  /* anywhere, the X/Y subscribe below corrects it almost immediately.     */
   const pos = pendingPositions[alias] || { x: 30, y: 30 };
   delete pendingPositions[alias];
+  container = container || pendingContainers[alias] || '';
+  delete pendingContainers[alias];
 
   /* a View is not a special client-side concept (the Palette included -   */
   /* it's just a View whose bootstrap children happen to have Container    */
@@ -745,7 +845,15 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   /* because it's the one class that actually contains other instances,    */
   /* not because it's a Palette.                                           */
   if (className === 'View') {
-    registerView(alias, props, pos, false, container);
+    registerView(alias, props, pos, hidden, container);
+    return;
+  }
+
+  /* a real Alias instance: a doorway to one property of another object -   */
+  /* rendered from its own Target/TargetProp/Widget/Label properties as     */
+  /* they arrive, bound to the original's value through the node-level link */
+  if (className === 'Alias') {
+    registerAliasAtom(alias, pos, container);
     return;
   }
 
@@ -769,10 +877,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
 /* in/out anchors are the exact same aliases as the panel's, just a second   */
 /* place to click them (see the iconDots/panelRows swap in setExpanded      */
 /* below): collapsed or expanded is a display choice, not a different        */
-/* object or a different wire. isCopy: see registerWidgetAtom's doc          */
-/* comment - the exact same reasoning applies here (bind every control to    */
-/* the same alias, but position and instances[]/copyRenderings registration  */
-/* diverge for a second rendering).                                          */
+/* object or a different wire.                                               */
 function registerCard(alias, className, props, pos, isCopy, container) {
   const wrap = document.createElement('div');
   wrap.className = 'instance-wrap';
@@ -788,15 +893,20 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   icon.appendChild(makeDisplayWidget('LED', alias, 'State'));
   wrap.appendChild(icon);
 
+  /* the panel is the icon's control panel - a separate thing with its    */
+  /* own independent life, handled by the exact same registerPanel every   */
+  /* view uses: it opens at the ROOT (panels are all peers, never nested),  */
+  /* sits at its own shared PanelX/PanelY, and neither opening nor moving   */
+  /* it ever touches the icon                                               */
   const panel = document.createElement('div');
   panel.className = 'node-box';
-  panel.style.display = 'none';
 
   const header = document.createElement('div');
   header.className = 'node-header';
   const title = document.createElement('span');
   title.className = 'node-title';
-  title.textContent = alias + (isCopy ? ' (copy)' : '');
+  title.textContent = baseName(alias);
+  title.title = alias;
   const cls = document.createElement('span');
   cls.className = 'node-class';
   cls.textContent = className;
@@ -845,6 +955,16 @@ function registerCard(alias, className, props, pos, isCopy, container) {
       /* wrap it and register its own real, separately addressable instance  */
       /* - see wireable() above) - nothing more to do here, this row is       */
       /* just its layout, not a second thing to click                        */
+
+      /* "copying out a control": in Alias mode, drag this row into any     */
+      /* view and drop it - a real Alias instance of THIS object's property  */
+      /* lands there (create-alias, bridge.c), reading and writing the one   */
+      /* true value through the link. That's how instrument panels are       */
+      /* built.                                                               */
+      row.onmousedown = ((propName) => (ev) => {
+        if (effectiveMode(row) !== 'Alias') return;
+        startGestureDrag(ev, 'alias', { of: alias, prop: propName }, 'alias: ' + alias + '.' + propName);
+      })(p.Name);
     } else if (p.Direction === 'in' || p.Direction === 'out') {
       const hasControl = DISPLAY_WIDGET_CLASS[p.Widget] || INPUT_WIDGET_CLASS[p.Widget];
 
@@ -897,42 +1017,26 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   footer.appendChild(makeButtonWidget(alias));
   panel.appendChild(footer);
 
-  wrap.appendChild(panel);
+  /* wires re-anchor to whichever representation shows the port best:      */
+  /* the panel's rows while it's open here, the icon's dots when not       */
+  const p = registerPanel(alias, panel, 'block', (open) => {
+    for (const name in ports) ports[name] = open ? panelRows[name] : iconDots[name];
+  });
 
-  /* collapsed <-> expanded is a display choice, not a mode-gated gesture -   */
-  /* it's always available, the same as Activate always is - but the CLICK    */
-  /* that opens it only fires in Operate mode (or whatever a containing        */
-  /* View's own Mode override resolves to - effectiveMode), so Delete/Clone/   */
-  /* Copy/Connect clicking the icon still does THEIR thing instead. Toggling   */
-  /* re-anchors every bare port's wires to whichever representation is now     */
-  /* visible - same alias, same prop, just a different element to draw to.    */
-  function setExpanded(next) {
-    icon.style.display = next ? 'none' : 'flex';
-    panel.style.display = next ? 'block' : 'none';
-    for (const name in ports) ports[name] = next ? panelRows[name] : iconDots[name];
-    updateWiresFor(alias);
-  }
+  icon.addEventListener('click', () => { if (effectiveMode(icon) === 'Operate') p.setOpen(true); });
+  collapseBtn.addEventListener('click', (ev) => { ev.stopPropagation(); p.setOpen(false); });
 
-  icon.addEventListener('click', () => { if (effectiveMode(icon) === 'Operate') setExpanded(true); });
-  collapseBtn.addEventListener('click', (ev) => { ev.stopPropagation(); setExpanded(false); });
-
-  icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, isCopy ? null : alias); };
-  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startDrag(ev, wrap, isCopy ? null : alias); };
+  /* aliasing a thing is aliasing its icon - the alias opens this same    */
+  /* panel (Open rides the link), exactly like aliasing a view            */
+  icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
+  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, alias, panel); };
   attachDeleteGesture(wrap, alias);
-  attachCloneGesture(wrap, alias, className);
-  attachCopyGesture(wrap, alias, className);
+  attachOptionsGesture(wrap, alias);
 
   /* an out port still needs its own subscribe wherever this rendering      */
   /* lives - message-flowed log lines aren't state, there's nothing to       */
   /* double up on the way a data property's live value would be              */
   for (const portName of outPorts) send({ cmd: 'subscribe', instance: alias, port: portName });
-
-  if (isCopy) {
-    $('canvas').appendChild(wrap);
-    (copyRenderings[alias] = copyRenderings[alias] || []).push(wrap);
-    log('copied ' + alias, 'event');
-    return;
-  }
 
   /* instance-created carries Container inline - see registerWidgetAtom's   */
   /* matching comment                                                       */
@@ -975,15 +1079,8 @@ function onPropertyChanged(alias, port, value) {
     else livePos.el.style.top = n + 'px';
     updateWiresFor(alias);
   }
-  /* same "our own in-flight gesture wins" reasoning as X/Y above, just for  */
-  /* W/H - only a View ever subscribes to these, so this is a no-op for      */
-  /* everything else                                                        */
-  if (livePos && (port === 'W' || port === 'H') && (!resizeState || resizeState.alias !== alias)) {
-    const n = parseInt(value, 10) || 0;
-    if (port === 'W') livePos.el.style.width = n + 'px';
-    else livePos.el.style.height = n + 'px';
-    updateWiresFor(alias);
-  }
+  /* W/H land on the view's panel in the views branch below - nothing else */
+  /* subscribes to them                                                     */
 
   /* where this instance renders - the top-level canvas ("") or a real       */
   /* View's own inner area (its alias) - arrives the same asynchronous way   */
@@ -994,19 +1091,47 @@ function onPropertyChanged(alias, port, value) {
     if (inst) placeInContainer(inst.el, value);
   }
 
-  /* a View's own two special property VALUES (view.c's doc comment) -      */
-  /* Mode drives effectiveMode() for everything rendered inside it, tagged   */
-  /* onto the inner element too so the CSS pointer-events rule (style.css)   */
-  /* can see it without a per-frame JS pass; Resizeable just shows/hides      */
-  /* the corner handle.                                                      */
+  /* a View's own rendering properties (the old per-View Mode override is  */
+  /* gone - one session mode, every view equal). W/H size the panel, not   */
+  /* the wrap, so the closed icon keeps its natural size.                   */
+  /* every thing's panel, view and card alike, syncs the same way */
+  const pnl = panels[alias];
+  if (pnl) {
+    /* Open's stored value is the initial presentation only - after       */
+    /* first paint, open/closed is this window's own business              */
+    if (port === 'Open' && !pnl.openApplied) {
+      pnl.openApplied = true;
+      pnl.setOpen(value === '1');
+    }
+    /* same "our own in-flight gesture wins" reasoning as X/Y above */
+    else if (port === 'PanelX' && (!panelDrag || panelDrag.alias !== alias)) {
+      pnl.el.style.left = (parseInt(value, 10) || 0) + 'px';
+      updateWiresFor(alias);
+    } else if (port === 'PanelY' && (!panelDrag || panelDrag.alias !== alias)) {
+      pnl.el.style.top = (parseInt(value, 10) || 0) + 'px';
+      updateWiresFor(alias);
+    }
+  }
+
   const view = views[alias];
   if (view) {
-    if (port === 'Mode') {
-      view.mode = value || '';
-      view.innerEl.dataset.viewMode = view.mode;
-    } else if (port === 'Resizeable') {
-      view.resizeHandle.style.display = value === '0' ? 'none' : 'block';
+    if (port === 'Resizeable') view.resizeHandle.style.display = value === '0' ? 'none' : 'block';
+    else if (port === 'W' && (!resizeState || resizeState.alias !== alias)) {
+      view.panel.style.width = (parseInt(value, 10) || 190) + 'px';
+      updateWiresFor(alias);
+    } else if (port === 'H' && (!resizeState || resizeState.alias !== alias)) {
+      view.panel.style.height = (parseInt(value, 10) || 220) + 'px';
+      updateWiresFor(alias);
     }
+  }
+
+  /* an Alias atom assembles itself from its own properties as they arrive  */
+  /* (Target/TargetProp say what it stands for, Widget/Label are its own    */
+  /* presentation) - see registerAliasAtom                                   */
+  const aliasAtom = aliasAtoms[alias];
+  if (aliasAtom && (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Label')) {
+    aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
+    renderAliasControl(alias);
   }
 
   const w = widgets[alias];
@@ -1124,9 +1249,35 @@ function attachDeleteGesture(el, alias) {
   el.addEventListener('click', (ev) => {
     if (effectiveMode(el) !== 'Delete') return;
     ev.stopPropagation();
-    send({ cmd: 'delete-instance', instance: alias });
-    onInstanceRemoved(alias);
+    const cur = aliasOfEl(el, alias);
+    send({ cmd: 'delete-instance', instance: cur });
+    onInstanceRemoved(cur);
   });
+}
+
+/* Options mode: click a thing and its INTERNALS view opens - a real View  */
+/* the server builds lazily (once, shared by everyone), holding one real    */
+/* Alias per published property, each a live link into the object's data.   */
+/* The controls in it are ordinary instances: clone them, alias them, move  */
+/* them, rearrange the view - there is no second kind of control panel.     */
+function attachOptionsGesture(el, alias) {
+  el.addEventListener('click', (ev) => {
+    if (effectiveMode(el) !== 'Options') return;
+    ev.stopPropagation();
+    send({ cmd: 'internals', instance: aliasOfEl(el, alias) });
+  });
+}
+
+/* the server's answer to an internals ask: which view is this thing's     */
+/* panel - open it in this window (retrying briefly if the view's own      */
+/* instance-created is still in flight ahead of us)                         */
+function onInternals(viewAlias, tries) {
+  const p = panels[viewAlias];
+  if (p) {
+    p.setOpen(true);
+    return;
+  }
+  if ((tries || 0) < 10) setTimeout(() => onInternals(viewAlias, (tries || 0) + 1), 200);
 }
 
 /* a new, independent instance of the source's class, starting from the    */
@@ -1144,70 +1295,147 @@ function attachDeleteGesture(el, alias) {
 /* onPropertyChanged) - createInstance already stages/broadcasts position     */
 /* the same way a palette click does, so cloning is just that plus copying    */
 /* the rest of what's known.                                                  */
-function cloneInstance(sourceAlias, className) {
-  const alias = createInstance(className);
+function cloneInstance(sourceAlias, className, container, pos) {
+  /* the clone is one node operation inside the engine (Bridge_CloneCmd -> */
+  /* CloneObject, deep for views with aliases remapped onto the clones) -  */
+  /* this client, and every other one, just renders the instance-created   */
+  /* broadcasts that come back                                             */
+  send({ cmd: 'clone-instance', of: sourceAlias, container: container || '',
+         x: String(Math.round(pos.x)), y: String(Math.round(pos.y)) });
+  log('cloned ' + sourceAlias, 'event');
+}
 
-  const props = classes[className] || [];
-  for (const p of props) {
-    if (p.Direction !== 'data' || ['State', 'X', 'Y', 'W', 'H', 'Container', 'Deletable'].includes(p.Name)) continue;
-    const known = propertyValues[sourceAlias + '.' + p.Name];
-    if (known !== undefined) send({ cmd: 'set-property', instance: alias, prop: p.Name, value: known });
+/* --- an Alias instance's rendering: its own presentation, the original's --- */
+/* --- value (see registerAliasAtom / the alias branch of                  --- */
+/* --- onPropertyChanged; the mechanism is the node-level link, object.c)  --- */
+
+/* (re)build the alias atom's control once Target/TargetProp are known (or  */
+/* after its Widget/Label presentation properties change). Reads subscribe  */
+/* to the TARGET - events speak the original's name, one tap serves every    */
+/* alias of it - while edits write through the ALIAS, exercising the link.   */
+function renderAliasControl(alias) {
+  const rec = aliasAtoms[alias];
+  if (!rec || !rec.target || !rec.targetProp) return;
+
+  /* an alias of a thing's Open is another icon for the same thing -      */
+  /* clicking it opens the ONE panel, whether the target is a view or a    */
+  /* card; twelve icons anywhere are twelve doorways to one window         */
+  if (rec.targetProp === 'Open') {
+    rec.slot.textContent = '';
+    const ic = document.createElement('div');
+    ic.className = 'instance-icon';
+    const lb = document.createElement('span');
+    lb.className = 'instance-icon-label';
+    lb.textContent = rec.label || baseName(rec.target);
+    lb.title = rec.target;
+    ic.appendChild(lb);
+    ic.addEventListener('click', () => {
+      const p = panels[rec.target];
+      if (effectiveMode(ic) === 'Operate' && p) p.setOpen(true);
+    });
+    rec.slot.appendChild(ic);
+    rec.control = ic;
+    rec.labelEl.textContent = '';
+    instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
+    instances[alias].ports['Value'] = rec.el;
+    return;
   }
 
-  log('cloned ' + sourceAlias + ' → ' + alias, 'event');
+  /* presentation is the alias's own: Widget picks the control class, its   */
+  /* default inferred from what the target's class published for that prop  */
+  let widgetClass = rec.widget;
+  if (!widgetClass) {
+    const targetInst = instances[rec.target];
+    const targetProps = (targetInst && classes[targetInst.className]) || [];
+    const p = targetProps.find((q) => q.Name === rec.targetProp);
+    widgetClass = (p && (INPUT_WIDGET_CLASS[p.Widget] || DISPLAY_WIDGET_CLASS[p.Widget])) || 'Textbox';
+  }
+
+  rec.slot.textContent = '';
+  /* reads subscribe to the target (events speak the original's name);    */
+  /* writes go through the alias's own "Value" slot - the doorway - so     */
+  /* the alias's own Name/Container/X/Y are never touched                  */
+  const el = bindLiveControl(rec.target, rec.targetProp, widgetClass, propertyValues[rec.target + '.' + rec.targetProp],
+    (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v }));
+  el.classList && el.classList.add('widget-atom-control');
+  rec.slot.appendChild(el);
+  rec.control = el;
+
+  rec.labelEl.textContent = rec.label || (baseName(rec.target) + '.' + rec.targetProp);
+
+  /* wiring through the alias is wiring to the original (ResolvePort,       */
+  /* object.c) - the atom arms a wire on its doorway slot                    */
+  instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
+  instances[alias].ports['Value'] = rec.el;
 }
 
-/* Clone mode's gesture: click anywhere on a card/atom to spin off an       */
-/* independent copy of it - same pattern as attachDeleteGesture. This is     */
-/* also the ENTIRE mechanism behind "the Palette is a permanent Clone         */
-/* station": its Mode="Clone" (BuildPalette, object.c) makes effectiveMode    */
-/* return "Clone" for anything inside it no matter what the session's own    */
-/* mode is, so clicking a palette icon always clones, full stop - nothing     */
-/* palette-specific written here at all.                                     */
-function attachCloneGesture(el, alias, className) {
-  el.addEventListener('click', (ev) => {
-    if (effectiveMode(el) !== 'Clone') return;
-    ev.stopPropagation();
-    cloneInstance(alias, className);
+function registerAliasAtom(alias, pos, container) {
+  const el = document.createElement('div');
+  el.className = 'widget-atom alias-atom';
+  el.style.left = pos.x + 'px';
+  el.style.top = pos.y + 'px';
+
+  const slot = document.createElement('span');
+  slot.className = 'alias-slot';
+  slot.textContent = '…';
+  el.appendChild(slot);
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'widget-atom-label';
+  labelEl.textContent = baseName(alias);
+  labelEl.title = alias;
+  el.appendChild(labelEl);
+
+  aliasAtoms[alias] = { el, slot, labelEl, target: '', targetProp: '', widget: '', label: '', control: null };
+
+  el.addEventListener('click', () => {
+    const rec = aliasAtoms[alias];
+    if (rec && rec.targetProp) onPortClick(alias, 'Value', el);
   });
-}
 
-/* another rendering of the SAME real object, not a new instance - reuses   */
-/* the identical registerWidgetAtom/registerCard construction the original   */
-/* went through (isCopy=true), just bound to sourceAlias again instead of a  */
-/* freshly created one. No create-instance, no new alias: subscribing is    */
-/* the entire mechanism, exactly as discussed - editing a copy's control     */
-/* still writes back to sourceAlias (it's the one real object), and every    */
-/* value this copy is hydrated with on arrival goes through updateReadout/   */
-/* updateLiveControl, which only ever assign - they never re-send, so         */
-/* nothing here can loop back out as a spurious set-property.                */
-/*                                                                            */
-/* KNOWN GAP (ROADMAP.md, Phase 8): a Copy has no path of its own. Every      */
-/* other rendering now follows "no creation path, only a current path" -      */
-/* this one doesn't - registerCard/registerWidgetAtom's isCopy branch always  */
-/* drops it on the top-level canvas regardless of where sourceAlias currently  */
-/* lives, and it is never reparented if the source later moves (Bridge_Rename  */
-/* only re-keys instances{}/etc, isCopy renderings live in copyRenderings{}    */
-/* and are deliberately never placeInContainer'd at all). Needs a real design   */
-/* decision, not a patch here - see the roadmap note.                          */
-function renderCopy(sourceAlias, className) {
-  const props = classes[className] || [];
-  const pos = nextPos;
-  nextPos = { x: (nextPos.x + 40) % 500 + 30, y: nextPos.y + (nextPos.x > 460 ? 130 : 0) + 0 };
+  /* an alias is as alias-able and clone-able as anything else. Alias      */
+  /* makes another alias of the same target (chains collapse to the        */
+  /* original); Clone goes through the alias to the THING and snapshots    */
+  /* it - a new independent instance of the target's class with a copy of  */
+  /* its current data, exactly what cloning the thing itself gives you.    */
+  el.onmousedown = (ev) => {
+    const cur = aliasOfEl(el, alias);   /* survives renames/moves */
+    const rec = aliasAtoms[cur];
+    if (!rec || ev.target === rec.control) return;
+    const mode = effectiveMode(el);
+    if (mode === 'Alias' && rec.target && rec.targetProp) {
+      /* through the doorway slot - the server resolves and records the  */
+      /* real target and property name                                    */
+      startGestureDrag(ev, 'alias', { of: cur, prop: 'Value' },
+        'alias: ' + baseName(rec.target) + '.' + rec.targetProp);
+      return;
+    }
+    if (mode === 'Clone' && rec.target) {
+      /* the server resolves through the alias and snapshots the thing */
+      startGestureDrag(ev, 'clone', { sourceAlias: cur, className: 'Alias' },
+        'clone: ' + baseName(rec.target));
+      return;
+    }
+    startDrag(ev, el, cur, 'Alias');
+  };
+  attachDeleteGesture(el, alias);
+  attachOptionsGesture(el, alias);
 
-  if (WIDGET_CLASSES.has(className)) registerWidgetAtom(sourceAlias, className, props, pos, true);
-  else registerCard(sourceAlias, className, props, pos, true);
-}
+  placeInContainer(el, container || '');
+  instances[alias] = { className: 'Alias', el, ports: {} };
+  livePositions[alias] = { el };
+  send({ cmd: 'subscribe', instance: alias, port: 'X' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Y' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Container' });
 
-/* Copy mode's gesture: click anywhere on a card/atom to open another live  */
-/* view onto the same object - same pattern as attachDeleteGesture/          */
-/* attachCloneGesture                                                        */
-function attachCopyGesture(el, alias, className) {
-  el.addEventListener('click', (ev) => {
-    if (effectiveMode(el) !== 'Copy') return;
-    ev.stopPropagation();
-    renderCopy(alias, className);
-  });
+  /* what it stands for + its own presentation - the atom assembles itself  */
+  /* as these arrive (onPropertyChanged's aliasAtoms branch)                */
+  send({ cmd: 'subscribe', instance: alias, port: 'Target' });
+  send({ cmd: 'subscribe', instance: alias, port: 'TargetProp' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Widget' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Label' });
+
+  log('created ' + alias + ' (Alias)', 'event');
 }
 
 /* Delete mode's own gesture (above) already removes the card locally      */
@@ -1220,13 +1448,17 @@ function onInstanceRemoved(alias) {
     inst.el.remove();
     delete instances[alias];
   }
+  /* every thing's panel is a separate element at the root - take it along */
+  if (panels[alias]) {
+    panels[alias].el.remove();
+    delete panels[alias];
+  }
+  if (views[alias]) {
+    delete views[alias];
+    delete loadedContainers[alias];
+  }
   delete livePositions[alias];
-
-  /* the object is gone - every copy of it (see renderCopy) is a rendering  */
-  /* of that same now-nonexistent object, not a separate thing that can       */
-  /* survive on its own                                                       */
-  for (const el of copyRenderings[alias] || []) el.remove();
-  delete copyRenderings[alias];
+  delete aliasAtoms[alias];
 
   wires = wires.filter((w) => {
     if (w.fromAlias !== alias && w.toAlias !== alias) return true;
@@ -1245,11 +1477,9 @@ function onInstanceRemoved(alias) {
 /* own.                                                                       */
 /*                                                                            */
 /* Known gap: gesture handlers attached at creation (attachDeleteGesture/     */
-/* attachCloneGesture/attachCopyGesture/startDrag/onPortClick) close over      */
-/* the alias they were built with rather than re-reading it live, so a        */
-/* delete/clone/copy/drag/wire issued against a card AFTER it has been         */
-/* renamed (today, only reachable by editing its Container property row       */
-/* directly - there is no drag-between-Views gesture yet) will fail until      */
+/* startDrag/onPortClick) close over the alias they were built with rather     */
+/* than re-reading it live, so a gesture issued against a card AFTER it has    */
+/* been renamed (now reachable by dragging it between views) will fail until    */
 /* the page reloads. Making every gesture closure re-resolve its alias live    */
 /* is a real follow-up, not done here.                                         */
 function onInstanceRenamed(oldAlias, newAlias) {
@@ -1263,10 +1493,12 @@ function onInstanceRenamed(oldAlias, newAlias) {
   };
   moveKey(instances);
   moveKey(views);
+  moveKey(panels);
   moveKey(livePositions);
   moveKey(menuButtons);
-  moveKey(copyRenderings);
+  moveKey(aliasAtoms);
   moveKey(widgets);
+  moveKey(loadedContainers);
 
   const prefix = oldAlias + '.';
   const rekeyProps = (map) => {
@@ -1288,14 +1520,106 @@ function onInstanceRenamed(oldAlias, newAlias) {
 
   if (views[newAlias]) views[newAlias].innerEl.dataset.viewAlias = newAlias;
 
+  /* what's painted on the thing follows its name - icon labels, card and  */
+  /* panel titles, atom labels, wherever this alias shows itself           */
+  const newBase = baseName(newAlias);
+  const relabel = (rootEl) => {
+    if (!rootEl) return;
+    for (const sel of ['.instance-icon-label', '.node-title', '.widget-atom-label']) {
+      const el = rootEl.querySelector(sel);
+      if (el) { el.textContent = newBase; el.title = newAlias; }
+    }
+  };
+  if (instances[newAlias]) relabel(instances[newAlias].el);
+  if (panels[newAlias]) relabel(panels[newAlias].el);
+  if (views[newAlias]) {
+    const s = views[newAlias].header.querySelector('span');
+    if (s) { s.textContent = newBase; s.title = newAlias; }
+  }
+  const atom = aliasAtoms[newAlias];
+  if (atom && !atom.label) atom.labelEl.textContent = baseName(atom.target) + '.' + atom.targetProp;
+
   log(oldAlias + ' → ' + newAlias, 'event');
 }
 
-/* alias is null for something draggable that isn't a registered instance  */
-/* (the palette panel itself, see below) - it moves locally same as ever,  */
-/* it just has no server-side X/Y to write back on release                 */
-function startDrag(ev, el, alias) {
-  if (effectiveMode(el) !== 'Move') return;
+/* --- the drop primitive: where you release IS where it lives ------------ */
+
+/* what view is under the cursor (skipping ignoreEl, usually the thing      */
+/* being dragged) and the cursor's position relative to that view's inner   */
+/* area - Root is just the outermost view, reported as container "" with    */
+/* canvas coordinates. This one function is what makes Clone, Alias, and    */
+/* Move all "drag and drop into any view" with no view special-cased.       */
+function dropTargetAt(ev, ignoreEl) {
+  let restore = null;
+  if (ignoreEl) {
+    restore = ignoreEl.style.pointerEvents;
+    ignoreEl.style.pointerEvents = 'none';
+  }
+  const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+  if (ignoreEl) ignoreEl.style.pointerEvents = restore || '';
+
+  const inner = hit && hit.closest('.view-inner');
+  if (inner && inner.dataset.viewAlias && (!ignoreEl || !ignoreEl.contains(inner))) {
+    const rect = inner.getBoundingClientRect();
+    return {
+      container: inner.dataset.viewAlias,
+      x: Math.max(0, ev.clientX - rect.left + inner.scrollLeft),
+      y: Math.max(0, ev.clientY - rect.top + inner.scrollTop),
+    };
+  }
+
+  const canvas = $('canvas');
+  const rect = canvas.getBoundingClientRect();
+  return {
+    container: '',
+    x: Math.max(0, ev.clientX - rect.left),
+    y: Math.max(0, ev.clientY - rect.top),
+  };
+}
+
+/* Clone and Alias are pick-then-place, deterministic: the first click     */
+/* picks up a ghost (the source never moves), the ghost follows the         */
+/* pointer, and the NEXT click places it - wherever you point is exactly    */
+/* where it lands. Esc cancels the carry. No press-drag-release timing      */
+/* to get right.                                                            */
+function startGestureDrag(ev, kind, data, labelText) {
+  cancelGestureDrag();
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  ghost.textContent = labelText;
+  document.body.appendChild(ghost);
+  gestureDrag = { kind, data, ghost };
+  ghost.style.left = (ev.clientX + 8) + 'px';
+  ghost.style.top = (ev.clientY + 8) + 'px';
+  ev.preventDefault();
+  ev.stopPropagation();
+}
+
+function cancelGestureDrag() {
+  if (!gestureDrag) return;
+  gestureDrag.ghost.remove();
+  gestureDrag = null;
+}
+
+/* the shared mousedown for every card/atom/view - one dispatch, no          */
+/* per-view or per-kind modes: Move drags the thing itself, Clone drags a   */
+/* ghost that creates an independent instance where dropped, Alias (on a    */
+/* widget atom) drags a ghost that creates an Alias of its primary control  */
+function startDrag(ev, el, alias, className, primaryProp) {
+  const mode = effectiveMode(el);
+  alias = aliasOfEl(el, alias);   /* the CURRENT name, not the birth name */
+
+  if (mode === 'Clone' && alias && className) {
+    startGestureDrag(ev, 'clone', { sourceAlias: alias, className }, 'clone: ' + className);
+    return;
+  }
+
+  if (mode === 'Alias' && alias && primaryProp) {
+    startGestureDrag(ev, 'alias', { of: alias, prop: primaryProp }, 'alias: ' + baseName(alias) + '.' + primaryProp);
+    return;
+  }
+
+  if (mode !== 'Move') return;
 
   const rect = el.getBoundingClientRect();
   dragState = {
@@ -1307,26 +1631,112 @@ function startDrag(ev, el, alias) {
   ev.preventDefault();
 }
 
+/* position is relative to whatever positioned ancestor the element        */
+/* currently sits in (.view-inner is position:relative; the canvas is the   */
+/* outermost case) - correct DOM nesting instead of coordinate math         */
 document.addEventListener('mousemove', (ev) => {
+  if (gestureDrag) {
+    gestureDrag.ghost.style.left = (ev.clientX + 8) + 'px';
+    gestureDrag.ghost.style.top = (ev.clientY + 8) + 'px';
+    return;
+  }
+  if (panelDrag) {
+    const canvas = $('canvas');
+    const rect = canvas.getBoundingClientRect();
+    panelDrag.el.style.left = Math.max(0, ev.clientX - rect.left - panelDrag.offsetX) + 'px';
+    panelDrag.el.style.top = Math.max(0, ev.clientY - rect.top - panelDrag.offsetY) + 'px';
+    return;
+  }
   if (!dragState) return;
-  const wrap = $('canvas-wrap');
-  const x = ev.clientX - wrap.getBoundingClientRect().left + wrap.scrollLeft - dragState.offsetX;
-  const y = ev.clientY - wrap.getBoundingClientRect().top + wrap.scrollTop - dragState.offsetY;
+  const parentEl = dragState.el.offsetParent || $('canvas');
+  const rect = parentEl.getBoundingClientRect();
+  const x = ev.clientX - rect.left + parentEl.scrollLeft - dragState.offsetX;
+  const y = ev.clientY - rect.top + parentEl.scrollTop - dragState.offsetY;
   dragState.el.style.left = Math.max(0, x) + 'px';
   dragState.el.style.top = Math.max(0, y) + 'px';
   if (dragState.alias) updateWiresFor(dragState.alias);
 });
 
-document.addEventListener('mouseup', () => {
+/* the placing click - capture phase, so nothing under the cursor reacts   */
+/* to it (the click means "put it here", not "press this"). The arming     */
+/* click never reaches here: startGestureDrag runs from an element         */
+/* handler after capture has already passed, and stops propagation.        */
+document.addEventListener('mousedown', (ev) => {
+  if (!gestureDrag) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+
+  const g = gestureDrag;
+  gestureDrag = null;
+  g.ghost.remove();
+
+  /* clicking off the canvas (the topbar, say) is a cancel, not a place */
+  if (!ev.target.closest || !ev.target.closest('#canvas-wrap')) {
+    log('cancelled ' + g.kind, 'event');
+    return;
+  }
+
+  const drop = dropTargetAt(ev, null);
+
+  {
+    if (g.kind === 'clone') {
+      cloneInstance(g.data.sourceAlias, g.data.className, drop.container, { x: drop.x, y: drop.y });
+    } else if (g.kind === 'alias') {
+      /* one verb carrying the whole intent - the server names it and    */
+      /* places it in a single atomic birth (see readmefirst.md); this    */
+      /* client learns the name from the instance-created that comes back */
+      send({ cmd: 'create-alias', of: g.data.of, prop: g.data.prop,
+             container: drop.container, x: String(Math.round(drop.x)), y: String(Math.round(drop.y)) });
+      log('aliased ' + g.data.of + '.' + g.data.prop, 'event');
+    }
+  }
+}, true);
+
+/* Esc drops whatever is being carried, nothing happens anywhere */
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && gestureDrag) {
+    cancelGestureDrag();
+    log('cancelled', 'event');
+  }
+});
+
+document.addEventListener('mouseup', (ev) => {
+  if (panelDrag) {
+    /* commit the panel's place - the panel's own shared properties, the  */
+    /* icon's X/Y untouched                                                */
+    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'PanelX', value: String(parseInt(panelDrag.el.style.left, 10) || 0) });
+    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'PanelY', value: String(parseInt(panelDrag.el.style.top, 10) || 0) });
+    panelDrag = null;
+    return;
+  }
   if (dragState && dragState.alias) {
     /* the identical command an edited textbox sends - moving a card is    */
     /* not a different kind of thing from changing a value, it's the same  */
-    /* set-property on X/Y, so it reflects back to every connected window   */
-    /* through the same subscribe/property-changed path as anything else    */
-    const x = parseInt(dragState.el.style.left, 10) || 0;
-    const y = parseInt(dragState.el.style.top, 10) || 0;
-    send({ cmd: 'set-property', instance: dragState.alias, prop: 'X', value: String(x) });
-    send({ cmd: 'set-property', instance: dragState.alias, prop: 'Y', value: String(y) });
+    /* set-property on X/Y (and Container when the drop crossed into a      */
+    /* different view - entering and leaving views is just moving).         */
+    /* Resolved to the CURRENT name - the drag may span a rename ago.       */
+    const alias = aliasOfEl(dragState.el, dragState.alias);
+    const inst = instances[alias];
+    const drop = dropTargetAt(ev, dragState.el);
+    const view = views[alias];
+    const escapesItself = view && (drop.container === alias);
+
+    const currentInner = dragState.el.parentElement;
+    const currentContainer = (currentInner && currentInner.dataset && currentInner.dataset.viewAlias) || '';
+
+    if (!escapesItself && drop.container !== currentContainer) {
+      send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(drop.x - dragState.offsetX) });
+      send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(drop.y - dragState.offsetY) });
+      send({ cmd: 'set-property', instance: alias, prop: 'Container', value: drop.container });
+      dragState.el.style.left = Math.max(0, drop.x - dragState.offsetX) + 'px';
+      dragState.el.style.top = Math.max(0, drop.y - dragState.offsetY) + 'px';
+      if (inst) placeInContainer(inst.el, drop.container);
+    } else {
+      const x = parseInt(dragState.el.style.left, 10) || 0;
+      const y = parseInt(dragState.el.style.top, 10) || 0;
+      send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(x) });
+      send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(y) });
+    }
   }
   dragState = null;
 });

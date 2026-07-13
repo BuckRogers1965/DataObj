@@ -156,6 +156,19 @@ RemoveTaskFromList(TaskPtr task){
 	if (!task->linked)
 		return;
 
+	/* a task leaving the chain must never remain the insert hint:     */
+	/* ActivateTimedTasks moves due tasks into the runnow chain (where  */
+	/* AddTaskToTail sets linked=1 again), and a hint still pointing at */
+	/* one passed AddTaskDelay's validity check, sent its insert walk   */
+	/* down the WRONG chain, and appended the new task - a due-now poll */
+	/* re-arm, say - unsorted at the main list's tail, behind whatever  */
+	/* far-future timers were parked there. ActivateTimedTasks stops at */
+	/* the first non-due entry, so that task then sat unrunnable until  */
+	/* the unrelated timer ahead of it fired: the "web server stalls    */
+	/* for ~20s until some other flow's timer goes off" stutter.        */
+	if (list->insertHint == task)
+		list->insertHint = NULL;
+
 	if (!task->prev){
 		list->head = task->next;
 	} else {

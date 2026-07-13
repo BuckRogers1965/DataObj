@@ -37,6 +37,13 @@ struct node
 	NodeObj class;
 	NodeObj child;
 	NodeObj nextSib;
+
+	/* symlink: when set, this node stands for another node - an alias's  */
+	/* control property links to the original's, so value, subscribers,   */
+	/* and wiring all live in exactly one place. Non-owning pointer;      */
+	/* resolution happens at the port-resolution choke points (object.c), */
+	/* and DeleteInstance scrubs links aimed at a dying instance.          */
+	NodeObj link;
 } node;
 
 #include "callback.h"
@@ -146,8 +153,42 @@ NewNode(int type)
 		temp->parent = NULL;
 		temp->child = NULL;
 		temp->nextSib = NULL;
+		temp->link = NULL;
 	}
 	return temp;
+}
+
+/* make node a symlink standing for target (NULL unlinks). The link is  */
+/* non-owning: deleting the link node never touches the target, and     */
+/* whoever deletes the target is responsible for scrubbing links aimed  */
+/* at it (ScrubLinks, object.c)                                          */
+void LinkNode(NodeObj node, NodeObj target)
+{
+	if (!node)
+		return;
+
+	node->link = target;
+}
+
+NodeObj GetNodeLink(NodeObj node)
+{
+	if (!node)
+		return NULL;
+
+	return node->link;
+}
+
+/* follow a link chain to the node it ultimately stands for - depth-     */
+/* capped so a cycle degrades into "stops resolving" instead of hanging  */
+/* the fabric. A node with no link resolves to itself.                    */
+NodeObj ResolveNode(NodeObj node)
+{
+	int depth = 8;
+
+	while (node && node->link && depth--)
+		node = node->link;
+
+	return node;
 }
 
 void SetName(NodeObj node, char *name)
@@ -1264,6 +1305,47 @@ void InterceptTest()
 	DelNode(node);
 }
 
+void LinkTest()
+{
+	NodeObj original, aliasProp, second;
+
+	printf("\n\nRunning node link (symlink) tests\n\n");
+
+	original = NewNode(STRING);
+	SetName(original, "Original");
+	SetValueStr(original, "truth");
+
+	aliasProp = NewNode(STRING);
+	SetName(aliasProp, "Alias");
+	LinkNode(aliasProp, original);
+
+	printf("Plain node resolves to itself: %d\n", ResolveNode(original) == original);
+	printf("Linked node resolves to its target: %d\n", ResolveNode(aliasProp) == original);
+	printf("Resolved value reads the original: %d (%s)\n",
+		strcmp(GetValueStr(ResolveNode(aliasProp)), "truth") == 0,
+		GetValueStr(ResolveNode(aliasProp)));
+
+	/* chains collapse: an alias of an alias reaches the final target */
+	second = NewNode(STRING);
+	SetName(second, "SecondAlias");
+	LinkNode(second, aliasProp);
+	printf("Chained link resolves to the final target: %d\n", ResolveNode(second) == original);
+
+	/* a cycle degrades into 'stops resolving' instead of hanging */
+	LinkNode(original, second);
+	printf("Cycle survives resolution (depth cap): %d\n", ResolveNode(second) != NULL);
+	LinkNode(original, NULL);
+
+	printf("Unlink restores self-resolution: %d\n",
+		(LinkNode(second, NULL), ResolveNode(second) == second));
+
+	DelNode(second);
+	DelNode(aliasProp);
+	printf("Deleting a link never touches the target: %d (%s)\n",
+		strcmp(GetValueStr(original), "truth") == 0, GetValueStr(original));
+	DelNode(original);
+}
+
 void NodeTest()
 {
 
@@ -1284,4 +1366,5 @@ void NodeTest()
 
 	SerializationTest();
 	InterceptTest();
+	LinkTest();
 }

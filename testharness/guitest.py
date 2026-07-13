@@ -1,0 +1,589 @@
+#!/usr/bin/env python3
+"""
+GUI unit tests: drive the framework's web canvas through a real browser
+and check clone / alias / move / open / close behavior.
+
+Every check documents what was EXPECTED and what was actually OBSERVED,
+in the same print-based spirit as the C modules' own self-tests.
+
+Each test stages its artifacts in its own clearly-labelled View
+(CloneTest, AliasTest, ...) with the panels laid out in a grid, never
+stacked - and the server is left running afterwards, so after a run you
+can open a browser on the same port and dissect exactly what every test
+left behind.
+
+Run through run.sh (kill server, make clean, make, fresh server, test),
+or standalone against an already-running pair:
+
+    python3 testharness/guitest.py --app http://127.0.0.1:8083 --cdp 9223
+"""
+import argparse, json, sys, time
+from cdp import attach
+
+APP = "http://127.0.0.1:8083"
+CDP_PORT = 9223
+
+
+# --------------------------------------------------------------------------
+# expected-vs-observed reporting
+# --------------------------------------------------------------------------
+
+class Report:
+    def __init__(self):
+        self.results = []
+
+    def expect(self, name, expected, observed, ok):
+        self.results.append((name, expected, observed, bool(ok)))
+        print("TEST     %s" % name)
+        print("  expected: %s" % expected)
+        print("  observed: %s" % observed)
+        print("  result:   %s" % ("PASS" if ok else "FAIL"))
+        print()
+
+    def summary(self):
+        failed = [r for r in self.results if not r[3]]
+        print("=" * 60)
+        print("%d tests, %d passed, %d failed" % (len(self.results), len(self.results) - len(failed), len(failed)))
+        for name, expected, observed, _ in failed:
+            print("  FAILED: %s\n    expected: %s\n    observed: %s" % (name, expected, observed))
+        return len(failed)
+
+
+# --------------------------------------------------------------------------
+# staging: one labelled view per test, panels on a grid, icons in a row
+# --------------------------------------------------------------------------
+
+_slot = [0]
+
+def next_slot():
+    """Non-overlapping panel positions: 3 columns of 320, rows of 265."""
+    i = _slot[0]
+    _slot[0] += 1
+    return 240 + (i % 3) * 320, 60 + (i // 3) * 265
+
+
+def make_test_view(t, label):
+    """A View named for the test, icon in the top row, panel in its own
+    grid slot, opened in this window so the test can drop things into it."""
+    alias = '/Root/' + label
+    i = _slot[0]
+    px, py = next_slot()
+    t.js("send({cmd:'create-instance',class:'View',as:'%s'})" % alias)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'X',value:'%d'})" % (alias, 250 + i * 115))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Y',value:'8'})" % alias)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (alias, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (alias, py))
+    t.wait_js("!!views['%s']" % alias, label + " view")
+    t.js("panels['%s'].setOpen(true)" % alias)
+    time.sleep(0.6)
+    return alias
+
+
+def inner_center(t, view, dx=0, dy=0):
+    return t.js("(()=>{const v=views['%s'];const r=v.innerEl.getBoundingClientRect();"
+                "return {x:r.left+r.width/2+(%d),y:r.top+r.height/2+(%d)};})()" % (view, dx, dy))
+
+
+def members(t, view, pattern):
+    return t.js("(Object.keys(instances).find(k=>k.startsWith('%s/%s')) || false)" % (view, pattern))
+
+
+# --------------------------------------------------------------------------
+# the tests
+# --------------------------------------------------------------------------
+
+def install_error_trap(t):
+    t.js("window.__errs=window.__errs||[];"
+         "window.addEventListener('error',(e)=>window.__errs.push(String(e.message)))")
+
+
+def test_boot(t, r):
+    t.call("Page.enable")
+    t.call("Page.navigate", {"url": APP})
+    time.sleep(2)
+    t.wait_js("typeof instances !== 'undefined' && !!views['/Root/Palette']", "boot replay")
+    time.sleep(1.5)
+    install_error_trap(t)
+    t.hook_events()
+
+    palette_open = t.js("panels['/Root/Palette'].el.style.display !== 'none'")
+    seeds = t.js("Object.keys(instances).filter(k=>k.startsWith('/Root/Palette/')).length")
+    r.expect("boot: palette view opens with its seeds",
+             "palette panel open (initial Open=1) and >5 class seeds fetched on open",
+             "open=%s, seeds=%s" % (palette_open, seeds),
+             palette_open and seeds and seeds > 5)
+
+    root_only = t.js("Object.keys(instances).every(k=>{const c=propertyValues[k+'.Container'];"
+                     "return c===undefined || c==='' || c==='/Root/Palette';})")
+    r.expect("boot: only visible containers were loaded",
+             "no instance from any container this window has not opened",
+             "all known instances are root-level or palette members: %s" % root_only,
+             root_only)
+
+
+def test_clone(t, r):
+    """Clone = engine snapshot, placed by pick-then-place - staged in CloneTest."""
+    view = make_test_view(t, 'CloneTest')
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/Slider']")
+    tgt = inner_center(t, view, -25, -30)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    clone = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view, "slider clone")
+    time.sleep(0.8)
+    inside = t.js("(()=>{const i=instances['%s'];const inn=i&&i.el.closest('.view-inner');"
+                  "return inn&&inn.dataset.viewAlias;})()" % clone)
+    r.expect("clone: palette Slider -> the CloneTest view",
+             "a new independent Slider instance created where the second click landed, inside CloneTest",
+             "created %s, rendered inside %s" % (clone, inside),
+             clone and inside == view)
+
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'42'})" % clone)
+    time.sleep(0.6)
+    t.set_mode('Clone')
+    src = t.center_of("instances['%s']" % clone)
+    tgt = inner_center(t, view, 25, 40)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    clone2 = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_') && k!=='%s') || false)" % (view, clone),
+                       "second clone")
+    time.sleep(0.8)
+    snap = t.js("propertyValues['%s.Value']" % clone2)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'99'})" % clone)
+    time.sleep(0.8)
+    vals = t.js("[propertyValues['%s.Value'], propertyValues['%s.Value']]" % (clone, clone2))
+    r.expect("clone: data is a snapshot, then independent",
+             "clone starts at the source's current value (42); changing the source (99) does not move the clone",
+             "clone started at %s; after source->99 values are %s" % (snap, vals),
+             snap == "42" and vals == ["99", "42"])
+    return clone, clone2
+
+
+def test_esc_cancels(t, r):
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/LED']")
+    t.click(src["x"], src["y"])
+    carrying = t.js("!!gestureDrag")
+    before = t.js("Object.keys(instances).length")
+    t.key("Escape", 27)
+    time.sleep(0.5)
+    after = t.js("Object.keys(instances).length")
+    dropped = t.js("!gestureDrag")
+    r.expect("esc: cancels a carry",
+             "first click picks up a ghost; Esc drops it and nothing is created",
+             "carrying=%s, dropped=%s, instances %s -> %s" % (carrying, dropped, before, after),
+             carrying and dropped and before == after)
+
+
+def test_alias(t, r, slider):
+    """Alias = a doorway - staged in AliasTest, pointing at CloneTest's slider."""
+    view = make_test_view(t, 'AliasTest')
+    t.set_mode('Alias')
+    src = t.center_of("instances['%s']" % slider)
+    tgt = inner_center(t, view)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    alias = t.wait_js("(Object.keys(aliasAtoms).find(k=>aliasAtoms[k].target==='%s') || false)" % slider, "alias atom")
+    time.sleep(0.8)
+    rec = t.js("(()=>{const a=aliasAtoms['%s'];return a&&{target:a.target,prop:a.targetProp,live:!!a.control};})()" % alias)
+    r.expect("alias: slider -> alias atom in AliasTest",
+             "a real Alias instance bound to the slider's Value with a live control, living in AliasTest",
+             "%s -> %s" % (alias, rec),
+             rec and rec.get("target") == slider and rec.get("prop") == "Value" and rec.get("live")
+             and alias.startswith(view + "/"))
+
+    t.clear_events()
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'63'})" % alias)
+    time.sleep(0.8)
+    evs = t.events("m.event==='property-changed' && m.value==='63'")
+    r.expect("alias: writing through the alias writes the original",
+             "one property-changed event, speaking the ORIGINAL's name (%s)" % slider,
+             "%s" % evs,
+             evs and len(evs) == 1 and evs[0].get("instance") == slider)
+    return alias
+
+
+def test_clone_of_alias(t, r, slider, alias):
+    """Cloning an alias clones the THING - staged in CloneAliasTest."""
+    view = make_test_view(t, 'CloneAliasTest')
+    t.set_mode('Clone')
+    src = t.center_of("instances['%s']" % alias)
+    tgt = inner_center(t, view)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    clone = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view, "clone via alias")
+    time.sleep(0.8)
+    cls = t.js("instances['%s'] && instances['%s'].className" % (clone, clone))
+    snap = t.js("propertyValues['%s.Value']" % clone)
+    r.expect("clone an alias: you get the THING, snapshotted",
+             "a new Slider instance (not an Alias) in CloneAliasTest, carrying the original's current value (63)",
+             "created %s, class=%s, Value=%s" % (clone, cls, snap),
+             clone and cls == "Slider" and snap == "63")
+
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'20'})" % slider)
+    time.sleep(0.8)
+    vals = t.js("[propertyValues['%s.Value'], propertyValues['%s.Value']]" % (slider, clone))
+    r.expect("clone an alias: the snapshot is independent of the original",
+             "changing the original (20) leaves the clone at its snapshot (63)",
+             "original,clone = %s" % vals,
+             vals == ["20", "63"])
+
+
+def test_alias_of_clone(t, r, clone2, other_slider):
+    """Aliasing a clone binds to the CLONE - staged in AliasCloneTest."""
+    view = make_test_view(t, 'AliasCloneTest')
+    t.set_mode('Alias')
+    src = t.center_of("instances['%s']" % clone2)
+    tgt = inner_center(t, view)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    alias = t.wait_js("(Object.keys(aliasAtoms).find(k=>aliasAtoms[k].target==='%s') || false)" % clone2, "alias of clone")
+    time.sleep(0.8)
+    rec = t.js("(()=>{const a=aliasAtoms['%s'];return a&&{target:a.target,live:!!a.control};})()" % alias)
+    r.expect("alias a clone: the alias binds to the clone itself",
+             "an Alias instance in AliasCloneTest targeting %s (the clone), with a live control" % clone2,
+             "%s -> %s" % (alias, rec),
+             rec and rec.get("target") == clone2 and rec.get("live") and alias.startswith(view + "/"))
+
+    before = t.js("propertyValues['%s.Value']" % other_slider)
+    t.clear_events()
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'71'})" % alias)
+    time.sleep(0.8)
+    evs = t.events("m.event==='property-changed' && m.value==='71'")
+    after = t.js("propertyValues['%s.Value']" % other_slider)
+    r.expect("alias a clone: writes reach the clone, never its source",
+             "one event in the CLONE's name (%s); the instance it was cloned from stays at %s" % (clone2, before),
+             "events=%s; clone-source value %s -> %s" % (evs, before, after),
+             evs and len(evs) == 1 and evs[0].get("instance") == clone2 and after == before)
+
+
+def test_options_internals(t, r):
+    """Options: the whole dissection table - staged around OptionsTest's own slider."""
+    view = make_test_view(t, 'OptionsTest')
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/Slider']")
+    tgt = inner_center(t, view)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    thing = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view, "options subject")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'71'})" % thing)
+    time.sleep(0.6)
+
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % thing)
+    t.click(src["x"], src["y"])
+    panel_view = t.wait_js(
+        "(Object.keys(panels).find(k=>/Panel_/.test(k) && panels[k].el.style.display!=='none') || false)",
+        "internals panel")
+    # the dissection table is TALL (one row per published property) -
+    # park it in its own column on the far right, clear of the grid
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'1080'})" % panel_view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'60'})" % panel_view)
+    time.sleep(1.5)  # members stream in on open
+
+    raw = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
+               ".map(k=>({alias:k,target:aliasAtoms[k].target,prop:aliasAtoms[k].targetProp})))" % panel_view)
+    mlist = json.loads(raw) if raw else []
+    all_bound = mlist and all(m["target"] == thing for m in mlist)
+    props = sorted(m["prop"] for m in mlist)
+    whole_frog = all(p in props for p in ("Value", "State", "X", "Y", "Container", "Deletable", "Enable", "In", "Name"))
+    r.expect("options: click a thing, its ENTIRE internal state lays out",
+             "a View opens with one Alias per published property - data, position, container, ports, "
+             "everything, all bound to %s" % thing,
+             "view %s opened with members %s (all bound: %s)" % (panel_view, props, all_bound),
+             panel_view and whole_frog and all_bound)
+
+    val_member = next((m["alias"] for m in mlist if m["prop"] == "Value"), None)
+    t.clear_events()
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'35'})" % val_member)
+    time.sleep(0.8)
+    evs = t.events("m.event==='property-changed' && m.value==='35'")
+    now = t.js("propertyValues['%s.Value']" % thing)
+    r.expect("options: the panel's controls connect to the object's data",
+             "writing through the panel's Value control changes %s itself (one event, its name)" % thing,
+             "events=%s, %s.Value=%s" % (evs, thing, now),
+             evs and len(evs) == 1 and evs[0].get("instance") == thing and now == "35")
+
+    before = t.js("Object.keys(panels).filter(k=>/Panel_/.test(k)).length")
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % thing)
+    t.click(src["x"], src["y"])
+    time.sleep(1.0)
+    after = t.js("Object.keys(panels).filter(k=>/Panel_/.test(k)).length")
+    r.expect("options: every ask opens the same one view",
+             "a second Options click reuses the existing internals view (no new panel)",
+             "panel count %s -> %s" % (before, after),
+             before == after)
+
+    # the name is just one of the properties on the table - write it, the thing renames
+    # (writes go through the member's doorway slot, "Value")
+    name_member = next((m["alias"] for m in mlist if m["prop"] == "Name"), None)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'Fred'})" % name_member)
+    time.sleep(1.0)
+    fred = view + "/Fred"
+    renamed = t.js("!!instances['%s']" % fred)
+    old_gone = t.js("!instances['%s']" % thing)
+    label = t.js("(()=>{const i=instances['%s'];const l=i&&i.el.querySelector('.widget-atom-label');"
+                 "return l&&l.textContent;})()" % fred)
+    val = t.js("propertyValues['%s.Value']" % fred)
+    r.expect("options: the Name on the table renames the thing",
+             "writing 'Fred' through the panel's Name control re-keys %s to %s, "
+             "label follows, state (Value=35) rides along" % (thing, fred),
+             "renamed=%s, old gone=%s, label=%s, Value=%s" % (renamed, old_gone, label, val),
+             renamed and old_gone and label == "Fred" and val == "35")
+
+
+def test_move(t, r):
+    """Move: X/Y are ordinary writes; crossing into a view re-containers."""
+    view = make_test_view(t, 'MoveTest')
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/Slider']")
+    t.pick_place(src["x"], src["y"], 100, 380)  # the free column under the palette
+    # anchored pattern: the OptionsTest dissection view is named
+    # /Root/Slider_1Panel_1 and must not match
+    slider = t.wait_js("(Object.keys(instances).find(k=>/^\\/Root\\/Slider_\\d+$/.test(k)) || false)", "move subject")
+    # let the birth X/Y land before dragging from wherever it painted
+    t.wait_js("propertyValues['%s.X'] === '100'" % slider, "move subject placed")
+    time.sleep(0.4)
+
+    t.set_mode('Move')
+    src = t.center_of("instances['%s']" % slider)
+    t.press_drag(src["x"], src["y"], src["x"] + 80, src["y"] - 40)
+    time.sleep(0.8)
+    pos = t.js("[propertyValues['%s.X'], propertyValues['%s.Y']]" % (slider, slider))
+    moved = pos and pos[0] and int(pos[0]) > 100
+    r.expect("move: drag writes X/Y back as shared properties",
+             "the slider's X/Y properties reflect the drop point (moved right of 100)",
+             "X,Y = %s" % pos,
+             bool(moved))
+
+    src = t.center_of("instances['%s']" % slider)
+    tgt = inner_center(t, view)
+    t.press_drag(src["x"], src["y"], tgt["x"], tgt["y"])
+    time.sleep(1.2)
+    renamed = t.js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view)
+    inside = renamed and t.js("(()=>{const i=instances['%s'];const inn=i&&i.el.closest('.view-inner');"
+                              "return inn&&inn.dataset.viewAlias;})()" % renamed)
+    r.expect("move: dropping into a view re-containers (and renames) the thing",
+             "the slider now lives in MoveTest (Container change + rename), rendered inside its panel",
+             "renamed to %s, rendered inside %s" % (renamed, inside),
+             renamed and inside == view)
+
+
+def test_open_close(t, r):
+    """Open/close: the icon is permanent; the panel is a separate life at
+    the root. The test view is cloned from the palette and RENAMED to
+    OpenCloseTest - the label is just the Name property doing its job."""
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/View']")
+    t.pick_place(src["x"], src["y"], 100, 500)  # the free column under the palette
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "view clone")
+    time.sleep(0.6)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'OpenCloseTest'})" % raw)
+    view = "/Root/OpenCloseTest"
+    t.wait_js("!!views['%s']" % view, "renamed view")
+    px, py = next_slot()
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    time.sleep(0.6)
+
+    closed = t.js("panels['%s'].el.style.display === 'none'" % view)
+    r.expect("open/close: a fresh view arrives closed (an icon)",
+             "the cloned view renders as an icon only (Open defaults to 0)",
+             "panel hidden: %s" % closed, closed)
+
+    t.set_mode('Operate')
+    icon_before = t.js("instances['%s'].el.getBoundingClientRect().left" % view)
+    src = t.center_of("instances['%s']" % view)
+    t.click(src["x"], src["y"])
+    time.sleep(1.0)
+    st = t.js("(()=>{const i=instances['%s'];const p=panels['%s'];"
+              "return {open:p.el.style.display!=='none', parent:p.el.parentElement.id,"
+              "iconLeft:i.el.getBoundingClientRect().left,"
+              "iconShown:getComputedStyle(i.el.querySelector('.instance-icon')).display!=='none'};})()" % (view, view))
+    r.expect("open: click the icon, the panel opens at the ROOT",
+             "panel visible as a root-level peer; the icon did not move, change, or disappear",
+             "%s (icon was at %s)" % (st, icon_before),
+             st and st.get("open") and st.get("parent") == "canvas"
+             and st.get("iconShown") and st.get("iconLeft") == icon_before)
+
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px + 40))
+    time.sleep(0.8)
+    st = t.js("(()=>{const i=instances['%s'];const p=panels['%s'];"
+              "return {panelLeft:p.el.style.left, iconLeft:i.el.getBoundingClientRect().left};})()" % (view, view))
+    r.expect("open: the panel's position is its own, independent of the icon",
+             "PanelX=%d moves the panel only; the icon stays where it was" % (px + 40),
+             "%s (icon was at %s)" % (st, icon_before),
+             st and st.get("panelLeft") == "%dpx" % (px + 40) and st.get("iconLeft") == icon_before)
+
+    t.js("(()=>{const p=panels['%s'];p.el.querySelector('.node-collapse').click();})()" % view)
+    time.sleep(0.6)
+    st = t.js("(()=>{const i=instances['%s'];const p=panels['%s'];"
+              "return {closed:p.el.style.display==='none',"
+              "iconShown:getComputedStyle(i.el.querySelector('.instance-icon')).display!=='none'};})()" % (view, view))
+    r.expect("close: the corner symbol closes the panel, the icon remains",
+             "panel hidden again, icon still present in its place",
+             "%s" % st,
+             st and st.get("closed") and st.get("iconShown"))
+
+
+def test_lazy_contents(t, r):
+    """A closed view's contents are never sent - they stream in on open."""
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/View']")
+    t.pick_place(src["x"], src["y"], 100, 620)  # the free column under the palette
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "lazy view clone")
+    time.sleep(0.6)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'LazyTest'})" % raw)
+    view = "/Root/LazyTest"
+    t.wait_js("!!views['%s']" % view, "renamed lazy view")
+    px, py = next_slot()
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    t.js("panels['%s'].setOpen(true)" % view)
+    time.sleep(0.8)
+
+    # source first, target second: center_of may scroll the canvas to
+    # reach the seed, which would leave earlier-computed coordinates stale
+    src = t.center_of("instances['/Root/Palette/LED']")
+    tgt = inner_center(t, view)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    member = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/LED')) || false)" % view, "member")
+
+    # a FRESH page must not know the closed view's contents until it opens it
+    t.call("Page.navigate", {"url": APP})
+    time.sleep(2.5)
+    t.wait_js("typeof instances !== 'undefined' && !!views['%s']" % view, "reboot")
+    time.sleep(1.5)
+    install_error_trap(t)
+    known_before = t.js("!!instances['%s']" % member)
+    t.set_mode('Operate')
+    src = t.center_of("instances['%s']" % view)
+    t.click(src["x"], src["y"])
+    time.sleep(1.2)
+    known_after = t.js("!!instances['%s']" % member)
+    r.expect("lazy: the GUI only holds what it can see",
+             "after a fresh page load the member of the closed view is unknown; opening the view streams it in",
+             "known before open: %s, after open: %s" % (known_before, known_after),
+             (not known_before) and known_after)
+
+
+# --------------------------------------------------------------------------
+
+
+def test_lua_script(t, r):
+    """A Lua Script object: wire a Pulse into it, its oninput callback
+    counts rising edges and sends the count out its Out port."""
+    view = make_test_view(t, 'ScriptTest')
+    t.set_mode('Clone')
+    src = t.center_of("instances['/Root/Palette/Script']")
+    tgt = inner_center(t, view, -30, -30)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    script = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Script_')) || false)" % view, "script clone")
+    src = t.center_of("instances['/Root/Palette/Pulse']")
+    tgt = inner_center(t, view, 30, 40)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    pulse = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Pulse_')) || false)" % view, "pulse clone")
+    time.sleep(0.5)
+
+    lua = "local c = 0 oninput(function(v, k) if v == '1' then c = c + 1 send(tostring(c)) end end)"
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (script, json.dumps(lua)))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Interval',value:'150'})" % pulse)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Count',value:'3'})" % pulse)
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, script))
+    t.js("send({cmd:'subscribe',instance:'%s',port:'Out'})" % script)
+    time.sleep(0.5)
+    t.clear_events()
+    t.js("send({cmd:'activate',instance:'%s'})" % script)
+    t.js("send({cmd:'activate',instance:'%s'})" % pulse)
+    time.sleep(0.5)
+
+    # Clone the Textbox using a dynamic case-insensitive match
+    palette_key_js = "Object.keys(instances).find(k => k.toLowerCase().startsWith('/root/palette/textbox'))"
+    src = t.center_of("instances[%s]" % palette_key_js)
+    tgt = inner_center(t, view, -30, 20)
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
+    textbox = t.wait_js(
+        "(Object.keys(instances).find(k => k.startsWith('%s/') && /text(box)?_/i.test(k)) || false)" % view, 
+        "textbox clone"
+    )
+
+    # Connect the Out of the script to the In of the textbox
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (script, textbox))
+
+    time.sleep(3.5)
+    counts = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='message-flowed' && m.instance==='%s').map(m=>m.value))" % script)
+    r.expect("lua: a script counts pulses and speaks",
+             "the Script's Lua oninput callback fires per pulse edge; counts 1,2,3 emerge from its Out port",
+             "script output: %s" % counts,
+             counts and json.loads(counts) == ["1", "2", "3"])
+
+
+def post_mortem(t):
+    """A timed-out wait usually means the page stopped keeping up with the
+    session - dump what it saw so the failure explains itself."""
+    print("  --- post-mortem ---")
+    try:
+        print("  page errors :", t.js("JSON.stringify(window.__errs || [])"))
+        print("  last events :", t.js("JSON.stringify((window.__evts||[]).slice(-6))"))
+        print("  gestureDrag :", t.js("gestureDrag && gestureDrag.kind"))
+        print("  mode        :", t.js("currentMode"))
+    except Exception as e2:
+        print("  (post-mortem itself failed: %s)" % e2)
+    print()
+
+
+def main():
+    global APP
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--app", default=APP)
+    ap.add_argument("--cdp", type=int, default=CDP_PORT)
+    args = ap.parse_args()
+    APP = args.app
+
+    t = attach(args.cdp)
+    r = Report()
+
+    def guarded(name, fn, *deps_named):
+        """One test crashing (a timed-out wait, anything) is ONE failure in
+        the report - never the death of the whole run. Missing dependencies
+        from an earlier failed test are reported as such, not as tracebacks."""
+        missing = [d for d, v in deps_named if not v]
+        if missing:
+            r.expect(name, "the test runs (needs %s from earlier tests)" % ", ".join(d for d, _ in deps_named),
+                     "skipped - earlier failure left no %s" % ", ".join(missing), False)
+            return None
+        try:
+            return fn()
+        except Exception as e:
+            r.expect(name, "the test runs to completion", "aborted: %s" % e, False)
+            post_mortem(t)
+            return None
+
+    guarded("boot", lambda: test_boot(t, r))
+    pair = guarded("clone", lambda: test_clone(t, r))
+    slider, clone2 = pair if pair else (None, None)
+    guarded("esc", lambda: test_esc_cancels(t, r))
+    alias = guarded("alias", lambda: test_alias(t, r, slider), ("slider", slider))
+    guarded("clone-of-alias", lambda: test_clone_of_alias(t, r, slider, alias), ("slider", slider), ("alias", alias))
+    guarded("alias-of-clone", lambda: test_alias_of_clone(t, r, clone2, slider), ("clone2", clone2), ("slider", slider))
+    guarded("options", lambda: test_options_internals(t, r))
+    guarded("move", lambda: test_move(t, r))
+    guarded("open-close", lambda: test_open_close(t, r))
+    guarded("lazy", lambda: test_lazy_contents(t, r))
+    guarded("lua-script", lambda: test_lua_script(t, r))
+
+    # last step, every time, pass or fail: put the shared session back in
+    # Operate mode so whoever opens a browser next gets a usable canvas
+    try:
+        t.set_mode('Operate')
+    except Exception:
+        pass
+
+    try:
+        errs = t.js("window.__errs || []")
+        r.expect("no page errors",
+                 "the browser console saw no uncaught errors during the whole run",
+                 "%s" % (errs if errs else "none"), not errs)
+    except Exception as e:
+        r.expect("no page errors", "the page is still answering at the end", "aborted: %s" % e, False)
+
+    sys.exit(1 if r.summary() else 0)
+
+
+if __name__ == "__main__":
+    main()

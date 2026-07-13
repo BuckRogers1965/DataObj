@@ -104,6 +104,8 @@ body {
   z-index: 5;
 }
 
+/* laid out exactly like .node-header - a view's panel and a card's panel  */
+/* are the same kind of thing, down to the minimize symbol in the corner   */
 .view-header {
   padding: 5px 8px;
   background: #2c2f38;
@@ -113,6 +115,9 @@ body {
   font-weight: 600;
   flex: 0 0 auto;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -474,6 +479,8 @@ body.mode-delete .widget-atom,
 body.mode-delete .view-panel {
   cursor: crosshair;
 }
+/* the one box that stays: the red warning around what a click is about   */
+/* to destroy - Clone/Alias hovers stay clean, delete gets a heads-up      */
 body.mode-delete .instance-icon:hover,
 body.mode-delete .node-box:hover,
 body.mode-delete .widget-atom:hover,
@@ -488,36 +495,43 @@ body.mode-clone .widget-atom,
 body.mode-clone .view-panel {
   cursor: copy;
 }
-body.mode-clone .instance-icon:hover,
-body.mode-clone .node-box:hover,
-body.mode-clone .widget-atom:hover,
-body.mode-clone .view-panel:hover {
-  outline: 2px solid #6be69a;
-  outline-offset: 2px;
+
+/* Options: click a thing, its internals view opens */
+body.mode-options .instance-icon,
+body.mode-options .node-box,
+body.mode-options .widget-atom,
+body.mode-options .view-panel {
+  cursor: help;
 }
 
-body.mode-copy .instance-icon,
-body.mode-copy .node-box,
-body.mode-copy .widget-atom,
-body.mode-copy .view-panel {
-  cursor: copy;
-}
-body.mode-copy .instance-icon:hover,
-body.mode-copy .node-box:hover,
-body.mode-copy .widget-atom:hover,
-body.mode-copy .view-panel:hover {
-  outline: 2px dashed #8bb8e6;
-  outline-offset: 2px;
+/* Alias mode: drag a control (a card's prop row, or a widget atom) into    */
+/* any view - the drop creates a real Alias instance there. cursor: alias   */
+/* is a genuine CSS cursor, fittingly. The cursor is the whole mode cue -    */
+/* no outlines, no boxes around things.                                      */
+body.mode-alias .widget-atom,
+body.mode-alias .prop-row {
+  cursor: alias;
 }
 
-/* a View with its own Mode override (the Palette, permanently, via         */
-/* BuildPalette - object.c) needs everything inside it to stop taking        */
-/* normal clicks too, the same reason body:not(.mode-operate) does - but     */
-/* scoped to the view, not the whole page, since the session's own mode      */
-/* might genuinely be Operate while this one view overrides it.              */
-.view-inner[data-view-mode]:not([data-view-mode=""]):not([data-view-mode="Operate"]) .wireable > * {
+/* the ghost that follows the cursor during a Clone/Alias drag - the drop   */
+/* is what creates something, the source never moves                         */
+.drag-ghost {
+  position: fixed;
+  z-index: 1000;
   pointer-events: none;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: rgba(40, 60, 90, 0.9);
+  color: #cfe3ff;
+  border: 1px dashed #8bb8e6;
+  border-radius: 4px;
+  white-space: nowrap;
 }
-.view-inner[data-view-mode]:not([data-view-mode=""]):not([data-view-mode="Operate"]) .widget-atom-control {
-  pointer-events: none;
+
+/* an Alias atom renders exactly like a widget atom - nothing marks it as   */
+/* special, it IS the thing (a doorway to it); its control slot fills in     */
+/* once Target/TargetProp arrive                                             */
+.alias-atom .alias-slot {
+  display: inline-flex;
+  min-width: 40px;
 }

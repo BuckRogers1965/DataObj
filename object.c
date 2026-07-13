@@ -296,7 +296,11 @@ NodeObj GetPaletteView(void){
 static int IsPaletteExcluded(char *className)
 {
 	return strcmp(className, "Bridge") == 0
-		|| strcmp(className, "TCP") == 0;
+		|| strcmp(className, "TCP") == 0
+		/* an Alias only means something bound to a target - they are    */
+		/* born from the Alias-mode drag (create-alias), never dragged    */
+		/* out of the palette as a blank                                   */
+		|| strcmp(className, "Alias") == 0;
 }
 
 void BuildPalette(void){
@@ -305,11 +309,18 @@ void BuildPalette(void){
 	int slot;
 	char alias[128];
 
+	/* no forced Mode, no Deletable protection: the palette is just a     */
+	/* View like Root or any panel, and everything in it deletes like     */
+	/* anything else - a restart rebuilds it, so nothing here is precious. */
+	/* X/Y position the icon; PanelX/PanelY position its open panel        */
+	/* (independent - the icon never goes away).                            */
 	PaletteView = CreateObject(NULL, "View");
-	SetPropStr(PaletteView, "Mode", "Clone");
-	SetPropStr(PaletteView, "Deletable", "0");
+	SetPropStr(PaletteView, "Name", "Palette");
+	SetPropStr(PaletteView, "Open", "1");	/* views default closed; the palette starts open */
 	SetPropInt(PaletteView, "X", 20);
 	SetPropInt(PaletteView, "Y", 20);
+	SetPropInt(PaletteView, "PanelX", 20);
+	SetPropInt(PaletteView, "PanelY", 60);
 	SetPropInt(PaletteView, "W", 190);
 	SetPropInt(PaletteView, "H", 220);
 
@@ -335,7 +346,7 @@ void BuildPalette(void){
 				inst = CreateObject(NULL, GetNameStr(class));
 				if (inst) {
 					SetPropStr(inst, "Container", "/Root/Palette");
-					SetPropStr(inst, "Deletable", "0");
+					SetPropStr(inst, "Name", GetNameStr(class));
 					SetPropInt(inst, "X", 10 + (slot % 2) * 80);
 					SetPropInt(inst, "Y", 10 + (slot / 2) * 66);
 					slot++;
@@ -391,7 +402,7 @@ void BuildChrome(void){
 	modeMenu = CreateObject(NULL, "MenuButton");
 	if (modeMenu) {
 		SetPropStr(modeMenu, "Label", "Mode");
-		SetPropStr(modeMenu, "Items", "Operate,Clone,Copy,Move,Connect,Delete,Options");
+		SetPropStr(modeMenu, "Items", "Operate,Clone,Alias,Move,Connect,Delete,Options");
 		SetPropStr(modeMenu, "Selected", "Operate");
 		SetPropLong(Chrome, "ModeMenu", (long) modeMenu);
 	}
@@ -445,6 +456,131 @@ CreateObject(NodeObj container, char * classname){
 	return (NodeObj)GetPropLong(class, "LastInstance");
 }
 
+/*
+ * The alias mechanism's one moving part: resolve (instance, propname)
+ * through any link chain to the pair that actually owns the property.
+ * A linked prop node (LinkNode, node.c) carries a LinkInst prop naming
+ * the owning instance (set by LinkProperty below, which collapses
+ * chains at creation), so the caller gets back both the real prop node
+ * AND the real instance - handlers need the owning instance to find
+ * their "local" state, so resolving the node alone is not enough.
+ * For a plain unlinked property this is exactly GetPropNode.
+ */
+NodeObj ResolvePort(NodeObj * instp, char * name)
+{
+	NodeObj raw, owner;
+
+	if (!instp || !*instp || !name)
+		return NULL;
+
+	raw = GetPropNode(*instp, name);
+	if (!raw)
+		return NULL;
+
+	if (GetNodeLink(raw))
+	{
+		owner = (NodeObj) GetPropLong(raw, "LinkInst");
+		if (owner)
+			*instp = owner;
+		return ResolveNode(raw);
+	}
+
+	return raw;
+}
+
+/*
+ * Expose targetInst's property on owner under `slot`, as a link.
+ * Everything that resolves ports (Connect, SndMsg, SetOrDeliverProp,
+ * the Bridge's subscribe) lands on the original: one value, one
+ * subscriber list, no forwarding. Aliasing an alias collapses to the
+ * final original at creation, so chains never grow at use time.
+ *
+ * The slot matters: an Alias instance keeps the link in its own "Value"
+ * slot precisely so its OWN Name/Container/X/Y stay its own - linking a
+ * target's Name under the name "Name" would hijack the alias's identity
+ * (renaming the member renamed the target, and vice versa).
+ */
+int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propname)
+{
+	NodeObj targetProp, linknode, realOwner;
+
+	if (!owner || !slot || !targetInst || !propname)
+		return 0;
+
+	realOwner = targetInst;
+	targetProp = ResolvePort(&realOwner, propname);
+	if (!targetProp)
+		return 0;
+
+	SetPropStr(owner, slot, "");
+	linknode = GetPropNode(owner, slot);
+	if (!linknode)
+		return 0;
+
+	SetPropLong(linknode, "LinkInst", (long) realOwner);
+	LinkNode(linknode, targetProp);
+
+	return 1;
+}
+
+/* same, exposed under the target property's own name */
+int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname)
+{
+	return LinkPropertyAs(owner, propname, targetInst, propname);
+}
+
+/*
+ * The engine-level clone: a brand-new instance of source's class
+ * carrying a snapshot of source's published data properties - its own
+ * separate copy, nothing shared, nothing linked. Reading each value
+ * through ResolvePort means cloning THROUGH an alias never copies the
+ * alias's plumbing - it snapshots the original's live values. Naming,
+ * containment, registration in a session, and eventing are the
+ * caller's business (the Bridge's clone-instance verb does all of
+ * that); this is just the node operation.
+ */
+NodeObj CloneObject(NodeObj source)
+{
+	NodeObj class, inst, interface, prop, valnode, owner;
+	msgobj instanceStart;
+	char *name, *dir, *val;
+
+	if (!source)
+		return NULL;
+
+	class = GetParent(source);
+	if (!class)
+		return NULL;
+
+	instanceStart = (msgobj) GetPropLong(class, "InstanceStart");
+	if (!instanceStart)
+		return NULL;
+
+	instanceStart(class, msg_initialize, NULL);
+	inst = (NodeObj) GetPropLong(class, "LastInstance");
+	if (!inst)
+		return NULL;
+
+	interface = GetClassInterface(class);
+	for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
+	{
+		name = GetPropStr(prop, "Name");
+		dir  = GetPropStr(prop, "Direction");
+		if (!name || !dir || strcmp(dir, "data") != 0)
+			continue;
+		if (strcmp(name, "State") == 0)	/* lifecycle, not data */
+			continue;
+
+		owner = source;
+		valnode = ResolvePort(&owner, name);
+		val = valnode ? GetValueStr(valnode) : NULL;
+		if (val)
+			SetOrDeliverProp(inst, name, val);
+	}
+
+	return inst;
+}
+
 /* record a subscription on a source port */
 /* each Subscriber carries the sink instance and the handler */
 /* the sink registered as OnMsg on its input port            */
@@ -460,21 +596,27 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, long handler){
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 
-	NodeObj fromPort, toPort;
+	NodeObj fromPort, toPort, fromOwner, toOwner;
 	long handler;
 
 	if (!fromNode || !from || !toNode || !to)
 		return 0;
 
-	/* make sure the output port exists on the source */
-	fromPort = GetPropNode(fromNode, from);
+	/* both ends resolve through links: wiring to or from an alias IS   */
+	/* wiring to or from the original - the Subscriber entry lands on    */
+	/* the original's port and carries the original instance, so the     */
+	/* alias adds zero cost (and zero code) to every later message       */
+	fromOwner = fromNode;
+	fromPort = ResolvePort(&fromOwner, from);
 	if (!fromPort) {
+		/* make sure the output port exists on the source */
 		SetPropInt(fromNode, from, 0);
 		fromPort = GetPropNode(fromNode, from);
 	}
 
 	/* the target property must already exist */
-	toPort = GetPropNode(toNode, to);
+	toOwner = toNode;
+	toPort = ResolvePort(&toOwner, to);
 	if (!toPort) {
 		DebugPrint ( "Connect could not find the input port on the sink.", __FILE__, __LINE__, ERROR);
 		return 0;
@@ -483,7 +625,7 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	handler = GetPropLong(toPort, "OnMsg");
 	if (handler)
 	{
-		AddSubscription(fromPort, toNode, handler);
+		AddSubscription(fromPort, toOwner, handler);
 		return 1;
 	}
 
@@ -494,7 +636,7 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	/* care whether "to" happens to be a port with real receive logic       */
 	/* (Enable) or a plain data property (Filename, a Label's Value) - it   */
 	/* is still just "wire these two things together" either way.          */
-	return ConnectToProperty(fromNode, from, toNode, to) != NULL;
+	return ConnectToProperty(fromNode, from, toOwner, to) != NULL;
 }
 
 /* one of these rides on a queued dispatch task between SndMsg (which   */
@@ -613,16 +755,21 @@ static void CancelPendingSends(NodeObj deadInstance)
 int
 SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 
-	NodeObj outPort;
+	NodeObj outPort, owner;
 	MsgEnvelope * env;
 	TaskObj task;
 
-	outPort = GetPropNode(instance, port);
+	/* sending out an alias port sends out the original - the envelope   */
+	/* records the original as its source so CancelPendingSends matches   */
+	/* the instance whose port the envelope actually holds                 */
+	owner = instance;
+	outPort = ResolvePort(&owner, port);
 	if (!outPort) {
 		if (data)
 			DelNode(data);
 		return 0;
 	}
+	instance = owner;
 
 	env = malloc(sizeof(MsgEnvelope));
 	env->instance = instance;
@@ -683,23 +830,33 @@ int DeliverMsg(NodeObj target, char *port, MsgId message, NodeObj data){
  */
 void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 {
-	NodeObj propnode, chunk;
+	NodeObj propnode, chunk, owner;
 
 	if (!target || !propname || !value)
 		return;
 
-	propnode = GetPropNode(target, propname);
+	/* writing through an alias writes the original - and the original's */
+	/* own fan-out (SetPropStr) or compiled handler (DeliverMsg with the  */
+	/* owning instance, so it finds its own "local") does the rest.       */
+	/* The write goes by the RESOLVED node's own name, not the name the   */
+	/* caller used: an Alias keeps its link in a "Value" slot that may    */
+	/* stand for the target's Name, Enable, anything - writing "Value"    */
+	/* on the owner would hit the wrong property entirely.                 */
+	owner = target;
+	propnode = ResolvePort(&owner, propname);
+	if (propnode)
+		propname = GetNameStr(propnode);
 	if (propnode && GetPropLong(propnode, "OnMsg"))
 	{
 		chunk = NewNode(STRING);
 		SetName(chunk, propname);
 		SetValueStr(chunk, value);
-		DeliverMsg(target, propname, msg_send, chunk);
+		DeliverMsg(owner, propname, msg_send, chunk);
 		DelNode(chunk);
 		return;
 	}
 
-	SetPropStr(target, propname, value);
+	SetPropStr(propnode ? owner : target, propname, value);
 }
 
 /* see the comment above these in object.h */
@@ -894,6 +1051,20 @@ void PublishPosition(NodeObj class)
 	/* correcting late exactly like X/Y already does.                       */
 	PublishProp(class, "Container", "data", PROP_NULL, "");
 
+	/* what a thing is CALLED is just one of its properties - writing it   */
+	/* renames the instance (the Bridge keys its alias table off it, see   */
+	/* Bridge_Set/Bridge_RenameName). Shown as an editable textbox on the  */
+	/* dissection table like anything else.                                 */
+	PublishProp(class, "Name",   "data", PROP_TEXTBOX, "");
+
+	/* every thing is a view: its icon lives wherever Container says, and  */
+	/* its open panel is a peer of every other panel at the root, with a   */
+	/* position of its own. Open is only the INITIAL presentation - after  */
+	/* first paint, open/closed is each window's own business.              */
+	PublishProp(class, "Open",   "data", PROP_NULL, "0");
+	PublishProp(class, "PanelX", "data", PROP_NULL, "240");
+	PublishProp(class, "PanelY", "data", PROP_NULL, "60");
+
 	/* generic, not View-specific - anything CAN be marked undeletable      */
 	/* this way, the Palette's own bootstrap instances are just the first    */
 	/* thing that actually uses it (BuildPalette). Bridge_Delete is what     */
@@ -909,6 +1080,10 @@ void InitPosition(NodeObj instance)
 	SetPropInt(instance, "H", 60);
 	SetPropStr(instance, "Container", "");
 	SetPropStr(instance, "Deletable", "1");
+	SetPropStr(instance, "Name", "");
+	SetPropStr(instance, "Open", "0");
+	SetPropInt(instance, "PanelX", 240);
+	SetPropInt(instance, "PanelY", 60);
 }
 
 /* call the Activate function pointer an instance carries on itself */
@@ -1611,6 +1786,48 @@ static void ScrubRegistrySubscriptions(NodeObj deadInstance)
 	}
 }
 
+/* blank every link (aliased property) under `node`'s props that points   */
+/* at deadInstance - the alias survives as a dead control instead of a    */
+/* dangling pointer, same policy as scrubbed subscriptions                 */
+static void ScrubLinkProps(NodeObj node, NodeObj deadInstance)
+{
+	NodeObj prop;
+
+	if (!node)
+		return;
+
+	for (prop = GetNextProp(node); prop; prop = GetNextSibling(prop))
+	{
+		if (GetNodeLink(prop) && (NodeObj) GetPropLong(prop, "LinkInst") == deadInstance)
+		{
+			LinkNode(prop, NULL);
+			SetPropLong(prop, "LinkInst", 0);
+		}
+		ScrubLinkProps(prop, deadInstance);
+	}
+}
+
+/* walk every live instance (same shape as ScrubRegistrySubscriptions)   */
+/* neutralizing links aimed at deadInstance - see DeleteInstance          */
+static void ScrubRegistryLinks(NodeObj deadInstance)
+{
+	NodeObj library, class, instance;
+
+	library = GetChild(RegObjList);
+	while (library) {
+		class = GetChild(library);
+		while (class) {
+			instance = GetChild(class);
+			while (instance) {
+				ScrubLinkProps(instance, deadInstance);
+				instance = GetNextSibling(instance);
+			}
+			class = GetNextSibling(class);
+		}
+		library = GetNextSibling(library);
+	}
+}
+
 /* the actual, working removal UnRegisterInstance's own stub never did -  */
 /* DelSibling first (unlinks Instance from its class's child chain without */
 /* touching the instances after it), then DelNode (frees just this one,   */
@@ -1651,6 +1868,7 @@ void DeleteInstance(NodeObj instance)
 	}
 
 	ScrubRegistrySubscriptions(instance);
+	ScrubRegistryLinks(instance);
 	CancelPendingSends(instance);
 
 	DelSibling(instance);

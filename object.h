@@ -86,6 +86,26 @@ ActivateInstance(NodeObj instance);
 void
 SetOrDeliverProp(NodeObj target, char * propname, char * value);
 
+/* Resolve (instance, propname) through any alias link chain to the pair */
+/* that actually owns the property - *instp is rewritten to the owning   */
+/* instance when the name is a link. Plain properties behave exactly     */
+/* like GetPropNode. Every port-resolution choke point uses this, which  */
+/* is the entire alias mechanism.                                         */
+NodeObj ResolvePort(NodeObj * instp, char * name);
+
+/* Expose targetInst's property on owner as a link - value, subscribers, */
+/* and wiring all stay on the original. Chains collapse to the final     */
+/* original at creation. Returns 0 if targetInst has no such property.   */
+/* The ...As form names the local slot: an Alias keeps its link in its    */
+/* own "Value" slot so its own Name/Container/X/Y stay its own.           */
+int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propname);
+int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname);
+
+/* A brand-new instance of source's class carrying a snapshot of its     */
+/* published data - the engine-level clone. Naming/containment/eventing  */
+/* are the caller's business.                                              */
+NodeObj CloneObject(NodeObj source);
+
 /* Wire fromInst's fromPort to an arbitrary, chosen-at-runtime property */
 /* on targetInst (something Connect() alone can't do - see the comment */
 /* above its definition in object.c). Returns the adapter node (keep   */

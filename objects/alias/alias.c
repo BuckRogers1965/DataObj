@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,25 +9,27 @@
 
 /*
 
-View object: the container primitive - a first-class object on the
-palette exactly like LED or Button. It carries no Value of its own - it
-is not a data-holding leaf - and, like every other placeable object,
-its own position is just PublishPosition/InitPosition (object.c), the
-same opt-in helper any object calls for itself. There is no separate
-membership mechanism here (no Slot table, no AddSlot) - which instance
-is "in" a View is Container, an ordinary property on the CHILD (see
-PublishPosition/InitPosition, object.c), not something the View itself
-tracks a list of. View does not need to know about its children any
-more than a Reader needs to know about its Filename textbox - the
-wiring already says what's connected to what.
+Alias object: a stand-in for one property of another instance - the
+"copy a control out of a widget" primitive, and the seed of composite-
+object ports.
 
-Two properties of its own beyond position: Resizeable (a client shows a
-resize handle unless this reads "0") and Mode - empty means "whatever
-the session's global mode currently is", set to anything else and every
-click inside this View uses THAT instead, regardless of the session's
-own mode. This is the entire mechanism BuildPalette (object.c) needs to
-make the Palette behave like a permanent Clone station: it is a real
-View, Mode="Clone", nothing else about it is special except Deletable.
+The aliased property itself is a node-level link (LinkProperty,
+object.c): its value, its subscribers, and anything wired to it all
+live ONLY on the original. Connect/SndMsg/SetOrDeliverProp/the
+Bridge's subscribe resolve through the link (ResolvePort), so twelve
+aliases of one control are twelve zero-cost doorways to the same
+node - there is no forwarding, no second state, nothing to keep in
+sync, and this object needs no handlers or tasks of its own.
+
+What the Alias does own is its presentation: Target/TargetProp say
+what it stands for (set by the Bridge's create-alias, which also makes
+the link), and Widget/Label/position are the alias's own - render the
+same underlying value as a Knob here and a Textbox there without the
+original's appearance changing.
+
+If the original is deleted, DeleteInstance scrubs the link
+(ScrubRegistryLinks, object.c) and the alias survives as a dead
+control - same policy as scrubbed subscriptions.
 
 */
 
@@ -44,12 +45,12 @@ static NodeObj ClassSelf;
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
-	DebugPrint ( "View handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
+	DebugPrint ( "Alias handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
 	return rtrn_handled;
 }
 
 /* control callback: 1 enables, 0 disables, EOF on this line is ignored */
-int View_OnEnable(NodeObj instance, MsgId message, NodeObj data)
+int Alias_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
@@ -63,7 +64,7 @@ int View_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 }
 
 /* nothing async here - Activate just goes live */
-int View_Activate(NodeObj instance, MsgId message, NodeObj data)
+int Alias_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
@@ -85,27 +86,33 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	local->enabled = 1;
 
 	instance = NewNode(INTEGER);
-	SetName(instance, "View");
+	SetName(instance, "Alias");
+
+	/* what this alias stands for - create-alias (bridge.c) fills these  */
+	/* in and makes the actual link; they are ordinary watchable          */
+	/* properties so any client can ask what it is looking at             */
+	SetPropStr(instance, "Target", "");
+	WatchableProp(instance, "Target");
+	SetPropStr(instance, "TargetProp", "");
+	WatchableProp(instance, "TargetProp");
+
+	/* the alias's OWN presentation - restyling an alias never touches   */
+	/* the original                                                        */
+	SetPropStr(instance, "Widget", "");
+	WatchableProp(instance, "Widget");
+	SetPropStr(instance, "Label", "");
+	WatchableProp(instance, "Label");
+
 	SetPropInt(instance, "State", Starting);
 	WatchableProp(instance, "State");
 	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)View_Activate);
+	SetPropLong(instance, "Activate", (long)Alias_Activate);
 
 	SetPropStr(instance, "Enable", "1");
 	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)View_OnEnable);
+	SetPropLong(port, "OnMsg", (long)Alias_OnEnable);
 
-	SetPropStr(instance, "Resizeable", "1");
-	SetPropStr(instance, "Mode", "");
-
-	/* Open/PanelX/PanelY come from InitPosition like every other class - */
-	/* a View's panel is not special, every thing's panel works the same   */
 	InitPosition(instance);
-
-	/* a view's panel needs room for contents - InitPosition's card-sized */
-	/* W/H default (120x60) is too small for a container                   */
-	SetPropInt(instance, "W", 190);
-	SetPropInt(instance, "H", 220);
 
 	RegisterInstance(class, instance);
 
@@ -126,17 +133,20 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
 
-	SetName(class, "View");
+	SetName(class, "Alias");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 
 	ClassSelf = RegisterClass(library, class);
 
+	PublishPosition(ClassSelf);
+
+	PublishProp(ClassSelf, "Target",     "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "TargetProp", "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Widget",     "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Label",      "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Enable",     "in",   PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
-	PublishProp(ClassSelf, "Resizeable", "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Mode",       "data", PROP_TEXTBOX, "");
-	PublishPosition(ClassSelf);
 
 	return rtrn_handled;
 }
@@ -153,9 +163,9 @@ void _init()
 {
 	NodeObj temp = NewNode(INTEGER);
 
-	SetName(temp, "View");
+	SetName(temp, "Alias");
 	SetPropStr(temp, "Company", "GrokThink");
-	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c750");
+	SetPropStr(temp, "UUID", "59c559c8-de8a-4095-897c-1b712cad8f77");
 	SetPropStr(temp, "Version", "1.0");
 	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);

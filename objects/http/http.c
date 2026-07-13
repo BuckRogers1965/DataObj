@@ -128,6 +128,7 @@ void Http_Serve(NodeObj instance, char *path, long connId)
 	long size;
 	char *body;
 
+
 	if (strstr(path, ".."))
 	{
 		Http_SendError(instance, "403 Forbidden", "Forbidden", connId);
