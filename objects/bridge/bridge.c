@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "node.h"
 #include "object.h"
@@ -382,17 +385,21 @@ static void Bridge_FreshAlias(InstanceData *local, char *prefix, char *base, cha
 /* no matter which client, or how much later, ends up replaying it.       */
 void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 {
-	char *classname, *alias;
+	char *classname, *alias, *container, *x, *y;
+	char fresh[256];
 	int hidden;
 	NodeObj inst;
 
 	classname = GetPropStr(command, "class");
 	alias     = GetPropStr(command, "as");
+	container = GetPropStr(command, "container");
+	x         = GetPropStr(command, "x");
+	y         = GetPropStr(command, "y");
 	hidden    = GetPropInt(command, "hidden") != 0;
 
-	if (!classname || !classname[0] || !alias || !alias[0])
+	if (!classname || !classname[0])
 	{
-		Bridge_Error(instance, "create-instance", "class and as are required");
+		Bridge_Error(instance, "create-instance", "class is required");
 		return;
 	}
 
@@ -404,17 +411,25 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	if (hidden)
-	{
 		SetPropInt(inst, "_Hidden", 1);
 
-		/* hidden helpers are one client's chrome, not shared session   */
-		/* state - remember which connection built this one so its      */
-		/* close can take it along (Bridge_ConnClosed). User-built      */
-		/* session objects are never stamped and survive their          */
-		/* creator's browser closing, which is the point of the shared  */
-		/* session.                                                      */
-		if (local->replyConn)
-			SetPropLong(inst, "_OwnerConn", local->replyConn);
+	/* atomic birth: placed in its container at its position in this one  */
+	/* command - same contract create-alias and clone-instance already    */
+	/* keep. PlaceInstance (object.c) is the shared engine call.           */
+	PlaceInstance(inst, container, x, y);
+
+	/* the server names things; a client-supplied "as" is honored when    */
+	/* given (flow replay, scripts), otherwise minted where it lives.      */
+	/* A TAKEN "as" also mints fresh: honoring it would shadow the live    */
+	/* entry in the alias table - two instances answering to one name,     */
+	/* every binding through it dead (what Import into a session that      */
+	/* already had the name used to do). The final name is stamped back    */
+	/* into the command so the flow log records a fully-determined birth.  */
+	if (!alias || !alias[0] || GetPropLong(local->aliases, alias))
+	{
+		Bridge_FreshAlias(local, container, classname, fresh, sizeof(fresh));
+		alias = fresh;
+		SetPropStr(command, "as", alias);
 	}
 
 	SetPropLong(local->aliases, alias, (long) inst);
@@ -478,7 +493,7 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	/* alias's target" would key its control on a name no event carries    */
 	{
 		NodeObj owner = target;
-		NodeObj node;
+		NodeObj node, pub;
 		char *realName;
 
 		node = ResolvePort(&owner, prop);
@@ -487,33 +502,47 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 			of = realName;
 		if (node)
 			prop = GetNameStr(node);
+
+		/* presentation default, stamped by the ENGINE at birth: what the  */
+		/* final owner's class published for this property (Widget type and */
+		/* Direction). The client renders the alias's Widget property - it  */
+		/* never consults the class Interface to deduce a control            */
+		/* (readmefirst repair #2). Unpublished properties stay unstamped    */
+		/* and render as the plain-textbox fallback.                          */
+		pub = InterfacePropForInstance(owner, prop);
+		if (pub)
+		{
+			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
+			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
+		}
 	}
 
 	SetPropStr(inst, "Target", of);
 	SetPropStr(inst, "TargetProp", prop);
 
+	/* the flow log records the resolved fact: an alias created THROUGH    */
+	/* another alias (a panel member's doorway slot) collapses to the       */
+	/* final original above, and only the original's name is replayable     */
+	SetPropStr(command, "of", of);
+	SetPropStr(command, "prop", prop);
+
 	/* atomic birth: named IN its container with its position, in this    */
 	/* one command - never born at root and then moved, which raced every */
 	/* client that addressed it by its seconds-old birth name              */
-	SetOrDeliverProp(inst, "Container", container ? container : "");
-	if (x && x[0]) SetOrDeliverProp(inst, "X", x);
-	if (y && y[0]) SetOrDeliverProp(inst, "Y", y);
+	PlaceInstance(inst, container, x, y);
 
 	if (hidden)
-	{
 		SetPropInt(inst, "_Hidden", 1);
-		/* same ownership rule as Bridge_Create: hidden plumbing dies    */
-		/* with the connection that made it                               */
-		if (local->replyConn)
-			SetPropLong(inst, "_OwnerConn", local->replyConn);
-	}
 
 	/* the server names things; a client-supplied "as" is honored when   */
-	/* given (scripts), otherwise the name is minted where it lives       */
-	if (!alias || !alias[0])
+	/* given (scripts), otherwise - or when the name is already taken,    */
+	/* see Bridge_Create - minted where it lives, and stamped back into   */
+	/* the command for a fully-determined replay                           */
+	if (!alias || !alias[0] || GetPropLong(local->aliases, alias))
 	{
 		Bridge_FreshAlias(local, container, "Alias", fresh, sizeof(fresh));
 		alias = fresh;
+		SetPropStr(command, "as", alias);
 	}
 
 	SetPropLong(local->aliases, alias, (long) inst);
@@ -521,141 +550,30 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	Bridge_InstanceEvent(instance, local, alias, "Alias", GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
 }
 
-/* clone one non-Alias instance into container: engine snapshot           */
-/* (CloneObject, object.c), fresh name, containment, broadcast - the      */
-/* display side just sees another instance-created                        */
-static NodeObj Bridge_CloneOne(NodeObj instance, InstanceData *local, NodeObj src, char *container)
+/* Cloning does NOT live here anymore. The bridge translates - it does not */
+/* copy objects or walk a graph. The whole deep clone (the view, its       */
+/* members, the aliases re-pointed at the copies, the wires re-made        */
+/* between them) is one engine operation, CloneView (object.c), that runs  */
+/* the same whoever asked. Bridge_CloneCmd below just: resolves the name,   */
+/* mints the new one, calls the engine, then translates the resulting      */
+/* objects into html paths and instance-created events. See                */
+/* Bridge_AnnounceClone.                                                    */
+
+/* translate one freshly-cloned instance into the session: give it its     */
+/* path in the alias table, and (for an alias) fill its Target string from */
+/* what its link now points at. Naming/paths are the translator's, which   */
+/* is why this is here and not in the engine.                              */
+static void Bridge_RegisterClone(InstanceData *local, NodeObj clone, char *pathOut, int outlen)
 {
-	NodeObj class = GetParent(src), inst;
-	char *classname = GetNameStr(class);
-	char newAlias[256];
+	char *cont = GetPropStr(clone, "Container");
+	char *nm   = GetPropStr(clone, "Name");
 
-	inst = CloneObject(src);
-	if (!inst)
-		return NULL;
+	if (cont && cont[0])
+		snprintf(pathOut, outlen, "%s/%s", cont, nm ? nm : "");
+	else
+		snprintf(pathOut, outlen, "/Root/%s", nm ? nm : "");
 
-	SetOrDeliverProp(inst, "Container", container ? container : "");
-	Bridge_FreshAlias(local, container, classname, newAlias, sizeof(newAlias));
-	SetPropLong(local->aliases, newAlias, (long) inst);
-	Bridge_SetNameFromAlias(inst, newAlias);
-	Bridge_InstanceEvent(instance, local, newAlias, classname, class, "Root", container ? container : "", 0, 0);
-
-	return inst;
-}
-
-/* clone an Alias member of a view being deep-cloned: if its target was   */
-/* itself cloned along with the view (it's in `map`), the new alias       */
-/* points at the CLONE - a self-contained panel stays self-contained.     */
-/* A target outside the cloned view stays the original.                    */
-static void Bridge_CloneAliasMember(NodeObj instance, InstanceData *local, NodeObj src, char *container, NodeObj map)
-{
-	char *propname = GetPropStr(src, "TargetProp");
-	NodeObj linknode, targetInst, mapped, inst;
-	char newAlias[256];
-	char *v, *tn;
-	int i;
-	char *carry[] = { "Widget", "Label", "X", "Y" };
-
-	if (!propname || !propname[0])
-		return;
-
-	linknode = GetPropNode(src, "Value");	/* the alias's doorway slot */
-	targetInst = linknode ? (NodeObj) GetPropLong(linknode, "LinkInst") : NULL;
-	if (!targetInst)
-		return;
-
-	mapped = (NodeObj) GetConnState(map, (long) targetInst);
-	if (mapped)
-		targetInst = mapped;
-
-	inst = CreateObject(local->container, "Alias");
-	if (!inst)
-		return;
-
-	if (!LinkPropertyAs(inst, "Value", targetInst, propname))
-	{
-		DeleteInstance(inst);
-		return;
-	}
-
-	tn = Bridge_AliasForInstance(local, targetInst);
-	SetPropStr(inst, "Target", tn ? tn : "");
-	SetPropStr(inst, "TargetProp", propname);
-	for (i = 0; i < 4; i++)
-	{
-		v = GetPropStr(src, carry[i]);
-		if (v && v[0])
-			SetPropStr(inst, carry[i], v);
-	}
-	SetPropStr(inst, "Container", container ? container : "");
-
-	Bridge_FreshAlias(local, container, "Alias", newAlias, sizeof(newAlias));
-	SetPropLong(local->aliases, newAlias, (long) inst);
-	Bridge_SetNameFromAlias(inst, newAlias);
-	Bridge_InstanceEvent(instance, local, newAlias, "Alias", GetParent(inst), "Root", container ? container : "", 0, 0);
-}
-
-/* deep-clone a view's members. Two full passes: everything concrete       */
-/* first (filling `map` with src->clone, recursing into nested views),      */
-/* then every Alias member, so an alias can be remapped no matter where     */
-/* in the tree its target's clone landed. Member lists are snapshotted      */
-/* before cloning so the entries the clones themselves add to the session   */
-/* are never re-walked mid-pass.                                             */
-static void Bridge_CloneViewMembers(NodeObj instance, InstanceData *local, char *srcViewAlias, char *newViewAlias, NodeObj map, int aliasPass)
-{
-	NodeObj list, entry, member, clone;
-	char *name, *cont, *classname;
-
-	list = NewNode(INTEGER);
-	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
-	{
-		name = GetNameStr(entry);
-		member = (NodeObj) GetValueLong(entry);
-		if (!member || !name)
-			continue;
-		if ((NodeObj) GetPropLong(local->aliases, name) != member)
-			continue;	/* stale shadow - see Bridge_ConnClosed */
-		if (GetPropInt(member, "_Hidden"))
-			continue;	/* per-connection plumbing is not content */
-		cont = GetPropStr(member, "Container");
-		if (!cont || strcmp(cont, srcViewAlias) != 0)
-			continue;
-		SetPropLong(list, name, (long) member);
-	}
-
-	for (entry = GetNextProp(list); entry; entry = GetNextSibling(entry))
-	{
-		name = GetNameStr(entry);
-		member = (NodeObj) GetValueLong(entry);
-		classname = GetNameStr(GetParent(member));
-
-		if (strcmp(classname, "Alias") == 0)
-		{
-			if (aliasPass)
-				Bridge_CloneAliasMember(instance, local, member, newViewAlias, map);
-		}
-		else if (!aliasPass)
-		{
-			clone = Bridge_CloneOne(instance, local, member, newViewAlias);
-			if (clone)
-				SetConnState(map, (long) member, (long) clone);
-		}
-
-		/* nested views recurse on both passes - in the alias pass the    */
-		/* child's clone (made in pass one) is looked up through the map  */
-		if (strcmp(classname, "View") == 0)
-		{
-			clone = (NodeObj) GetConnState(map, (long) member);
-			if (clone)
-			{
-				char *cn = Bridge_AliasForInstance(local, clone);
-				if (cn)
-					Bridge_CloneViewMembers(instance, local, name, cn, map, aliasPass);
-			}
-		}
-	}
-
-	DelNode(list);
+	SetPropLong(local->aliases, pathOut, (long) clone);
 }
 
 /*
@@ -747,6 +665,14 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 
 			SetPropStr(member, "Target", curAlias);
 			SetPropStr(member, "TargetProp", name);
+
+			/* the Interface entry is in hand - stamp the published        */
+			/* presentation on the member so any client renders the row     */
+			/* from the member's own properties, never from the class        */
+			/* Interface (readmefirst repair #2)                              */
+			SetPropInt(member, "Widget", GetPropInt(prop, "Widget"));
+			SetPropStr(member, "Direction", GetPropStr(prop, "Direction"));
+
 			SetPropStr(member, "Container", viewAlias);
 			SetPropInt(member, "X", 14);
 			SetPropInt(member, "Y", 12 + row * 44);
@@ -780,18 +706,20 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 
 /*
  * {"cmd":"clone-instance","of":"Slider1","container":"","x":"700","y":"250"}
- * - the whole clone is a node operation inside the engine; the display
- * just updates from the instance-created broadcasts. Cloning an alias
- * clones the THING it stands for (a snapshot of the target's data);
- * cloning a view clones the container AND everything in it, with
- * intra-view aliases remapped onto the clones.
+ *
+ * The bridge does NOT clone - it translates. It resolves what `of` names,
+ * mints the new name, hands the whole job to the engine (CloneView,
+ * object.c - which copies the view, its members, the aliases re-pointed
+ * at the copies, and the wires re-made between them, identically whether
+ * a script or the html asked), and then turns the resulting objects into
+ * session paths and instance-created events. Cloning an alias clones the
+ * THING it stands for.
  */
 void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 {
-	char *of, *container, *x, *y;
-	NodeObj src, inst, map, linknode;
-	char *classname, *newAlias;
-	char panelPos[16];
+	char *of, *container, *x, *y, *cont, *nm, *cn, *tp;
+	NodeObj src, top, map, linknode, entry, clone, cls, ln, ti;
+	char path[256], panelPos[16];
 
 	of        = GetPropStr(command, "of");
 	container = GetPropStr(command, "container");
@@ -817,36 +745,122 @@ void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 		}
 	}
 
-	classname = GetNameStr(GetParent(src));
-
-	inst = Bridge_CloneOne(instance, local, src, container);
-	if (!inst)
+	/* the engine does the whole clone AND names it - the bridge just says */
+	/* what to clone and which container to put it in. map comes back as   */
+	/* src -> clone for the top and every descendant.                       */
+	map = NewNode(INTEGER);
+	top = CloneView(src, container ? container : "", map);
+	if (!top)
 	{
+		DelNode(map);
 		Bridge_Error(instance, "clone-instance", "clone failed");
 		return;
 	}
 
-	if (x && x[0]) SetOrDeliverProp(inst, "X", x);
-	if (y && y[0]) SetOrDeliverProp(inst, "Y", y);
-
-	if (strcmp(classname, "View") == 0)
+	/* the drop point is presentation - place the top there (members keep  */
+	/* their positions inside it); nudge a view's panel off the source's   */
+	PlaceInstance(top, container, x, y);
+	if (strcmp(GetNameStr(GetParent(top)), "View") == 0)
 	{
-		/* the clone's panel would sit exactly on the source's - nudge it */
 		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "PanelX") + 24);
-		SetOrDeliverProp(inst, "PanelX", panelPos);
+		SetOrDeliverProp(top, "PanelX", panelPos);
 		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "PanelY") + 24);
-		SetOrDeliverProp(inst, "PanelY", panelPos);
-
-		newAlias = Bridge_AliasForInstance(local, inst);
-		if (newAlias)
-		{
-			map = NewNode(INTEGER);
-			SetConnState(map, (long) src, (long) inst);
-			Bridge_CloneViewMembers(instance, local, of, newAlias, map, 0);
-			Bridge_CloneViewMembers(instance, local, of, newAlias, map, 1);
-			DelNode(map);
-		}
+		SetOrDeliverProp(top, "PanelY", panelPos);
 	}
+
+	/* translate the clones into the session - register every path FIRST,  */
+	/* so an alias's Target (below) can resolve to a name that now exists  */
+	for (entry = GetNextProp(map); entry; entry = GetNextSibling(entry))
+	{
+		clone = (NodeObj) GetValueLong(entry);
+		if (clone)
+			Bridge_RegisterClone(local, clone, path, sizeof(path));
+	}
+
+	/* then announce each, filling an alias's Target string (translation)  */
+	/* from what its link now points at                                    */
+	for (entry = GetNextProp(map); entry; entry = GetNextSibling(entry))
+	{
+		clone = (NodeObj) GetValueLong(entry);
+		if (!clone)
+			continue;
+
+		cls  = GetParent(clone);
+		cn   = GetNameStr(cls);
+		cont = GetPropStr(clone, "Container");
+		nm   = GetPropStr(clone, "Name");
+		if (cont && cont[0])
+			snprintf(path, sizeof(path), "%s/%s", cont, nm ? nm : "");
+		else
+			snprintf(path, sizeof(path), "/Root/%s", nm ? nm : "");
+
+		if (strcmp(cn, "Alias") == 0)
+		{
+			ln = GetPropNode(clone, "Value");
+			ti = ln ? (NodeObj) GetPropLong(ln, "LinkInst") : NULL;
+			tp = ti ? Bridge_AliasForInstance(local, ti) : NULL;
+			SetPropStr(clone, "Target", tp ? tp : "");
+		}
+
+		Bridge_InstanceEvent(instance, local, path, cn, cls, "Root", cont ? cont : "", 0, 0);
+	}
+
+	/* record the clone's name so the flow log carries it (Load remaps     */
+	/* references onto whatever replay mints) - the engine set it, we just  */
+	/* read it back                                                         */
+	tp = Bridge_AliasForInstance(local, top);
+	if (tp)
+		SetPropStr(command, "as", tp);
+
+	DelNode(map);
+}
+
+/*
+ * {"cmd":"move-instance","of":"Slider_1","container":"/Root/MyPanel","x":"20","y":"40"}
+ * - the whole drop gesture in one verb: the engine validates (a thing can
+ * never be moved into itself or a descendant - MoveInstance, object.c),
+ * re-containers, repositions, and the rename machinery re-keys the alias
+ * and tells both containers. Same-container moves are the same verb with
+ * the current container; the rename is then a no-op. What used to be a
+ * client-sequenced X, Y, Container write triple (a race every raw client
+ * could lose) is one fully-carried intent.
+ */
+static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias, NodeObj inst, char *newContainer);
+
+void Bridge_Move(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char *of, *container, *x, *y, *curAlias;
+	NodeObj inst;
+
+	of        = GetPropStr(command, "of");
+	container = GetPropStr(command, "container");
+	x         = GetPropStr(command, "x");
+	y         = GetPropStr(command, "y");
+
+	inst = Bridge_ResolveAlias(local, of);
+	if (!inst)
+	{
+		Bridge_Error(instance, "move-instance", "unknown instance");
+		return;
+	}
+
+	curAlias = Bridge_AliasForInstance(local, inst);
+	if (!curAlias)
+		curAlias = of;
+
+	/* record the CURRENT name - a stale of (the drag spanned a rename)   */
+	/* resolves here, and only the current name replays                    */
+	SetPropStr(command, "of", curAlias);
+
+	if (!MoveInstance(inst, curAlias, container, x, y))
+	{
+		Bridge_Error(instance, "move-instance", "a thing cannot be moved into itself");
+		return;
+	}
+
+	/* PlaceInstance wrote Container directly (not through set-property),  */
+	/* so the alias re-key + instance-renamed events happen here            */
+	Bridge_Rename(instance, local, curAlias, inst, container ? container : "");
 }
 
 void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
@@ -947,6 +961,124 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
  * alias-based, so nothing about actual message delivery is affected -
  * this is a saved-flow display gap, not a functional one.
  */
+/*
+ * Renaming or moving a container re-paths its whole subtree. Every
+ * descendant carries the old container path as a prefix in two places -
+ * its alias key (the translator's name for it) and its Container property
+ * (the engine's fact of where it lives) - and BOTH must swap old -> new,
+ * or the members are orphaned: a clone finds zero of them (CloneView walks
+ * by Container), and a set-property by the new path misses. Every
+ * connection viewing any part of the subtree has its view-keys migrated
+ * too and gets an instance-renamed per descendant so it re-keys its own
+ * rendering. The alias table and each conn's view table are snapshotted
+ * before rewriting, because the rewrite mutates the very chains walked.
+ */
+static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *oldAlias, char *newAlias)
+{
+	NodeObj snap, entry, inst, ce, table, ks, ke;
+	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560];
+	char *p, *cont, *k, *ok, *escFrom, *escTo, *slash;
+	long cut;
+	int preLen, oldLen, n;
+
+	oldLen = (int) strlen(oldAlias);
+	snprintf(prefix, sizeof(prefix), "%s/", oldAlias);
+	preLen = (int) strlen(prefix);
+
+	/* --- the instances: snapshot descendants, then re-path each --- */
+	snap = NewNode(INTEGER);
+	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
+	{
+		p = GetNameStr(entry);
+		inst = (NodeObj) GetValueLong(entry);
+		if (!inst || !p)
+			continue;
+		if ((NodeObj) GetPropLong(local->aliases, p) != inst)
+			continue;	/* stale / zeroed */
+		if (strncmp(p, prefix, preLen) != 0)
+			continue;	/* not a descendant */
+		SetPropLong(snap, p, (long) inst);	/* key = old path, value = instance */
+	}
+
+	for (entry = GetNextProp(snap); entry; entry = GetNextSibling(entry))
+	{
+		p = GetNameStr(entry);			/* old path */
+		inst = (NodeObj) GetValueLong(entry);
+
+		snprintf(newP, sizeof(newP), "%s/%s", newAlias, p + preLen);
+
+		/* re-key the alias */
+		SetPropLong(local->aliases, p, 0);
+		SetPropLong(local->aliases, newP, (long) inst);
+
+		/* the old container is where a viewing conn is registered - read  */
+		/* it off the old path before we change Container                   */
+		slash = strrchr(p, '/');
+		cut = slash ? (long)(slash - p) : 0;
+		if (cut > 0 && cut < (long) sizeof(oldCont))
+		{
+			memcpy(oldCont, p, cut);
+			oldCont[cut] = 0;
+		}
+		else
+			oldCont[0] = 0;
+		if (strcmp(oldCont, "/Root") == 0)
+			oldCont[0] = 0;
+
+		/* swap the old container prefix in its Container property */
+		cont = GetPropStr(inst, "Container");
+		if (cont && strncmp(cont, oldAlias, oldLen) == 0)
+		{
+			if (cont[oldLen] == 0)
+				snprintf(newCont, sizeof(newCont), "%s", newAlias);
+			else
+				snprintf(newCont, sizeof(newCont), "%s%s", newAlias, cont + oldLen);
+			SetOrDeliverProp(inst, "Container", newCont);
+		}
+
+		/* tell whoever is viewing where it lived */
+		escFrom = JsonEscapeStr(p);
+		escTo   = JsonEscapeStr(newP);
+		snprintf(buf, sizeof(buf), "{\"event\":\"instance-renamed\",\"from\":%s,\"to\":%s}", escFrom, escTo);
+		free(escFrom);
+		free(escTo);
+		Bridge_SendEventScoped(instance, local, buf, oldCont);
+	}
+	DelNode(snap);
+
+	/* --- the viewers: migrate every conn's view-keys old -> new --- */
+	for (ce = GetNextProp(local->connViews); ce; ce = GetNextSibling(ce))
+	{
+		table = (NodeObj) GetValueLong(ce);
+		if (!table)
+			continue;
+
+		/* snapshot matching keys, then add the new ones (mutating table) */
+		ks = NewNode(INTEGER);
+		n = 0;
+		for (ke = GetNextProp(table); ke; ke = GetNextSibling(ke))
+		{
+			k = GetNameStr(ke);
+			if (!k)
+				continue;
+			/* a view-key is "<container>|" - the subtree is oldAlias| or  */
+			/* anything under oldAlias/                                     */
+			if (strncmp(k, oldAlias, oldLen) == 0 && (k[oldLen] == '|' || k[oldLen] == '/'))
+			{
+				snprintf(key, sizeof(key), "%d", n++);
+				SetPropStr(ks, key, k);
+			}
+		}
+		for (ke = GetNextProp(ks); ke; ke = GetNextSibling(ke))
+		{
+			ok = GetValueStr(ke);
+			snprintf(nk, sizeof(nk), "%s%s", newAlias, ok + oldLen);
+			SetPropInt(table, nk, 1);
+		}
+		DelNode(ks);
+	}
+}
+
 static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias, NodeObj inst, char *newContainer)
 {
 	char newAlias[256];
@@ -994,6 +1126,9 @@ static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias,
 		if (strcmp(oldCont[0] ? oldCont : "/", (newContainer && newContainer[0]) ? newContainer : "/") != 0)
 			Bridge_SendEventScoped(instance, local, buf, newContainer);
 	}
+
+	/* the thing moved - everything inside it moves with it */
+	Bridge_RepathSubtree(instance, local, oldAlias, newAlias);
 }
 
 /* the Name property's write-side: same alias re-keying as a Container    */
@@ -1051,6 +1186,9 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 	if (strcmp(oldCont, "/Root") == 0)
 		oldCont[0] = 0;
 	Bridge_SendEventScoped(instance, local, buf, oldCont);
+
+	/* the thing was renamed - everything inside it is re-pathed with it */
+	Bridge_RepathSubtree(instance, local, oldAlias, newAlias);
 }
 
 void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
@@ -1082,11 +1220,21 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 		NodeObj owner = inst;
 		NodeObj node = ResolvePort(&owner, prop);
 		char *realProp = node ? GetNameStr(node) : prop;
-		char *ownAlias;
+		char *ownAlias = Bridge_AliasForInstance(local, owner);
+
+		/* the flow log records the FACT, not the doorway it came through: */
+		/* a write through an alias (a panel member, a dragged-out control) */
+		/* is a write on the original, and only the original is replayable  */
+		/* - internals views are rebuilt lazily, never recorded, so a       */
+		/* command naming a member alias would land on nothing at Load      */
+		if (node && ownAlias)
+		{
+			SetPropStr(command, "instance", ownAlias);
+			SetPropStr(command, "prop", realProp);
+		}
 
 		if (strcmp(realProp, "Container") == 0 || strcmp(realProp, "Name") == 0)
 		{
-			ownAlias = Bridge_AliasForInstance(local, owner);
 			if (ownAlias)
 			{
 				if (strcmp(realProp, "Container") == 0)
@@ -1207,21 +1355,17 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
  * A connection died (msg_eof arrived on In, tagged with its Conn id -
  * forwarded up from TCP through WebSocket, or straight from TCP on the
  * raw-JSON bridges; Conn 0 means the transport itself shut down, every
- * peer at once): delete every instance that connection owned. Only
- * hidden helper widgets ever carry _OwnerConn (Bridge_Create), and the
- * client rebuilds its helpers from scratch on its next page load
- * anyway - before this, every reconnect left a full set of them behind
- * forever, the memory growth visible on each browser reload.
+ * peer at once): free the closing connection's view table.
  *
- * Each deletion also compacts the flow log: every recorded command that
- * mentions the dead helper's alias is removed, so the session record
- * (and session.flow on the next Save) stays the size of what actually
- * exists instead of accreting one dead create-instance per page load
- * forever. Compacting rather than appending a delete-instance is safe
- * here precisely because a swept instance was created live through
- * Bridge_OnIn (that's where _OwnerConn comes from), so its create is
- * guaranteed to be in this same log - not true of instances that
- * arrived via Load, which is why Bridge_Delete still records deletes.
+ * There used to be a per-connection ownership sweep here (_OwnerConn):
+ * the hidden helper widgets the OLD client created for every card were
+ * one connection's private chrome, and had to die with it or every page
+ * reload leaked a full set. That whole species is gone - a card's rows
+ * are the engine's own internals-view members now (readmefirst repair
+ * #3), shared session state like everything else - so no instance is
+ * per-connection anymore and there is nothing to sweep. Everything a
+ * client makes is session content that survives its creator, which is
+ * the point of the shared session.
  */
 
 /* drop every command in the flow log that references alias in any of   */
@@ -1261,49 +1405,7 @@ void Bridge_CompactFlow(InstanceData *local, char *alias)
 
 void Bridge_ConnClosed(NodeObj instance, InstanceData *local, long connId)
 {
-	NodeObj entry, next, inst;
-	long owner;
-	char *alias, *escAlias;
-	char buf[256];
-
-	entry = GetNextProp(local->aliases);
-	while (entry)
-	{
-		next = GetNextSibling(entry);
-
-		alias = GetNameStr(entry);
-		inst  = (NodeObj) GetValueLong(entry);
-
-		/* live entries only: zeroing an alias prepends a shadow (see    */
-		/* Bridge_Delete), so an entry only counts while it is still     */
-		/* what a lookup of its own name resolves to - anything older    */
-		/* holds a stale pointer that must not be dereferenced           */
-		if (inst && alias && (NodeObj) GetPropLong(local->aliases, alias) == inst)
-		{
-			owner = GetPropLong(inst, "_OwnerConn");
-			if (owner && (connId == 0 || owner == connId))
-			{
-				char cont[256];
-				char *c = GetPropStr(inst, "Container");
-				snprintf(cont, sizeof(cont), "%s", c ? c : "");
-
-				Bridge_FreeTaps(inst);
-				SetPropLong(local->aliases, alias, 0);
-				DeleteInstance(inst);
-
-				escAlias = JsonEscapeStr(alias);
-				snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escAlias);
-				free(escAlias);
-
-				/* only the connections looking at where it lived */
-				Bridge_SendEventScoped(instance, local, buf, cont);
-
-				Bridge_CompactFlow(local, alias);
-			}
-		}
-
-		entry = next;
-	}
+	NodeObj entry;
 
 	/* the closing connection stops looking at everything - free its   */
 	/* view table (Conn 0 = the transport shut down: free them all)    */
@@ -1678,52 +1780,94 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 	SndMsg(instance, "Out", msg_send, chunk);
 }
 
-/* targeted, one per genuine Connect() the flow ever recorded (see          */
-/* Bridge_OnIn) - not bind-property/bind-activate, which wire a control      */
-/* into an arbitrary property or an Activate rather than a named port with   */
-/* a dot on screen to anchor a line to; that plumbing is already visible as   */
-/* the control itself sitting in the card, no separate wire needed to        */
-/* explain it. What a client asks for on entering Connect mode (app.js) -    */
-/* "we draw all connections" means all of THESE, sourced straight from the    */
-/* same recording Save/Load already use rather than a live graph walk, so     */
-/* there is nothing new to keep in sync.                                      */
+/* which port on `sink` carries this handler - the reverse of the OnMsg   */
+/* a Subscriber records, so a wire can name the sink's PORT and not just   */
+/* the sink. NULL if none matches (should not happen for a live wire).     */
+static char *Bridge_PortForHandler(NodeObj sink, long callback)
+{
+	NodeObj prop;
+
+	for (prop = GetNextProp(sink); prop; prop = GetNextSibling(prop))
+		if (GetPropLong(prop, "OnMsg") == callback)
+			return GetNameStr(prop);
+
+	return NULL;
+}
+
+/*
+ * A client entering Connect mode (app.js) asks "draw all connections."
+ * The truth about what is wired is the live subscription graph itself -
+ * the Subscriber entries a Connect() lands on a source port (object.c) -
+ * NOT the flow log. This used to walk the flow's recorded `connect`
+ * commands, which misses every wire the log never saw: the ones a view
+ * CLONE makes between its members (CloneConnections), which is why a
+ * cloned flow came up on screen with no lines even though it worked.
+ * Walking the graph reports every real wire once, whatever made it, and
+ * cannot double a loaded/cloned one - it is simply what exists now.
+ *
+ * bind-property/bind-activate wiring is intentionally not reported: those
+ * land a bare adapter (no alias) as the sink, so Bridge_AliasForInstance
+ * returns NULL and they are skipped - the same reason they were never in
+ * this list. Bridge taps are filtered the same way (a tap node has no
+ * alias either).
+ */
 void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 {
-	NodeObj instr, chunk;
-	char *from, *fromPort, *to, *toPort, *escFrom, *escFromPort, *escTo, *escToPort;
-	char buf[512];
+	NodeObj entry, port, sub, sink, chunk;
+	NodeObj inst;
+	char *fromAlias, *toAlias, *toPort;
+	char *escFrom, *escFromPort, *escTo, *escToPort;
+	char buf[600];
 
-	instr = GetChild(local->flow);
-	while (instr)
+	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
 	{
-		if (CmpName(instr, "connect"))
+		fromAlias = GetNameStr(entry);
+		inst = (NodeObj) GetValueLong(entry);
+
+		/* live entries only - a zeroed/renamed alias holds a stale       */
+		/* pointer (same guard the scrub and clear paths use)             */
+		if (!inst || !fromAlias
+			|| (NodeObj) GetPropLong(local->aliases, fromAlias) != inst)
+			continue;
+
+		/* every property is a potential source port; the wired ones are  */
+		/* exactly those carrying Subscriber entries                       */
+		for (port = GetNextProp(inst); port; port = GetNextSibling(port))
 		{
-			from     = GetPropStr(instr, "from");
-			fromPort = GetPropStr(instr, "fromPort");
-			to       = GetPropStr(instr, "to");
-			toPort   = GetPropStr(instr, "toPort");
+			for (sub = GetNextProp(port); sub; sub = GetNextSibling(sub))
+			{
+				if (!CmpName(sub, "Subscriber"))
+					continue;
 
-			escFrom     = JsonEscapeStr(from ? from : "");
-			escFromPort = JsonEscapeStr(fromPort ? fromPort : "");
-			escTo       = JsonEscapeStr(to ? to : "");
-			escToPort   = JsonEscapeStr(toPort ? toPort : "");
+				sink = (NodeObj) GetPropLong(sub, "Instance");
+				toAlias = sink ? Bridge_AliasForInstance(local, sink) : NULL;
+				if (!toAlias)
+					continue;	/* a tap or an adapter - not a drawable wire */
 
-			snprintf(buf, sizeof(buf), "{\"event\":\"connected\",\"from\":%s,\"fromPort\":%s,\"to\":%s,\"toPort\":%s}",
-					 escFrom, escFromPort, escTo, escToPort);
+				toPort = Bridge_PortForHandler(sink, GetPropLong(sub, "Callback"));
+				if (!toPort)
+					continue;
 
-			free(escFrom);
-			free(escFromPort);
-			free(escTo);
-			free(escToPort);
+				escFrom     = JsonEscapeStr(fromAlias);
+				escFromPort = JsonEscapeStr(GetNameStr(port));
+				escTo       = JsonEscapeStr(toAlias);
+				escToPort   = JsonEscapeStr(toPort);
 
-			chunk = NewNode(STRING);
-			SetName(chunk, "Event");
-			SetValueStr(chunk, buf);
-			SetPropLong(chunk, "Conn", local->replyConn);
-			SndMsg(instance, "Out", msg_send, chunk);
+				snprintf(buf, sizeof(buf), "{\"event\":\"connected\",\"from\":%s,\"fromPort\":%s,\"to\":%s,\"toPort\":%s}",
+						 escFrom, escFromPort, escTo, escToPort);
+
+				free(escFrom);
+				free(escFromPort);
+				free(escTo);
+				free(escToPort);
+
+				chunk = NewNode(STRING);
+				SetName(chunk, "Event");
+				SetValueStr(chunk, buf);
+				SetPropLong(chunk, "Conn", local->replyConn);
+				SndMsg(instance, "Out", msg_send, chunk);
+			}
 		}
-
-		instr = GetNextSibling(instr);
 	}
 
 	chunk = NewNode(STRING);
@@ -1733,8 +1877,12 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 	SndMsg(instance, "Out", msg_send, chunk);
 }
 
+void Bridge_SaveFlow(NodeObj instance, InstanceData *local, NodeObj command);
+void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command);
+void Bridge_ListFlows(NodeObj instance, InstanceData *local, NodeObj command);
+
 /* the command switch itself, factored out of Bridge_OnIn so Load/Import  */
-/* replay (Bridge_OnFileCmd) can run a recorded instruction through the    */
+/* replay (Bridge_LoadFlow) can run a recorded instruction through the     */
 /* exact same functions a live command uses - no separate replay-only      */
 /* code path to keep in sync. Deliberately does not re-check RequireAuth:  */
 /* that gate belongs to the wire (Bridge_OnIn), not to something already   */
@@ -1751,6 +1899,8 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_CreateAlias(instance, local, command);
 	else if (strcmp(cmd, "clone-instance") == 0)
 		Bridge_CloneCmd(instance, local, command);
+	else if (strcmp(cmd, "move-instance") == 0)
+		Bridge_Move(instance, local, command);
 	else if (strcmp(cmd, "internals") == 0)
 		Bridge_Internals(instance, local, command);
 	else if (strcmp(cmd, "connect") == 0)
@@ -1771,6 +1921,12 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_ListInstances(instance, local, command);
 	else if (strcmp(cmd, "list-connections") == 0)
 		Bridge_ListConnections(instance, local);
+	else if (strcmp(cmd, "save-flow") == 0)
+		Bridge_SaveFlow(instance, local, command);
+	else if (strcmp(cmd, "load-flow") == 0 || strcmp(cmd, "import-flow") == 0)
+		Bridge_LoadFlow(instance, local, command);
+	else if (strcmp(cmd, "list-flows") == 0)
+		Bridge_ListFlows(instance, local, command);
 	else
 		Bridge_Error(instance, cmd, "unknown command");
 }
@@ -1784,6 +1940,7 @@ static int Bridge_IsMutating(char *cmd)
 	return strcmp(cmd, "create-instance") == 0
 		|| strcmp(cmd, "create-alias") == 0
 		|| strcmp(cmd, "clone-instance") == 0
+		|| strcmp(cmd, "move-instance") == 0
 		|| strcmp(cmd, "connect") == 0
 		|| strcmp(cmd, "bind-property") == 0
 		|| strcmp(cmd, "bind-activate") == 0
@@ -1913,35 +2070,215 @@ int Bridge_Activate(NodeObj instance, MsgId message, NodeObj data)
 }
 
 /*
+ * Flows live in one place: the saved/ directory next to the framework
+ * (created on first save). A flow name is a bare filename - no paths,
+ * no escaping the directory - and gets its .flow extension appended
+ * when missing. Anything suspicious falls back to "session".
+ */
+static void Bridge_FlowPath(char *name, char *out, int outlen)
+{
+	int len;
+
+	if (!name || !name[0] || strchr(name, '/') || strstr(name, ".."))
+		name = "session";
+
+	len = (int) strlen(name);
+	if (len > 5 && strcmp(name + len - 5, ".flow") == 0)
+		snprintf(out, outlen, "saved/%s", name);
+	else
+		snprintf(out, outlen, "saved/%s.flow", name);
+}
+
+/* one targeted JSON event back to whoever asked - the same shape        */
+/* Bridge_Internals' reply already uses                                   */
+static void Bridge_ReplyEvent(NodeObj instance, InstanceData *local, char *event, char *field, char *value)
+{
+	char buf[600];
+	char *esc = JsonEscapeStr(value ? value : "");
+	NodeObj chunk;
+
+	snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"%s\":%s}", event, field, esc);
+	free(esc);
+
+	chunk = NewNode(STRING);
+	SetName(chunk, "Event");
+	SetValueStr(chunk, buf);
+	SetPropLong(chunk, "Conn", local->replyConn);
+	SndMsg(instance, "Out", msg_send, chunk);
+}
+
+/* {"cmd":"save-flow","file":"myapp"} - write the session's recorded     */
+/* flow to saved/myapp.flow                                               */
+void Bridge_SaveFlow(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char path[300];
+
+	mkdir("saved", 0755);	/* fine if it already exists */
+	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+	SaveFlow(local->flow, path);
+	Bridge_ReplyEvent(instance, local, "flow-saved", "file", path);
+}
+
+/*
+ * Load a saved flow into the session (Import is the same operation) -
+ * the objects and wiring the file records arrive alongside whatever is
+ * already on the canvas, nothing is cleared. Each recorded instruction
+ * replays through Bridge_Dispatch, the same function a live command
+ * goes through, so every resulting instance registers and broadcasts
+ * exactly like a genuine create-instance - to every connected client,
+ * not just whoever asked. Each replayed instruction is ALSO appended to
+ * this session's own flow log: what was loaded is part of the session
+ * now, and the next Save must contain it (it used to be silently
+ * dropped - Load-then-Save lost everything loaded).
+ *
+ * The names a flow records are the names the ORIGINAL session minted
+ * (/Root/View3/Slider_1, ...). Replaying them, the server mints its own
+ * fresh names (a clone-instance or an unnamed create-instance names
+ * itself, and if the recorded name is already taken it must, or it would
+ * shadow the live one). So a recorded command that REFERS to an earlier
+ * recorded instance - a create-alias whose `of` names a slider two lines
+ * up, a connect between two of them - has to be rewritten to the name
+ * replay actually produced, or it binds to the wrong thing (or nothing).
+ * A rename map carries recorded-name -> replayed-name across the whole
+ * flow so every back-reference lands on the loaded copy.
+ */
+static void Bridge_RemapField(NodeObj command, char *field, NodeObj map)
+{
+	char *v = GetPropStr(command, field);
+	char *mapped;
+
+	if (!v || !v[0])
+		return;
+	mapped = GetPropStr(map, v);
+	if (mapped && mapped[0])
+		SetPropStr(command, field, mapped);
+}
+
+void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char path[300];
+	NodeObj flow, instr, map;
+	FILE *f;
+	long size;
+	char *text, *name, *recordedAs, *replayedAs;
+
+	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+
+	f = fopen(path, "r");
+	if (!f)
+	{
+		Bridge_Error(instance, "load-flow", "no such flow in saved/");
+		return;
+	}
+
+	fseek(f, 0, SEEK_END);
+	size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	text = malloc(size + 1);
+	if (text)
+	{
+		fread(text, 1, size, f);
+		text[size] = '\0';
+
+		flow = TextToNode(text);
+		free(text);
+
+		if (flow)
+		{
+			/* recorded name (as a string key) -> the pointer to the      */
+			/* replayed name string, for rewriting later back-references   */
+			map = NewNode(INTEGER);
+
+			instr = GetChild(flow);
+			while (instr)
+			{
+				name = GetNameStr(instr);
+
+				/* rewrite every field that NAMES an earlier instance to   */
+				/* the name replay gave it - before dispatching, so the    */
+				/* handler resolves the loaded copy, not a stale name (or  */
+				/* a live instance from before the load that happens to    */
+				/* share it)                                                */
+				Bridge_RemapField(instr, "of", map);
+				Bridge_RemapField(instr, "instance", map);
+				Bridge_RemapField(instr, "from", map);
+				Bridge_RemapField(instr, "to", map);
+				Bridge_RemapField(instr, "container", map);
+
+				/* what did this instruction ask to be called, and what    */
+				/* did it end up called? create verbs stamp the final      */
+				/* name back into "as" (Bridge_Create/CreateAlias) and      */
+				/* clone-instance into... its result is not in the command, */
+				/* so read the recorded intent before dispatch and the     */
+				/* stamped result after                                     */
+				recordedAs = GetPropStr(instr, "as");
+				recordedAs = recordedAs && recordedAs[0] ? strdup(recordedAs) : NULL;
+
+				Bridge_Dispatch(instance, local, name, instr);
+
+				replayedAs = GetPropStr(instr, "as");
+				if (recordedAs && replayedAs && replayedAs[0]
+					&& strcmp(recordedAs, replayedAs) != 0)
+					SetPropStr(map, recordedAs, replayedAs);
+				if (recordedAs)
+					free(recordedAs);
+
+				if (Bridge_IsMutating(name))
+					AppendChild(local->flow, Bridge_CloneCommand(instr, name));
+
+				instr = GetNextSibling(instr);
+			}
+
+			DelNode(map);
+			DelNode(flow);
+		}
+	}
+	fclose(f);
+
+	Bridge_ReplyEvent(instance, local, "flow-loaded", "file", path);
+}
+
+/* {"cmd":"list-flows"} - one targeted flow-file event per .flow in      */
+/* saved/, then flows-done: what a client's file dialog lists            */
+void Bridge_ListFlows(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	DIR *d;
+	struct dirent *e;
+	int len;
+
+	d = opendir("saved");
+	if (d)
+	{
+		while ((e = readdir(d)) != NULL)
+		{
+			len = (int) strlen(e->d_name);
+			if (len > 5 && strcmp(e->d_name + len - 5, ".flow") == 0)
+				Bridge_ReplyEvent(instance, local, "flow-file", "file", e->d_name);
+		}
+		closedir(d);
+	}
+
+	Bridge_ReplyEvent(instance, local, "flows-done", "file", "");
+}
+
+/*
  * File menu action - the File MenuButton's own Selected property fans
  * straight in here (Connect(FileMenu, "Selected", WebBridge, "FileCmd"),
  * main.c), exactly the same as any property driving anything else; this
  * object doesn't know it's a "menu", it just watches a property like it
  * would watch anything it was wired to.
  *
- * Save/Load/Import all lean on local->flow, the exact recording every
- * mutating command already appends to (Bridge_OnIn) - Save just writes
- * it out; Load/Import read it back and replay each instruction through
- * Bridge_Dispatch, the same function a live command goes through, so
- * every resulting instance is registered into local->aliases and
- * broadcast (Conn 0) exactly like a genuine create-instance would be -
- * to every connected client, not just whoever clicked the menu.
- *
- * One fixed filename for now - a save-as prompt is a client-side
- * feature (a Textbox wired to this the same way everything else is)
- * that hasn't been asked for yet. Load and Import are currently the
- * same operation (replay into the live session) - a real distinction
- * would mean clearing the shared session first for Load, which is a
- * separate, genuinely destructive feature nobody has asked for.
+ * The GUI now collects a filename first (its file dialog) and sends the
+ * save-flow/load-flow verbs itself, so this path only fires for a bare
+ * property write (a raw client, an old flow) - it maps to the same
+ * handlers with the default name.
  */
 int Bridge_OnFileCmd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-	char *cmd, *filename = "session.flow";
-	NodeObj fileMenu, flow, instr;
-	FILE *f;
-	long size;
-	char *text;
+	char *cmd;
+	NodeObj fileMenu, command;
 
 	if (!local || !data)
 		return rtrn_dropped;
@@ -1950,42 +2287,14 @@ int Bridge_OnFileCmd(NodeObj instance, MsgId message, NodeObj data)
 	if (!cmd || !cmd[0])
 		return rtrn_dropped;
 
+	command = NewNode(INTEGER);	/* an empty command: default file */
+
 	if (strcmp(cmd, "Save") == 0)
-	{
-		SaveFlow(local->flow, filename);
-	}
+		Bridge_SaveFlow(instance, local, command);
 	else if (strcmp(cmd, "Load") == 0 || strcmp(cmd, "Import") == 0)
-	{
-		f = fopen(filename, "r");
-		if (f)
-		{
-			fseek(f, 0, SEEK_END);
-			size = ftell(f);
-			fseek(f, 0, SEEK_SET);
+		Bridge_LoadFlow(instance, local, command);
 
-			text = malloc(size + 1);
-			if (text)
-			{
-				fread(text, 1, size, f);
-				text[size] = '\0';
-
-				flow = TextToNode(text);
-				free(text);
-
-				if (flow)
-				{
-					instr = GetChild(flow);
-					while (instr)
-					{
-						Bridge_Dispatch(instance, local, GetNameStr(instr), instr);
-						instr = GetNextSibling(instr);
-					}
-					DelNode(flow);
-				}
-			}
-			fclose(f);
-		}
-	}
+	DelNode(command);
 
 	/* revert the button to its plain label - "File: Save" sitting there  */
 	/* forever would look like a persistent mode, not a one-shot action    */

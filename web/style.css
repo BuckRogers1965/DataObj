@@ -535,3 +535,47 @@ body.mode-alias .prop-row {
   display: inline-flex;
   min-width: 40px;
 }
+
+/* --- the file dialog (Save/Load/Import): a node-box centered over a     */
+/* --- dimmed canvas, listing what the engine says exists in saved/       */
+.flow-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flow-dialog {
+  position: static;
+  width: 320px;
+}
+
+.flow-dialog-list {
+  max-height: 190px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+}
+
+.flow-dialog-list:empty::after {
+  content: 'no saved flows yet';
+  display: block;
+  padding: 8px;
+  color: #777;
+  font-size: 11px;
+}
+
+.flow-dialog-name {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.flow-dialog .node-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

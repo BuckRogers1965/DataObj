@@ -97,9 +97,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	WatchableProp(instance, "TargetProp");
 
 	/* the alias's OWN presentation - restyling an alias never touches   */
-	/* the original                                                        */
+	/* the original. Widget and Direction are stamped at birth by the     */
+	/* engine (create-alias / internals, bridge.c) from what the target's  */
+	/* class published; clients render them and deduce nothing.            */
 	SetPropStr(instance, "Widget", "");
 	WatchableProp(instance, "Widget");
+	SetPropStr(instance, "Direction", "");
+	WatchableProp(instance, "Direction");
 	SetPropStr(instance, "Label", "");
 	WatchableProp(instance, "Label");
 
@@ -144,6 +148,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "Target",     "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "TargetProp", "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Widget",     "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Direction",  "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Label",      "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Enable",     "in",   PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");

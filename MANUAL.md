@@ -160,26 +160,66 @@ unique within a container; slashes aren't allowed.
 
 ## Saving and loading
 
-The **File** menu (top bar) saves the session to `session.flow` and
-loads/imports it back. What's saved is the command history that built
-the session — replaying it rebuilds your objects, wiring, views, and
-panels.
+The **File** menu (top bar) opens a file dialog for Save, Load, and
+Import. Flows live as named files in the **saved/** directory next to
+the framework (created automatically); the dialog lists what's there —
+click a name or type a new one. What's saved is the command history
+that built the session — replaying it rebuilds your objects, wiring,
+views, and panels — and edits made through a panel's controls are
+recorded against the object itself, so they replay no matter which
+doorway made them. A load becomes part of the session's own history:
+Load then Save keeps everything.
+
+Loading adds to the canvas; it doesn't clear it. If a loaded name is
+still in use, the copy is named fresh and everything the flow said
+about it follows to the new name — so a loaded view's controls drive
+that view's own objects, never the ones it was saved from.
+
+Scripts get the same three verbs, plus the listing:
+
+    {"cmd":"save-flow","file":"myapp"}
+    {"cmd":"load-flow","file":"myapp"}     // import-flow is the same for now
+    {"cmd":"list-flows"}                   // one flow-file event per saved flow
 
 ## Scripting
 
-Everything the canvas does travels as one-line JSON commands, and the
-same protocol is open to you, raw, on port **8091** (and an
-authenticated variant on 8093):
+Everything the canvas does travels as one-line JSON commands over the
+web port's WebSocket — and the same protocol can stand up its own raw
+TCP surface, because a transport is just objects plus wiring. Send
+these over the WebSocket and port **8091** starts answering raw JSON
+(this is exactly how the test harness bootstraps itself —
+`ensure_raw_bridge` in testharness/rawtest.py):
 
-    {"cmd":"create-instance","class":"Slider","as":"S1"}
-    {"cmd":"clone-instance","of":"S1","container":"/Root/MyPanel","x":"20","y":"20"}
-    {"cmd":"create-alias","of":"S1","prop":"Value","container":"","x":"300","y":"60"}
-    {"cmd":"set-property","instance":"S1","prop":"Value","value":"42"}
-    {"cmd":"connect","from":"S1","fromPort":"Value","to":"L1","toPort":"In"}
-    {"cmd":"subscribe","instance":"S1","port":"Value"}
-    {"cmd":"internals","instance":"S1"}
+    {"cmd":"create-instance","class":"TCP","as":"/Root/RawTcp","hidden":"1"}
+    {"cmd":"set-property","instance":"/Root/RawTcp","prop":"LocalPort","value":"8091"}
+    {"cmd":"create-instance","class":"Bridge","as":"/Root/RawBridge","hidden":"1"}
+    {"cmd":"connect","from":"/Root/RawTcp","fromPort":"Out","to":"/Root/RawBridge","toPort":"In"}
+    {"cmd":"connect","from":"/Root/RawBridge","fromPort":"Out","to":"/Root/RawTcp","toPort":"In"}
+    {"cmd":"activate","instance":"/Root/RawBridge"}
+    {"cmd":"activate","instance":"/Root/RawTcp"}
+
+The command vocabulary, on either transport:
+
+    {"cmd":"create-instance","class":"Slider","container":"","x":"510","y":"40"}
+    {"cmd":"clone-instance","of":"/Root/Slider_1","container":"/Root/MyPanel","x":"20","y":"20"}
+    {"cmd":"create-alias","of":"/Root/Slider_1","prop":"Value","container":"","x":"300","y":"60"}
+    {"cmd":"move-instance","of":"/Root/Slider_1","container":"/Root/MyPanel","x":"25","y":"35"}
+    {"cmd":"set-property","instance":"/Root/Slider_1","prop":"Value","value":"42"}
+    {"cmd":"connect","from":"/Root/Slider_1","fromPort":"Value","to":"/Root/LED_1","toPort":"In"}
+    {"cmd":"subscribe","instance":"/Root/Slider_1","port":"Value"}
+    {"cmd":"internals","instance":"/Root/Slider_1"}
     {"cmd":"list-instances"}            // root; add "container" for a view's members
-    {"cmd":"delete-instance","instance":"S1"}
+    {"cmd":"delete-instance","instance":"/Root/Slider_1"}
+
+Birth and placement are one command: `create-instance` (like
+`clone-instance` and `create-alias`) carries `container`/`x`/`y`, and the
+**server names the result** — the `instance-created` event teaches you the
+name (`/Root/Slider_1`). Supplying your own name with `as` still works.
+`move-instance` is the whole drop gesture in one verb: re-container,
+reposition, rename; the engine refuses to move a view into itself or a
+descendant. Aliases are stamped at birth with the target property's
+published `Widget` type (and `Direction`) — a client renders what the
+alias says, it never has to look the type up.
 
 Events come back as JSON too — and only for what you're looking at: you
 receive updates for things you subscribed to and containers you listed,

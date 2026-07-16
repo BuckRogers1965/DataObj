@@ -36,7 +36,8 @@ Widget numbers below mirror the PropertyType enum in object.h:
 const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
 
 const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_SLIDER = 5,
-      PROP_VUMETER = 6, PROP_TEXTOUT = 7, PROP_KNOB = 8, PROP_LABEL = 9, PROP_NULL = 10, PROP_MENU = 11;
+      PROP_VUMETER = 6, PROP_TEXTOUT = 7, PROP_KNOB = 8, PROP_LABEL = 9, PROP_NULL = 10, PROP_MENU = 11,
+      PROP_ICON = 12;   /* a doorway: renders as the target's icon, opens its one panel */
 
 /* palette classes that ARE widgets - the base case of the recursion */
 const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton']);
@@ -49,19 +50,17 @@ const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PR
 let ws = null;
 let classes = {};          // className -> [{Name,Direction,Widget,Default}, ...]
 let instances = {};        // alias -> {className, el, ports: {name: dotEl}}
-let widgets = {};          // widgetAlias -> {kind:'input'|'display'|'action', widgetClass, targetAlias, targetProp, el}
 let selfDisplays = {};     // "alias.propName" -> {el,widgetClass}, for a widget class's own State shown on itself
 let liveControls = {};     // "alias.propName" -> {el,widgetClass}, an editable control synced from its own property-changed events
+let portDisplays = {};     // "alias.portName" -> {el,widgetClass}, a readout painted from the port's message-flowed traffic (an out-port LED)
 let wires = [];            // {fromAlias, fromPort, toAlias, toPort, lineEl}
-let aliasCounters = {};    // className -> next number, for user-placed palette instances
-let widgetAliasCounters = {}; // widgetClass -> next number, for internally-wired widget instances
+let cardBodies = {};       // cardAlias -> {addMemberRow}, a card panel waiting to grow rows from its internals view's members
+let internalsOwner = {};   // internals view alias -> the instance it dissects (learned from the internals event)
+let internalsAskMode = {}; // instance alias -> 'card'|'options', which gesture asked for internals (purely which PANEL this window then shows)
 let pendingPort = null;    // {alias, port, dotEl} - first end of a wire being drawn
 let dragState = null;      // {alias, offsetX, offsetY}
 let gestureDrag = null;    // {kind:'clone'|'alias', data, ghost} - a Clone/Alias carry in progress (the ghost, not the source)
 let panelDrag = null;      // {alias, el, offsetX, offsetY} - a view PANEL being moved by its titlebar (PanelX/PanelY, not X/Y)
-let nextPos = { x: 250, y: 30 }; /* clear of the palette panel's own top-left corner */
-let pendingPositions = {}; // alias -> {x,y}, staged by createInstance() for an instance this client is about to create
-let pendingContainers = {}; // alias -> view alias, staged the same way - the drop target of the gesture that created it
 let livePositions = {};    // alias -> {el}, a card whose X/Y are real properties kept in sync like anything else
 let menuButtons = {};      // alias -> {label,items,selected,btn,dropdown}, any MenuButton (topbar chrome or dropped-in)
 let propertyValues = {};   // "alias.propName" -> last known value, from property-changed - what Clone reads to copy a source's configuration
@@ -291,7 +290,20 @@ function handleEvent(msg) {
       onInstanceRenamed(msg.from, msg.to);
       break;
     case 'internals':
-      onInternals(msg.view);
+      onInternals(msg.instance, msg.view);
+      break;
+    case 'flow-file':
+      onFlowFile(msg.file);
+      break;
+    case 'flows-done':
+      break;
+    case 'flow-saved':
+      log('saved ' + msg.file, 'event');
+      closeFlowDialog();
+      break;
+    case 'flow-loaded':
+      log('loaded ' + msg.file, 'event');
+      closeFlowDialog();
       break;
     case 'error':
       log('error (' + msg.cmd + '): ' + msg.message, 'error');
@@ -311,44 +323,13 @@ function parseInterface(interfaceNode) {
 }
 
 /* an alias is always the instance's CURRENT full path (/Root/... here,     */
-/* /Root/Palette/... for BuildPalette's bootstrap instances - object.c) -    */
-/* there is no separate "creation path" concept distinct from this: /Root/   */
-/* here is just what the current path happens to be at the moment of birth,  */
-/* the same as it is at any later moment. Moving an instance to a different   */
-/* View later changes both Container AND this path together (Bridge_Rename,   */
-/* bridge.c) - a client re-keys everything it has stored under the old        */
-/* alias to the new one (onInstanceRenamed) rather than the name staying      */
-/* fixed while only Container moves underneath it.                            */
-function createInstance(className, container, pos) {
-  aliasCounters[className] = (aliasCounters[className] || 0) + 1;
-  const alias = '/Root/' + className + aliasCounters[className];
-  send({ cmd: 'create-instance', class: className, as: alias });
-  /* the box itself is built on the instance-created event that comes  */
-  /* back, not here - the server is the source of truth for whether it */
-  /* actually exists                                                   */
-
-  /* position is a property like any other - a freshly created instance */
-  /* is just as real an object as one dragged a minute ago, so where it   */
-  /* first appears has to be written back immediately, not held only as   */
-  /* local placement the server (and every other window) never learns.   */
-  /* Position and container come from the drop that created it - where    */
-  /* you release IS where it lives, in whatever view that happens to be.  */
-  if (!pos) {
-    pos = nextPos;
-    nextPos = { x: (nextPos.x + 40) % 500 + 30, y: nextPos.y + (nextPos.x > 460 ? 130 : 0) + 0 };
-  }
-  pendingPositions[alias] = pos;
-  pendingContainers[alias] = container || '';
-  send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(pos.x) });
-  send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(pos.y) });
-  if (container) send({ cmd: 'set-property', instance: alias, prop: 'Container', value: container });
-  return alias;
-}
-
-function nextWidgetAlias(widgetClass) {
-  widgetAliasCounters[widgetClass] = (widgetAliasCounters[widgetClass] || 0) + 1;
-  return '_' + widgetClass + widgetAliasCounters[widgetClass];
-}
+/* /Root/Palette/... for BuildPalette's bootstrap instances - object.c).     */
+/* Moving an instance to a different View changes both Container AND this    */
+/* path together (Bridge_Rename, bridge.c) - a client re-keys everything it  */
+/* has stored under the old alias to the new one (onInstanceRenamed).         */
+/* Creation itself is one verb: create-instance carries class/container/x/y   */
+/* and the SERVER names the result - the client learns the name from the      */
+/* instance-created event, never mints one.                                    */
 
 /* one shared builder for the raw input element a Value control renders  */
 /* as - used both for a widget instance's own Value (base case) and for  */
@@ -423,8 +404,16 @@ function makeMenuButtonEl(alias) {
       row.textContent = item;
       row.onclick = (ev) => {
         ev.stopPropagation();
-        send({ cmd: 'set-property', instance: alias, prop: 'Selected', value: item });
         dropdown.style.display = 'none';
+        /* a file action needs a filename before it becomes ONE verb -    */
+        /* the dialog collects it (user input, the client's legitimate    */
+        /* job) and sends save-flow/load-flow/import-flow itself. Every    */
+        /* other menu selection is an ordinary property write.             */
+        if (alias === 'FileMenu' && (item === 'Save' || item === 'Load' || item === 'Import')) {
+          openFlowDialog(item);
+          return;
+        }
+        send({ cmd: 'set-property', instance: alias, prop: 'Selected', value: item });
       };
       dropdown.appendChild(row);
     }
@@ -449,6 +438,101 @@ function makeMenuButtonEl(alias) {
   return wrap;
 }
 
+/* --- the file dialog: pure presentation over two engine facts ---------- */
+/* list-flows says what exists in saved/; save-flow/load-flow/import-flow  */
+/* do the work. The filename is genuine user input - collecting it here    */
+/* is the client's legitimate job; the action is still ONE verb carrying   */
+/* the whole intent.                                                        */
+
+let flowDialog = null;   // {el, listEl, input, kind} while a dialog is open
+
+function closeFlowDialog() {
+  if (flowDialog) {
+    flowDialog.el.remove();
+    flowDialog = null;
+  }
+}
+
+function openFlowDialog(kind) {
+  closeFlowDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'flow-dialog-overlay';
+  overlay.onclick = (ev) => { if (ev.target === overlay) closeFlowDialog(); };
+
+  const box = document.createElement('div');
+  box.className = 'node-box flow-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'node-header';
+  const title = document.createElement('span');
+  title.className = 'node-title';
+  title.textContent = kind + ' flow';
+  const hint = document.createElement('span');
+  hint.className = 'node-class';
+  hint.textContent = 'saved/';
+  header.appendChild(title);
+  header.appendChild(hint);
+  box.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'node-body';
+  const listEl = document.createElement('div');
+  listEl.className = 'flow-dialog-list';
+  body.appendChild(listEl);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'flow-dialog-name';
+  input.placeholder = 'flow name';
+  input.value = 'session';
+  body.appendChild(input);
+  box.appendChild(body);
+
+  const doIt = () => {
+    const name = input.value.trim();
+    if (!name) return;
+    const verb = kind === 'Save' ? 'save-flow' : kind === 'Import' ? 'import-flow' : 'load-flow';
+    send({ cmd: verb, file: name });
+    /* stays open until flow-saved/flow-loaded confirms (handleEvent) -   */
+    /* the engine is the one that knows whether it happened               */
+  };
+
+  const footer = document.createElement('div');
+  footer.className = 'node-footer';
+  const go = document.createElement('button');
+  go.className = 'activate-btn';
+  go.textContent = kind;
+  go.onclick = doIt;
+  const cancel = document.createElement('button');
+  cancel.className = 'activate-btn';
+  cancel.textContent = 'Cancel';
+  cancel.onclick = closeFlowDialog;
+  footer.appendChild(go);
+  footer.appendChild(cancel);
+  box.appendChild(footer);
+
+  input.onkeydown = (ev) => { if (ev.key === 'Enter') doIt(); };
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  flowDialog = { el: overlay, listEl, input, kind };
+  input.focus();
+  input.select();
+
+  /* what exists is the ENGINE's fact - ask, then render what comes back */
+  send({ cmd: 'list-flows' });
+}
+
+function onFlowFile(file) {
+  if (!flowDialog || !file) return;
+  const row = document.createElement('div');
+  row.className = 'menu-item flow-dialog-file';
+  const name = file.replace(/\.flow$/, '');
+  row.textContent = name;
+  row.onclick = () => { flowDialog.input.value = name; };
+  flowDialog.listEl.appendChild(row);
+}
+
 /* clicking anywhere outside an open dropdown closes it - ordinary menu    */
 /* behavior, nothing property-related about it                            */
 document.addEventListener('click', () => {
@@ -471,21 +555,16 @@ function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValu
   return el;
 }
 
-/* every rendered control, however it's nested, is backed by a real,       */
-/* separately addressable object (makeInputWidget/makeDisplayWidget/        */
-/* makeButtonWidget already create one) - that's what makes it exactly as   */
-/* wireable as a top-level atom, just currently sitting inside its parent's  */
-/* card instead of standing on the canvas by itself. Same pattern            */
-/* registerWidgetAtom uses for itself: a wrapper carries the click-to-wire   */
-/* listener (the control inside loses pointer-events outside Operate mode,   */
-/* see the CSS, so the click falls through to this wrapper instead), and     */
-/* instances[alias] is what onConnected/updateWiresFor need to find it.      */
-function wireable(alias, className, propName, controlEl) {
+/* a control's wire anchor: the same .wireable wrapper every control has   */
+/* always had (the control inside loses pointer-events outside Operate      */
+/* mode, see the CSS, so the click falls through to this wrapper), but the   */
+/* endpoint it arms is the REAL instance and property/port name - there is   */
+/* no separate object standing in for a control anymore                      */
+function wireSlot(alias, propName, controlEl) {
   const wrap = document.createElement('span');
   wrap.className = 'wireable';
   wrap.appendChild(controlEl);
   wrap.addEventListener('click', () => onPortClick(alias, propName, wrap));
-  instances[alias] = { className, el: wrap, ports: { [propName]: wrap } };
   return wrap;
 }
 
@@ -521,68 +600,13 @@ function makeSelfActivateButton(alias) {
   return btn;
 }
 
-/* --- recursive case: wrap a composite object's property in a real widget instance --- */
-
-/* hidden:'1' marks these as plumbing, not first-class session objects -  */
-/* server-side state (see Bridge_InstanceEvent's doc comment), not just   */
-/* client bookkeeping, so a client that replays the view later (a fresh   */
-/* page load, a different browser entirely) still knows to skip them      */
-/* instead of rendering a stray extra card for every wrapped control      */
-function makeInputWidget(widgetClass, targetAlias, targetProp, defaultValue) {
-  const widgetAlias = nextWidgetAlias(widgetClass);
-  send({ cmd: 'create-instance', class: widgetClass, as: widgetAlias, hidden: '1' });
-  if (defaultValue) send({ cmd: 'set-property', instance: widgetAlias, prop: 'Value', value: defaultValue });
-  send({ cmd: 'bind-property', from: widgetAlias, fromPort: 'Value', to: targetAlias, toProp: targetProp });
-
-  widgets[widgetAlias] = { kind: 'input', widgetClass, targetAlias, targetProp };
-
-  const el = bindLiveControl(widgetAlias, 'Value', widgetClass, defaultValue,
-    (v) => send({ cmd: 'set-property', instance: widgetAlias, prop: 'Value', value: v }));
-
-  /* the write path above is deliberately one-way (widget.Value -> target */
-  /* property, via bind-property) to avoid a feedback loop - but nothing  */
-  /* was ever reading the target's CURRENT value back, so a change made   */
-  /* from a different window (its own separate hidden widget, or any      */
-  /* other source) never showed up here. Subscribing straight to the      */
-  /* target property is the read side of the same "everything is a        */
-  /* property, everything is subscribable" rule - it only ever updates    */
-  /* what's displayed, never re-sends, so it can't loop back into the      */
-  /* write path above.                                                     */
-  send({ cmd: 'subscribe', instance: targetAlias, port: targetProp });
-  /* list, not a single slot - same reasoning as bindLiveControl above:     */
-  /* if targetAlias has been Copy'd, every rendering's hidden widget needs   */
-  /* to keep reading the target's real value, not just whichever one        */
-  /* registered here last                                                   */
-  const targetKey = targetAlias + '.' + targetProp;
-  (liveControls[targetKey] = liveControls[targetKey] || []).push({ el, widgetClass });
-
-  return wireable(widgetAlias, widgetClass, 'Value', el);
-}
-
-function makeDisplayWidget(widgetClass, targetAlias, targetPort) {
-  const widgetAlias = nextWidgetAlias(widgetClass);
-  send({ cmd: 'create-instance', class: widgetClass, as: widgetAlias, hidden: '1' });
-  send({ cmd: 'connect', from: targetAlias, fromPort: targetPort, to: widgetAlias, toPort: 'In' });
-  send({ cmd: 'subscribe', instance: widgetAlias, port: 'Value' });
-
-  const el = makeReadoutEl(widgetClass);
-  widgets[widgetAlias] = { kind: 'display', widgetClass, targetAlias, targetPort, el };
-  return wireable(widgetAlias, widgetClass, 'Value', el);
-}
-
-function makeButtonWidget(targetAlias) {
-  const widgetAlias = nextWidgetAlias('Button');
-  send({ cmd: 'create-instance', class: 'Button', as: widgetAlias, hidden: '1' });
-  send({ cmd: 'bind-activate', from: widgetAlias, fromPort: 'Out', to: targetAlias });
-
-  widgets[widgetAlias] = { kind: 'action', widgetClass: 'Button', targetAlias };
-
-  const btn = document.createElement('button');
-  btn.className = 'activate-btn';
-  btn.textContent = 'Activate';
-  btn.onclick = () => { if (effectiveMode(btn) === 'Operate') send({ cmd: 'activate', instance: widgetAlias }); };
-  return wireable(widgetAlias, 'Button', 'Out', btn);
-}
+/* The hidden helper widgets (makeInputWidget/makeDisplayWidget/            */
+/* makeButtonWidget) that used to wrap a composite object's properties in    */
+/* invisible per-page widget instances are GONE (readmefirst repair #3):     */
+/* a card's rows are the engine's own internals-view members now (see        */
+/* registerCard/addMemberRow), its icon LED is a plain subscribed readout,   */
+/* and its Activate button sends the activate verb straight at the object.   */
+/* Nothing on this side of the bridge creates, names, or owns anything.      */
 
 /* a standalone widget instance: its own natural control (or dot) plus a  */
 /* label, positioned and draggable exactly like any other card - no        */
@@ -719,16 +743,24 @@ function registerView(alias, props, pos, hidden, container) {
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'view-resize-handle';
   resizeHandle.style.display = 'none'; /* shown once Resizeable arrives as "1" */
-  resizeHandle.onmousedown = (ev) => startResize(ev, alias);
+  /* the CURRENT name, not the birth name - renaming re-keys every map    */
+  /* this gesture is about to look in (see aliasOfEl)                       */
+  resizeHandle.onmousedown = (ev) => startResize(ev, aliasOfEl(wrap, alias));
   panel.appendChild(resizeHandle);
 
   /* a view's only extra behavior on open: a closed view's contents were  */
   /* never sent here - the GUI only holds what it can see - so first open  */
-  /* fetches the members; live events keep them current after that         */
+  /* fetches the members; live events keep them current after that.        */
+  /* Resolved to the CURRENT alias at open time (aliasOfEl), never the      */
+  /* birth name captured here - a rename between birth and first open       */
+  /* otherwise lists (and marks this window as viewing) a container that    */
+  /* no longer exists, and every event about the real one is then           */
+  /* correctly scoped away from us.                                          */
   const p = registerPanel(alias, panel, 'flex', (open) => {
-    if (open && !loadedContainers[alias]) {
-      loadedContainers[alias] = 1;
-      send({ cmd: 'list-instances', container: alias });
+    const cur = aliasOfEl(wrap, alias);
+    if (open && !loadedContainers[cur]) {
+      loadedContainers[cur] = 1;
+      send({ cmd: 'list-instances', container: cur });
     }
   });
 
@@ -739,7 +771,7 @@ function registerView(alias, props, pos, hidden, container) {
   /* aliasing a view aliases its Open - the alias renders as another icon */
   /* that opens this same panel (see renderAliasControl)                   */
   icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'Open'); };
-  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, alias, panel); };
+  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
 
@@ -801,19 +833,11 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   /* renders twice                                                          */
   if (instances[alias] || views[alias]) return;
 
-  /* plumbing widget instances (created by makeInputWidget/makeDisplayWidget/  */
-  /* makeButtonWidget to back some other node's control) are already fully    */
-  /* wired and rendered into their parent's card by the time this event       */
-  /* arrives - registered in widgets{} synchronously, before the round trip   */
-  /* to the server and back. They never get a canvas card of their own.       */
-  if (widgets[alias]) return;
-
-  /* the same plumbing, but replayed to a client that never created it (a  */
-  /* fresh page load, a different browser) and so has no local widgets{}   */
-  /* record - hidden is real server-side state precisely for this case.    */
-  /* A hidden VIEW is different: it is a panel with no icon of its own      */
-  /* (an object's internals view - the object's icon is its presence), so   */
-  /* it registers normally minus the canvas icon.                           */
+  /* hidden marks plumbing, not first-class session content - real          */
+  /* server-side state (see Bridge_InstanceEvent's doc comment). A hidden   */
+  /* VIEW is different: it is a panel with no icon of its own (an object's   */
+  /* internals view - the object's icon is its presence), so it registers    */
+  /* normally minus the canvas icon.                                          */
   if (hidden && className !== 'View') return;
 
   /* every instance-created event carries its class's Interface inline -  */
@@ -830,14 +854,11 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   }
 
   const props = classes[className] || [];
-  /* self-created: the position/container createInstance() already staged  */
-  /* and told the server about. Replayed (list-instances, or another        */
-  /* client's create-instance): no local stake in it yet - place it         */
-  /* anywhere, the X/Y subscribe below corrects it almost immediately.     */
-  const pos = pendingPositions[alias] || { x: 30, y: 30 };
-  delete pendingPositions[alias];
-  container = container || pendingContainers[alias] || '';
-  delete pendingContainers[alias];
+  /* birth position/container are the SERVER's facts (atomic birth - the   */
+  /* create verb carried them): place it anywhere for now, the X/Y          */
+  /* subscribe below corrects it almost immediately.                        */
+  const pos = { x: 30, y: 30 };
+  container = container || '';
 
   /* a View is not a special client-side concept (the Palette included -   */
   /* it's just a View whose bootstrap children happen to have Container    */
@@ -878,6 +899,16 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
 /* place to click them (see the iconDots/panelRows swap in setExpanded      */
 /* below): collapsed or expanded is a display choice, not a different        */
 /* object or a different wire.                                               */
+/*                                                                            */
+/* The panel's rows are the ENGINE's answer to "what is this object's        */
+/* panel": its internals view's member aliases (Bridge_Internals). The       */
+/* shell (header/body/footer) renders immediately; the first open asks       */
+/* `internals`, the members stream in (the same lazy-contents path the       */
+/* dissection panel uses), and each member becomes one row (addMemberRow     */
+/* below), its control chosen by the member's engine-stamped Widget/          */
+/* Direction and its edits written through the member's own Value link.       */
+/* This window shows the node-box styling; Options mode shows the same        */
+/* members as the free-form dissection table - one panel, two projections.    */
 function registerCard(alias, className, props, pos, isCopy, container) {
   const wrap = document.createElement('div');
   wrap.className = 'instance-wrap';
@@ -890,7 +921,9 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   iconLabel.className = 'instance-icon-label';
   iconLabel.textContent = className;
   icon.appendChild(iconLabel);
-  icon.appendChild(makeDisplayWidget('LED', alias, 'State'));
+  /* the status LED is a plain painted readout of the object's own State - */
+  /* subscribe and render, no helper instance standing in for it            */
+  icon.appendChild(wireSlot(alias, 'State', makeSelfDisplay(alias, 'State', PROP_LED)));
   wrap.appendChild(icon);
 
   /* the panel is the icon's control panel - a separate thing with its    */
@@ -926,101 +959,151 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   const panelRows = {};
   const iconDots = {};
   const outPorts = [];
+  const builtRows = {};
+  let panelOpen = false;
+  let rowsAsked = false;
 
+  /* the icon's port dots render straight from the class's published        */
+  /* Interface (it rides on instance-created for exactly this): a bare       */
+  /* port - one carrying no widget metadata - gets a clickable dot. The       */
+  /* panel's ROWS are not built here at all: they are the internals view's    */
+  /* members, streamed in on first open (addMemberRow below).                 */
   for (const p of props) {
-    /* position isn't a settings-row control, it's the card's own drag       */
-    /* position (see the livePositions wiring below); State is on the icon   */
-    /* now, not a second time in the panel header                            */
-    if (p.Name === 'X' || p.Name === 'Y' || p.Name === 'W' || p.Name === 'H' || p.Name === 'State') continue;
+    if (p.Direction !== 'in' && p.Direction !== 'out') continue;
+    if (p.Direction === 'out') outPorts.push(p.Name);
+    if (DISPLAY_WIDGET_CLASS[p.Widget] || INPUT_WIDGET_CLASS[p.Widget]) continue;
 
-    if (p.Direction === 'data') {
+    const dot = document.createElement('span');
+    dot.className = 'port-dot icon-dot ' + p.Direction;
+    dot.title = p.Name;
+    dot.addEventListener('click', ((name) => (ev) => { ev.stopPropagation(); onPortClick(alias, name, ports[name]); })(p.Name));
+    icon.appendChild(dot);
+    iconDots[p.Name] = dot;
+    ports[p.Name] = dot;
+  }
+
+  /* one row per internals-view member: which control, and whether it's a   */
+  /* prop row or a port row, comes from the member's ENGINE-stamped Widget/  */
+  /* Direction. Edits write through the member's own Value - the node-level  */
+  /* link lands them on the object - and reads subscribe to the object       */
+  /* itself (events speak the original's name; one tap serves everything).   */
+  function addMemberRow(memberAlias, rec) {
+    const propName = rec.targetProp;
+    if (builtRows[propName]) return;
+    builtRows[propName] = true;
+
+    /* position/size are the card's own drag; State is the icon's LED */
+    if (propName === 'State') return;
+
+    const inputClass = INPUT_WIDGET_CLASS[rec.widget];
+    const displayClass = DISPLAY_WIDGET_CLASS[rec.widget];
+    /* the published Default seeds a control before its first live value    */
+    /* arrives - same engine-published Interface fact the old rows used     */
+    const pub = props.find((q) => q.Name === propName) || {};
+
+    if (rec.direction === 'data') {
+      if (!inputClass && !displayClass) return; /* plumbing (PROP_NULL, PROP_ICON): no row */
+
       let controlEl;
-      if (INPUT_WIDGET_CLASS[p.Widget]) {
-        controlEl = makeInputWidget(INPUT_WIDGET_CLASS[p.Widget], alias, p.Name, p.Default);
-      } else if (DISPLAY_WIDGET_CLASS[p.Widget]) {
-        controlEl = makeDisplayWidget(DISPLAY_WIDGET_CLASS[p.Widget], alias, p.Name);
+      if (inputClass) {
+        controlEl = bindLiveControl(alias, propName, inputClass,
+          propertyValues[alias + '.' + propName] || pub.Default,
+          (v) => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: v }));
       } else {
-        continue; /* no widget backs this widget-type (e.g. PROP_BUTTON on a data prop) */
+        controlEl = makeSelfDisplay(alias, propName, rec.widget);
       }
 
       const row = document.createElement('div');
       row.className = 'prop-row';
       const label = document.createElement('label');
-      label.textContent = p.Name;
+      label.textContent = propName;
       row.appendChild(label);
-      row.appendChild(controlEl);
-      body.appendChild(row);
-
-      /* controlEl is already wireable (makeInputWidget/makeDisplayWidget    */
-      /* wrap it and register its own real, separately addressable instance  */
-      /* - see wireable() above) - nothing more to do here, this row is       */
-      /* just its layout, not a second thing to click                        */
+      row.appendChild(wireSlot(alias, propName, controlEl));
+      /* members replay newest-first (the session table prepends), so     */
+      /* prepending each row restores the class's published order - the    */
+      /* same top-to-bottom the Interface declares                          */
+      body.insertBefore(row, body.firstChild);
 
       /* "copying out a control": in Alias mode, drag this row into any     */
       /* view and drop it - a real Alias instance of THIS object's property  */
       /* lands there (create-alias, bridge.c), reading and writing the one   */
       /* true value through the link. That's how instrument panels are       */
       /* built.                                                               */
-      row.onmousedown = ((propName) => (ev) => {
+      row.onmousedown = (ev) => {
         if (effectiveMode(row) !== 'Alias') return;
         startGestureDrag(ev, 'alias', { of: alias, prop: propName }, 'alias: ' + alias + '.' + propName);
-      })(p.Name);
-    } else if (p.Direction === 'in' || p.Direction === 'out') {
-      const hasControl = DISPLAY_WIDGET_CLASS[p.Widget] || INPUT_WIDGET_CLASS[p.Widget];
+      };
+    } else if (rec.direction === 'in' || rec.direction === 'out') {
+      const hasControl = displayClass || inputClass;
 
       const row = document.createElement('div');
-      row.className = 'port-row ' + p.Direction + (hasControl ? ' has-control' : '');
+      row.className = 'port-row ' + rec.direction + (hasControl ? ' has-control' : '');
 
       const label = document.createElement('span');
-      label.textContent = p.Name;
+      label.textContent = propName;
 
-      if (p.Direction === 'out') {
+      if (rec.direction === 'out') {
         row.appendChild(label);
-        /* a port can carry the same display-widget metadata a property does */
-        /* (Pulse's Out is Widget=PROP_LED)                                   */
-        if (DISPLAY_WIDGET_CLASS[p.Widget]) row.appendChild(makeDisplayWidget(DISPLAY_WIDGET_CLASS[p.Widget], alias, p.Name));
+        /* a port can carry the same display-widget metadata a property     */
+        /* does (Pulse's Out is Widget=PROP_LED) - painted straight from     */
+        /* the port's own message-flowed traffic                             */
+        if (displayClass) {
+          const el = makeReadoutEl(displayClass);
+          const key = alias + '.' + propName;
+          (portDisplays[key] = portDisplays[key] || []).push({ el, widgetClass: displayClass });
+          row.appendChild(wireSlot(alias, propName, el));
+        }
       } else {
-        /* likewise an in-port can carry input-widget metadata (Enable is    */
-        /* Widget=PROP_CHECKBOX) - give it a real, directly-clickable control */
-        if (INPUT_WIDGET_CLASS[p.Widget]) row.appendChild(makeInputWidget(INPUT_WIDGET_CLASS[p.Widget], alias, p.Name, p.Default));
+        /* likewise an in-port can carry input-widget metadata (Enable is   */
+        /* Widget=PROP_CHECKBOX) - a directly-clickable control writing      */
+        /* through the member's link, so the port's own handler runs          */
+        if (inputClass) {
+          const el = bindLiveControl(alias, propName, inputClass, pub.Default,
+            (v) => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: v }));
+          row.appendChild(wireSlot(alias, propName, el));
+        }
         row.appendChild(label);
       }
 
-      body.appendChild(row);
+      /* same published-order restoration as the prop rows above */
+      body.insertBefore(row, body.firstChild);
 
-      /* a bare port (no control - Reader's "Out", say) has no separate      */
-      /* object standing in for it, so the row (or the icon's own small       */
-      /* dot, whichever is currently showing - see setExpanded) is what        */
-      /* gets clicked; a port that DOES carry a control is already wireable    */
-      /* through it (see wireable() above) - a dot would be a redundant        */
-      /* second click target for that one, so only bare ports get one.        */
+      /* a bare port's row is itself the wire click-target while the panel   */
+      /* is open (the icon's dot when it isn't - see the swap below)          */
       if (!hasControl) {
-        row.addEventListener('click', () => onPortClick(alias, p.Name, ports[p.Name]));
-        panelRows[p.Name] = row;
-        ports[p.Name] = row;
-
-        const dot = document.createElement('span');
-        dot.className = 'port-dot icon-dot ' + p.Direction;
-        dot.title = p.Name;
-        dot.addEventListener('click', (ev) => { ev.stopPropagation(); onPortClick(alias, p.Name, ports[p.Name]); });
-        icon.appendChild(dot);
-        iconDots[p.Name] = dot;
+        row.addEventListener('click', () => onPortClick(alias, propName, ports[propName]));
+        panelRows[propName] = row;
+        if (panelOpen) ports[propName] = row;
       }
-      if (p.Direction === 'out') outPorts.push(p.Name);
     }
   }
+  cardBodies[alias] = { addMemberRow };
 
   panel.appendChild(body);
 
   const footer = document.createElement('div');
   footer.className = 'node-footer';
-  footer.appendChild(makeButtonWidget(alias));
+  /* Activate is one verb aimed at the object itself */
+  const activateBtn = document.createElement('button');
+  activateBtn.className = 'activate-btn';
+  activateBtn.textContent = 'Activate';
+  activateBtn.onclick = () => { if (effectiveMode(activateBtn) === 'Operate') send({ cmd: 'activate', instance: aliasOfEl(wrap, alias) }); };
+  footer.appendChild(wireSlot(alias, 'Activate', activateBtn));
   panel.appendChild(footer);
 
   /* wires re-anchor to whichever representation shows the port best:      */
-  /* the panel's rows while it's open here, the icon's dots when not       */
+  /* the panel's rows while it's open here, the icon's dots when not.      */
+  /* First open asks the engine for the internals view - the one answer     */
+  /* to "what is this object's panel" - and the member rows stream in.      */
   const p = registerPanel(alias, panel, 'block', (open) => {
-    for (const name in ports) ports[name] = open ? panelRows[name] : iconDots[name];
+    panelOpen = open;
+    for (const name in ports) ports[name] = (open && panelRows[name]) || iconDots[name] || ports[name];
+    if (open && !rowsAsked) {
+      rowsAsked = true;
+      const cur = aliasOfEl(wrap, alias);
+      internalsAskMode[cur] = 'card';
+      send({ cmd: 'internals', instance: cur });
+    }
   });
 
   icon.addEventListener('click', () => { if (effectiveMode(icon) === 'Operate') p.setOpen(true); });
@@ -1029,7 +1112,7 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   /* aliasing a thing is aliasing its icon - the alias opens this same    */
   /* panel (Open rides the link), exactly like aliasing a view            */
   icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
-  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, alias, panel); };
+  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
 
@@ -1126,16 +1209,20 @@ function onPropertyChanged(alias, port, value) {
   }
 
   /* an Alias atom assembles itself from its own properties as they arrive  */
-  /* (Target/TargetProp say what it stands for, Widget/Label are its own    */
-  /* presentation) - see registerAliasAtom                                   */
+  /* (Target/TargetProp say what it stands for, Widget/Direction are the    */
+  /* engine's stamped presentation, Label its own) - see registerAliasAtom.  */
+  /* An internals-view member additionally becomes a row on its owner's      */
+  /* card panel (maybeBuildCardRow) - same member, second projection.         */
   const aliasAtom = aliasAtoms[alias];
-  if (aliasAtom && (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Label')) {
-    aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
-    renderAliasControl(alias);
+  if (aliasAtom) {
+    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Direction' || port === 'Label') {
+      aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
+      renderAliasControl(alias);
+      maybeBuildCardRow(alias);
+    } else if (port === 'Container') {
+      aliasAtom.container = value;
+    }
   }
-
-  const w = widgets[alias];
-  if (w && w.kind === 'display' && port === 'Value') updateReadout(w.el, w.widgetClass, value);
 
   /* every rendering subscribed to this alias.prop gets the update - this   */
   /* is the "load the new values in without propagating anything" contract: */
@@ -1163,7 +1250,24 @@ function onPropertyChanged(alias, port, value) {
 }
 
 function onMessageFlowed(alias, port, value) {
+  /* an out-port readout (a Pulse's Out LED) paints straight from the       */
+  /* port's own traffic - display only, nothing standing in for the port    */
+  const key = alias + '.' + port;
+  for (const entry of portDisplays[key] || []) updateReadout(entry.el, entry.widgetClass, value);
+
   log(alias + '.' + port + ' → ' + value, 'event');
+}
+
+/* an internals-view member alias doubles as a row on its owner's card      */
+/* panel - built once its engine-stamped facts (TargetProp/Widget/           */
+/* Direction) have all arrived and its container is a view some card here    */
+/* knows as its internals view                                                */
+function maybeBuildCardRow(memberAlias) {
+  const rec = aliasAtoms[memberAlias];
+  if (!rec || !rec.targetProp || rec.widget === '' || rec.direction === '') return;
+  const owner = internalsOwner[rec.container];
+  const card = owner && cardBodies[owner];
+  if (card) card.addMemberRow(memberAlias, rec);
 }
 
 /* wiring: click any property (a row, or a whole widget atom - see
@@ -1249,9 +1353,12 @@ function attachDeleteGesture(el, alias) {
   el.addEventListener('click', (ev) => {
     if (effectiveMode(el) !== 'Delete') return;
     ev.stopPropagation();
-    const cur = aliasOfEl(el, alias);
-    send({ cmd: 'delete-instance', instance: cur });
-    onInstanceRemoved(cur);
+    /* send the verb; the instance-removed event is the ONLY remover -    */
+    /* for a moment the GUI may show a thing the engine has deleted, but   */
+    /* never the reverse: the GUI is never the source of truth about what   */
+    /* exists (and a refused delete - Deletable="0" - removes nothing        */
+    /* anywhere, instead of flashing a fake removal here)                     */
+    send({ cmd: 'delete-instance', instance: aliasOfEl(el, alias) });
   });
 }
 
@@ -1269,32 +1376,39 @@ function attachOptionsGesture(el, alias) {
 }
 
 /* the server's answer to an internals ask: which view is this thing's     */
-/* panel - open it in this window (retrying briefly if the view's own      */
-/* instance-created is still in flight ahead of us)                         */
-function onInternals(viewAlias, tries) {
-  const p = panels[viewAlias];
-  if (p) {
-    p.setOpen(true);
-    return;
+/* panel. The view and its members are the same engine facts either way -   */
+/* which PANEL this window then shows is the only thing the asking gesture   */
+/* decides: an Options click opens the free-form dissection table; a card's   */
+/* first open keeps its node-box and grows rows from the same members.        */
+function onInternals(instance, viewAlias) {
+  internalsOwner[viewAlias] = instance;
+  const mode = internalsAskMode[instance] || 'options';
+  delete internalsAskMode[instance];
+
+  /* a closed view's contents were never sent here - fetch the members     */
+  /* (idempotent: the dissection panel's own open does the same thing)      */
+  if (!loadedContainers[viewAlias]) {
+    loadedContainers[viewAlias] = 1;
+    send({ cmd: 'list-instances', container: viewAlias });
   }
-  if ((tries || 0) < 10) setTimeout(() => onInternals(viewAlias, (tries || 0) + 1), 200);
+
+  if (mode !== 'options') return;
+
+  /* open the dissection panel, retrying briefly if the view's own          */
+  /* instance-created is still in flight ahead of us                         */
+  const openIt = (tries) => {
+    const p = panels[viewAlias];
+    if (p) { p.setOpen(true); return; }
+    if (tries < 10) setTimeout(() => openIt(tries + 1), 200);
+  };
+  openIt(0);
 }
 
 /* a new, independent instance of the source's class, starting from the    */
-/* source's current configuration - not a blank instance of the same       */
-/* class, and not the same object under a second name (that's Copy - a      */
-/* *second subscribe* to the SAME alias, no server-side clone concept        */
-/* needed for it at all). State/X/Y/W/H/Container/Deletable are excluded:   */
-/* a clone gets its own fresh lifecycle, its own position, and its own       */
-/* independence - inheriting the source's Container would silently place     */
-/* the clone back wherever the source lives (cloning something out of the    */
-/* Palette would otherwise put the clone right back in the Palette), and     */
-/* Deletable="0" is specifically the source's own protection, not a          */
-/* configuration choice to propagate. propertyValues already holds            */
-/* everything else this client has ever been told about the source (see      */
-/* onPropertyChanged) - createInstance already stages/broadcasts position     */
-/* the same way a palette click does, so cloning is just that plus copying    */
-/* the rest of what's known.                                                  */
+/* source's current configuration - one verb carrying the whole intent      */
+/* (of/container/x/y); the engine snapshots, names, and places it            */
+/* (CloneObject + Bridge_CloneCmd), and every window just renders the        */
+/* instance-created broadcast                                                 */
 function cloneInstance(sourceAlias, className, container, pos) {
   /* the clone is one node operation inside the engine (Bridge_CloneCmd -> */
   /* CloneObject, deep for views with aliases remapped onto the clones) -  */
@@ -1313,14 +1427,18 @@ function cloneInstance(sourceAlias, className, container, pos) {
 /* after its Widget/Label presentation properties change). Reads subscribe  */
 /* to the TARGET - events speak the original's name, one tap serves every    */
 /* alias of it - while edits write through the ALIAS, exercising the link.   */
+/*                                                                            */
+/* The Widget property is stamped by the ENGINE at the alias's birth          */
+/* (create-alias / the internals builder, bridge.c) from what the target's    */
+/* class published - this function renders it and deduces nothing.             */
 function renderAliasControl(alias) {
   const rec = aliasAtoms[alias];
   if (!rec || !rec.target || !rec.targetProp) return;
 
-  /* an alias of a thing's Open is another icon for the same thing -      */
+  /* PROP_ICON (what Open publishes): another icon for the same thing -    */
   /* clicking it opens the ONE panel, whether the target is a view or a    */
   /* card; twelve icons anywhere are twelve doorways to one window         */
-  if (rec.targetProp === 'Open') {
+  if (Number(rec.widget) === PROP_ICON) {
     rec.slot.textContent = '';
     const ic = document.createElement('div');
     ic.className = 'instance-icon';
@@ -1341,15 +1459,12 @@ function renderAliasControl(alias) {
     return;
   }
 
-  /* presentation is the alias's own: Widget picks the control class, its   */
-  /* default inferred from what the target's class published for that prop  */
-  let widgetClass = rec.widget;
-  if (!widgetClass) {
-    const targetInst = instances[rec.target];
-    const targetProps = (targetInst && classes[targetInst.className]) || [];
-    const p = targetProps.find((q) => q.Name === rec.targetProp);
-    widgetClass = (p && (INPUT_WIDGET_CLASS[p.Widget] || DISPLAY_WIDGET_CLASS[p.Widget])) || 'Textbox';
-  }
+  /* presentation is the alias's own Widget property: the stamped numeric  */
+  /* widget type maps to a control class; a widget CLASS NAME typed in by   */
+  /* hand on the dissection table is honored as-is; anything else (an       */
+  /* unpublished property, PROP_NULL plumbing) is a plain textbox            */
+  const widgetClass = INPUT_WIDGET_CLASS[rec.widget] || DISPLAY_WIDGET_CLASS[rec.widget] ||
+                      (WIDGET_CLASSES.has(rec.widget) ? rec.widget : 'Textbox');
 
   rec.slot.textContent = '';
   /* reads subscribe to the target (events speak the original's name);    */
@@ -1386,7 +1501,7 @@ function registerAliasAtom(alias, pos, container) {
   labelEl.title = alias;
   el.appendChild(labelEl);
 
-  aliasAtoms[alias] = { el, slot, labelEl, target: '', targetProp: '', widget: '', label: '', control: null };
+  aliasAtoms[alias] = { el, slot, labelEl, target: '', targetProp: '', widget: '', direction: '', label: '', control: null, container: container || '' };
 
   el.addEventListener('click', () => {
     const rec = aliasAtoms[alias];
@@ -1429,19 +1544,21 @@ function registerAliasAtom(alias, pos, container) {
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
 
   /* what it stands for + its own presentation - the atom assembles itself  */
-  /* as these arrive (onPropertyChanged's aliasAtoms branch)                */
+  /* as these arrive (onPropertyChanged's aliasAtoms branch). Widget and     */
+  /* Direction are the engine's stamps (create-alias/internals, bridge.c).   */
   send({ cmd: 'subscribe', instance: alias, port: 'Target' });
   send({ cmd: 'subscribe', instance: alias, port: 'TargetProp' });
   send({ cmd: 'subscribe', instance: alias, port: 'Widget' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Direction' });
   send({ cmd: 'subscribe', instance: alias, port: 'Label' });
 
   log('created ' + alias + ' (Alias)', 'event');
 }
 
-/* Delete mode's own gesture (above) already removes the card locally      */
-/* before the round trip - this is what makes the SAME removal happen on    */
-/* every other window watching, the same "everyone watching reflects it"    */
-/* rule position and mode already follow.                                   */
+/* the ONLY remover: every window - including the one whose Delete click    */
+/* asked - takes a rendering down when, and only when, the engine says the   */
+/* instance is gone. The same "everyone watching reflects it" rule position   */
+/* and mode already follow.                                                   */
 function onInstanceRemoved(alias) {
   const inst = instances[alias];
   if (inst) {
@@ -1459,6 +1576,8 @@ function onInstanceRemoved(alias) {
   }
   delete livePositions[alias];
   delete aliasAtoms[alias];
+  delete cardBodies[alias];
+  delete internalsOwner[alias];
 
   wires = wires.filter((w) => {
     if (w.fromAlias !== alias && w.toAlias !== alias) return true;
@@ -1497,8 +1616,16 @@ function onInstanceRenamed(oldAlias, newAlias) {
   moveKey(livePositions);
   moveKey(menuButtons);
   moveKey(aliasAtoms);
-  moveKey(widgets);
+  moveKey(cardBodies);
+  moveKey(internalsAskMode);
   moveKey(loadedContainers);
+
+  /* the internals bookkeeping names things on both sides: the view (key)  */
+  /* and its owner (value)                                                  */
+  moveKey(internalsOwner);
+  for (const v of Object.keys(internalsOwner)) {
+    if (internalsOwner[v] === oldAlias) internalsOwner[v] = newAlias;
+  }
 
   const prefix = oldAlias + '.';
   const rekeyProps = (map) => {
@@ -1512,6 +1639,7 @@ function onInstanceRenamed(oldAlias, newAlias) {
   rekeyProps(propertyValues);
   rekeyProps(selfDisplays);
   rekeyProps(liveControls);
+  rekeyProps(portDisplays);
 
   for (const w of wires) {
     if (w.fromAlias === oldAlias) w.fromAlias = newAlias;
@@ -1692,12 +1820,14 @@ document.addEventListener('mousedown', (ev) => {
   }
 }, true);
 
-/* Esc drops whatever is being carried, nothing happens anywhere */
+/* Esc drops whatever is being carried, nothing happens anywhere - and    */
+/* closes an open file dialog the same way                                */
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && gestureDrag) {
     cancelGestureDrag();
     log('cancelled', 'event');
   }
+  if (ev.key === 'Escape' && flowDialog) closeFlowDialog();
 });
 
 document.addEventListener('mouseup', (ev) => {
@@ -1710,11 +1840,13 @@ document.addEventListener('mouseup', (ev) => {
     return;
   }
   if (dragState && dragState.alias) {
-    /* the identical command an edited textbox sends - moving a card is    */
-    /* not a different kind of thing from changing a value, it's the same  */
-    /* set-property on X/Y (and Container when the drop crossed into a      */
-    /* different view - entering and leaving views is just moving).         */
-    /* Resolved to the CURRENT name - the drag may span a rename ago.       */
+    /* ONE verb carrying the whole intent: where you release IS where it   */
+    /* lives - container and position ride together (move-instance,         */
+    /* Bridge_Move -> MoveInstance, object.c). The engine independently      */
+    /* validates that a view never enters itself; the geometric check here    */
+    /* is input interpretation - a drop onto a view's own interior stays a    */
+    /* same-container reposition, exactly as it always has.                   */
+    /* Resolved to the CURRENT name - the drag may span a rename ago.          */
     const alias = aliasOfEl(dragState.el, dragState.alias);
     const inst = instances[alias];
     const drop = dropTargetAt(ev, dragState.el);
@@ -1725,17 +1857,15 @@ document.addEventListener('mouseup', (ev) => {
     const currentContainer = (currentInner && currentInner.dataset && currentInner.dataset.viewAlias) || '';
 
     if (!escapesItself && drop.container !== currentContainer) {
-      send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(drop.x - dragState.offsetX) });
-      send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(drop.y - dragState.offsetY) });
-      send({ cmd: 'set-property', instance: alias, prop: 'Container', value: drop.container });
+      send({ cmd: 'move-instance', of: alias, container: drop.container,
+             x: String(drop.x - dragState.offsetX), y: String(drop.y - dragState.offsetY) });
       dragState.el.style.left = Math.max(0, drop.x - dragState.offsetX) + 'px';
       dragState.el.style.top = Math.max(0, drop.y - dragState.offsetY) + 'px';
       if (inst) placeInContainer(inst.el, drop.container);
     } else {
-      const x = parseInt(dragState.el.style.left, 10) || 0;
-      const y = parseInt(dragState.el.style.top, 10) || 0;
-      send({ cmd: 'set-property', instance: alias, prop: 'X', value: String(x) });
-      send({ cmd: 'set-property', instance: alias, prop: 'Y', value: String(y) });
+      send({ cmd: 'move-instance', of: alias, container: currentContainer,
+             x: String(parseInt(dragState.el.style.left, 10) || 0),
+             y: String(parseInt(dragState.el.style.top, 10) || 0) });
     }
   }
   dragState = null;

@@ -322,7 +322,7 @@ void BuildPalette(void){
 	SetPropInt(PaletteView, "PanelX", 20);
 	SetPropInt(PaletteView, "PanelY", 60);
 	SetPropInt(PaletteView, "W", 190);
-	SetPropInt(PaletteView, "H", 220);
+	SetPropInt(PaletteView, "H", 220);	/* the inner area scrolls; resize to taste */
 
 	Palette = NewNode(INTEGER);
 	SetName(Palette, "Palette");
@@ -593,6 +593,376 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, long handler){
 	AddProp(fromPort, sub);
 }
 
+/* see the comment in object.h - a copied group has to arrive wired to  */
+/* itself, the same rule a deep-cloned view's aliases already follow    */
+void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map){
+
+	NodeObj port, sub, clonePort, sink, sinkClone, realSink, realSinkClone;
+	long callback;
+	char *portName, *sinkName, *targetProp;
+
+	char dbg[256];
+
+	if (!srcInst || !cloneInst || !map)
+		return;
+
+	snprintf(dbg, sizeof(dbg), "CloneConnections: wiring clone of '%s' (its clone is '%s')",
+			 GetPropStr(srcInst, "Name"), GetPropStr(cloneInst, "Name"));
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+	/* every property is a potential source port - the ones that were    */
+	/* actually wired are exactly the ones carrying Subscriber entries    */
+	/* (AddSubscription, above), so no separate "is this a port" test is  */
+	/* needed or wanted                                                    */
+	for (port = GetNextProp(srcInst); port; port = GetNextSibling(port)) {
+
+		portName = GetNameStr(port);
+		if (!portName)
+			continue;
+
+		for (sub = GetNextProp(port); sub; sub = GetNextSibling(sub)) {
+
+			if (!CmpName(sub, "Subscriber"))
+				continue;
+
+			sink = (NodeObj) GetPropLong(sub, "Instance");
+			callback = GetPropLong(sub, "Callback");
+			if (!sink || !callback)
+				continue;
+
+			clonePort = GetPropNode(cloneInst, portName);
+			if (!clonePort) {
+				SetPropInt(cloneInst, portName, 0);
+				clonePort = GetPropNode(cloneInst, portName);
+			}
+
+			/* Two shapes of wire land on a source port as a Subscriber:   */
+			/*                                                              */
+			/*  1. a direct wire into a real port that has a message        */
+			/*     handler (a Pulse's Out into a Slider's In): the          */
+			/*     subscriber's Instance IS the sink instance.              */
+			/*  2. a property-to-property wire (a Slider's Value driving    */
+			/*     another Slider's Value, which has no handler): Connect    */
+			/*     routes it through a PropertyBinding ADAPTER, and the      */
+			/*     subscriber's Instance is that nameless adapter - the      */
+			/*     REAL sink and property are stored ON it (Target/          */
+			/*     TargetProp). This is what the user connected and what     */
+			/*     the clone used to drop on the floor.                      */
+			/*                                                              */
+			/* Either way, we only re-make a wire whose sink was cloned into */
+			/* this same group; a sink outside it (or a client's own update  */
+			/* tap, which is neither a real instance nor an adapter) is left  */
+			/* alone.                                                         */
+			sinkName = GetNameStr(sink);
+
+			if (sinkName && strcmp(sinkName, "PropertyBinding") == 0)
+			{
+				realSink      = (NodeObj) GetPropLong(sink, "Target");
+				targetProp    = GetPropStr(sink, "TargetProp");
+				realSinkClone = realSink ? (NodeObj) GetConnState(map, (long) realSink) : NULL;
+
+				snprintf(dbg, sizeof(dbg),
+						 "CloneConnections:   found property wire %s.%s -> '%s'.%s; that sink %s cloned",
+						 GetPropStr(srcInst, "Name"), portName,
+						 realSink ? GetPropStr(realSink, "Name") : "?", targetProp ? targetProp : "?",
+						 realSinkClone ? "WAS" : "was NOT");
+				DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+				if (realSinkClone && targetProp)
+				{
+					ConnectToProperty(cloneInst, portName, realSinkClone, targetProp);
+					snprintf(dbg, sizeof(dbg),
+							 "CloneConnections:   ADDED property wire on clone: '%s'.%s -> '%s'.%s",
+							 GetPropStr(cloneInst, "Name"), portName,
+							 GetPropStr(realSinkClone, "Name"), targetProp);
+					DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+				}
+				continue;
+			}
+
+			/* the direct-handler wire */
+			sinkClone = (NodeObj) GetConnState(map, (long) sink);
+
+			snprintf(dbg, sizeof(dbg),
+					 "CloneConnections:   found wire %s.%s -> '%s'; that sink %s cloned in this group",
+					 GetPropStr(srcInst, "Name"), portName, sinkName ? sinkName : "?",
+					 sinkClone ? "WAS" : "was NOT");
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+			if (!sinkClone)
+				continue;
+
+			/* the sink's clone is the same class as the sink, so the    */
+			/* handler it registered is the same function                 */
+			AddSubscription(clonePort, sinkClone, callback);
+
+			snprintf(dbg, sizeof(dbg),
+					 "CloneConnections:   ADDED wire on clone: '%s'.%s -> '%s'",
+					 GetPropStr(cloneInst, "Name"), portName, GetPropStr(sinkClone, "Name"));
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+		}
+	}
+}
+
+/*
+ * Deep-clone a container and everything in it - the WHOLE clone, in the
+ * engine, so it happens the same whoever asked (a script, or the html
+ * through the bridge). CloneObject copies one node's data; this copies a
+ * group and keeps it self-contained:
+ *
+ *   - every member (an instance whose Container is srcPath, skipping
+ *     hidden plumbing) is cloned and re-homed under clonePath, recursively
+ *     into nested containers;
+ *   - an alias member is re-pointed at the CLONE of whatever it aliased
+ *     inside the group; an alias to something OUTSIDE the group is left
+ *     pointing where it did;
+ *   - the wires between members are re-made between the clones.
+ *
+ * Naming the result and telling anyone about it are NOT here - that is the
+ * translator's job (the bridge turns objects into html paths and events).
+ * Every instance made is recorded in `map` (src pointer -> clone pointer,
+ * GetConnState/SetConnState) so the caller can walk the clones out and
+ * name/announce them. srcPath/clonePath are the container-path strings the
+ * members' Container properties use; the caller owns that convention, the
+ * engine only rewrites old -> new. Members keep their own Name (unique
+ * already inside a fresh copy of their container); only the top is named
+ * by the caller, via clonePath's basename.
+ */
+/* a thing's session path = its Container plus its Name (root-level things  */
+/* have an empty Container and live under /Root). The engine owns this      */
+/* now, because the engine owns naming.                                      */
+static void InstancePath(NodeObj inst, char *out, int outlen)
+{
+	char *cont = GetPropStr(inst, "Container");
+	char *nm   = GetPropStr(inst, "Name");
+
+	if (cont && cont[0])
+		snprintf(out, outlen, "%s/%s", cont, nm ? nm : "");
+	else
+		snprintf(out, outlen, "/Root/%s", nm ? nm : "");
+}
+
+/* is `name` already the Name of some instance sitting in containerPath?    */
+/* the engine's own registry walk - names are unique within a container     */
+static int NameTakenIn(char *name, char *containerPath)
+{
+	NodeObj library, class, inst;
+	char *cont, *nm;
+
+	for (library = GetChild(RegObjList); library; library = GetNextSibling(library))
+		for (class = GetChild(library); class; class = GetNextSibling(class))
+			for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
+			{
+				cont = GetPropStr(inst, "Container");
+				if (strcmp(cont ? cont : "", containerPath ? containerPath : "") != 0)
+					continue;
+				nm = GetPropStr(inst, "Name");
+				if (nm && strcmp(nm, name) == 0)
+					return 1;
+			}
+	return 0;
+}
+
+/* the engine names a clone: after what the user calls the source, with     */
+/* any trailing _N stripped, then the lowest free _k in the target          */
+/* container - so a "Slider_1" cloned beside itself becomes Slider_2 (not    */
+/* Slider_1_1), and a view "CloneAliasTest" becomes CloneAliasTest_1.        */
+static void CloneMintName(NodeObj source, char *containerPath, char *out, int outlen)
+{
+	char base[200];
+	char *nm = GetPropStr(source, "Name");
+	char *b  = (nm && nm[0]) ? nm : GetNameStr(GetParent(source));
+	int len, k;
+
+	snprintf(base, sizeof(base), "%s", b ? b : "Thing");
+	len = (int) strlen(base);
+	while (len > 0 && base[len - 1] >= '0' && base[len - 1] <= '9')
+		len--;
+	if (len > 0 && len < (int) strlen(base) && base[len - 1] == '_')
+		base[len - 1] = 0;
+
+	for (k = 1; k < 100000; k++)
+	{
+		snprintf(out, outlen, "%s_%d", base, k);
+		if (!NameTakenIn(out, containerPath))
+			return;
+	}
+}
+
+/* an alias is a link, not a data snapshot - CloneObject can't copy it.  */
+/* Make a fresh alias pointing at the clone of what the source aliased    */
+/* (map), or at the original if that target was outside the group.        */
+static NodeObj CloneAliasNode(NodeObj src, char *container, NodeObj map)
+{
+	char *propname = GetPropStr(src, "TargetProp");
+	NodeObj linknode, targetInst, mapped, inst;
+	char *v;
+	int i;
+	char *carry[] = { "Widget", "Direction", "Label", "X", "Y" };
+
+	if (!propname || !propname[0])
+		return NULL;
+
+	linknode = GetPropNode(src, "Value");	/* the alias's doorway slot */
+	targetInst = linknode ? (NodeObj) GetPropLong(linknode, "LinkInst") : NULL;
+	if (!targetInst)
+		return NULL;
+
+	mapped = (NodeObj) GetConnState(map, (long) targetInst);
+	if (mapped)
+		targetInst = mapped;
+
+	inst = CreateObject(NULL, "Alias");
+	if (!inst)
+		return NULL;
+	if (!LinkPropertyAs(inst, "Value", targetInst, propname))
+	{
+		DeleteInstance(inst);
+		return NULL;
+	}
+
+	SetPropStr(inst, "TargetProp", propname);
+	for (i = 0; i < (int)(sizeof(carry) / sizeof(carry[0])); i++)
+	{
+		v = GetPropStr(src, carry[i]);
+		if (v && v[0])
+			SetPropStr(inst, carry[i], v);
+	}
+	SetOrDeliverProp(inst, "Container", container ? container : "");
+	return inst;
+}
+
+/* one pass over a container's direct members (0: clone concrete members,  */
+/* 1: clone alias members, 2: clone the wires between them). Later passes  */
+/* need every clone to already exist, so it's three sweeps, recursing into */
+/* nested views on each. The matching members are snapshotted into `list`  */
+/* first, because cloning ADDS instances to the same registry this walks.  */
+static void CloneGroupPass(char *srcPath, char *clonePath, NodeObj map, int pass)
+{
+	NodeObj list, library, class, inst, entry, clone;
+	char *cont, *classname, *nm;
+	char childSrc[256], childClone[256], key[24];
+	char dbg[300];
+	int n = 0;
+
+	list = NewNode(INTEGER);
+	for (library = GetChild(RegObjList); library; library = GetNextSibling(library))
+		for (class = GetChild(library); class; class = GetNextSibling(class))
+			for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
+			{
+				cont = GetPropStr(inst, "Container");
+				if (!cont || strcmp(cont, srcPath) != 0)
+					continue;
+				if (GetPropInt(inst, "_Hidden"))
+					continue;	/* plumbing is not content */
+				snprintf(key, sizeof(key), "%d", n++);
+				SetPropLong(list, key, (long) inst);
+			}
+
+	snprintf(dbg, sizeof(dbg), "CLONE pass %d: %d member(s) in '%s' -> '%s'",
+			 pass, n, srcPath, clonePath);
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+	for (entry = GetNextProp(list); entry; entry = GetNextSibling(entry))
+	{
+		inst = (NodeObj) GetValueLong(entry);
+		classname = GetNameStr(GetParent(inst));
+		nm = GetPropStr(inst, "Name");
+
+		if (strcmp(classname, "Alias") == 0)
+		{
+			if (pass == 1)
+			{
+				clone = CloneAliasNode(inst, clonePath, map);
+				if (clone)
+				{
+					if (nm && nm[0])
+						SetOrDeliverProp(clone, "Name", nm);
+					SetConnState(map, (long) inst, (long) clone);
+				}
+				snprintf(dbg, sizeof(dbg), "CLONE pass 1: alias member '%s' %s",
+						 nm ? nm : "?", clone ? "cloned + linked" : "FAILED");
+				DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+			}
+		}
+		else if (pass == 0)
+		{
+			clone = CloneObject(inst);
+			if (clone)
+			{
+				SetOrDeliverProp(clone, "Container", clonePath);
+				if (nm && nm[0])
+					SetOrDeliverProp(clone, "Name", nm);
+				SetConnState(map, (long) inst, (long) clone);
+			}
+			snprintf(dbg, sizeof(dbg), "CLONE pass 0: member '%s' (%s) %s",
+					 nm ? nm : "?", classname, clone ? "cloned" : "FAILED");
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+		}
+		else if (pass == 2)
+		{
+			clone = (NodeObj) GetConnState(map, (long) inst);
+			snprintf(dbg, sizeof(dbg), "CLONE pass 2: member '%s' -> %s",
+					 nm ? nm : "?", clone ? "cloning its wires" : "NO CLONE in map (skipped)");
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+			if (clone)
+				CloneConnections(inst, clone, map);
+		}
+
+		/* a nested view's members live under the nested view's own path */
+		if (strcmp(classname, "View") == 0 && nm && nm[0])
+		{
+			snprintf(childSrc, sizeof(childSrc), "%s/%s", srcPath, nm);
+			snprintf(childClone, sizeof(childClone), "%s/%s", clonePath, nm);
+			CloneGroupPass(childSrc, childClone, map, pass);
+		}
+	}
+
+	DelNode(list);
+}
+
+NodeObj CloneView(NodeObj source, char *containerPath, NodeObj map)
+{
+	NodeObj top;
+	char name[200], srcPath[256], clonePath[256];
+	char dbg[400];
+
+	if (!source || !map)
+		return NULL;
+
+	/* the engine names it (this is the core's job, not the caller's) and  */
+	/* works out both paths itself: where the source's members point        */
+	/* (srcPath) and where the clone's will (clonePath)                     */
+	InstancePath(source, srcPath, sizeof(srcPath));
+	CloneMintName(source, containerPath ? containerPath : "", name, sizeof(name));
+
+	snprintf(dbg, sizeof(dbg), "CLONE start: source '%s' -> new name '%s' into container '%s' (source path '%s')",
+			 GetPropStr(source, "Name"), name, containerPath ? containerPath : "(root)", srcPath);
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+	top = CloneObject(source);
+	if (!top)
+		return NULL;
+	SetOrDeliverProp(top, "Container", containerPath ? containerPath : "");
+	SetOrDeliverProp(top, "Name", name);
+	SetConnState(map, (long) source, (long) top);
+
+	if (containerPath && containerPath[0])
+		snprintf(clonePath, sizeof(clonePath), "%s/%s", containerPath, name);
+	else
+		snprintf(clonePath, sizeof(clonePath), "/Root/%s", name);
+
+	/* everything inside it - members, then aliases, then wires */
+	CloneGroupPass(srcPath, clonePath, map, 0);
+	CloneGroupPass(srcPath, clonePath, map, 1);
+	CloneGroupPass(srcPath, clonePath, map, 2);
+
+	snprintf(dbg, sizeof(dbg), "CLONE done: '%s' cloned into '%s'", GetPropStr(source, "Name"), clonePath);
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+	return top;
+}
+
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 
@@ -859,6 +1229,53 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 	SetPropStr(propnode ? owner : target, propname, value);
 }
 
+/* see the comment in object.h - the one shared placement call behind    */
+/* create, clone, and move, whatever translator asked                     */
+void PlaceInstance(NodeObj inst, char *container, char *x, char *y)
+{
+	if (!inst)
+		return;
+
+	SetOrDeliverProp(inst, "Container", (container && container[0]) ? container : "");
+	if (x && x[0])
+		SetOrDeliverProp(inst, "X", x);
+	if (y && y[0])
+		SetOrDeliverProp(inst, "Y", y);
+}
+
+/* Would placing the thing whose session path is instPath into container  */
+/* put it inside itself? Session paths ARE the containment chain (a       */
+/* member's path is its container's path plus its basename - see the      */
+/* Bridge's rename machinery), so ancestor-or-self is exactly a prefix    */
+/* test. "" is the top-level canvas and can never be inside anything.      */
+int ContainmentCycle(char *instPath, char *container)
+{
+	int len;
+
+	if (!instPath || !instPath[0] || !container || !container[0])
+		return 0;
+
+	len = (int) strlen(instPath);
+	if (strncmp(container, instPath, len) != 0)
+		return 0;
+
+	return container[len] == 0 || container[len] == '/';
+}
+
+/* see the comment in object.h - the one-verb move every translator      */
+/* shares: validate, then place. Returns 1 moved, 0 refused.              */
+int MoveInstance(NodeObj inst, char *instPath, char *container, char *x, char *y)
+{
+	if (!inst)
+		return 0;
+
+	if (ContainmentCycle(instPath, container))
+		return 0;
+
+	PlaceInstance(inst, container, x, y);
+	return 1;
+}
+
 /* see the comment above these in object.h */
 long GetConnState(NodeObj table, long connId)
 {
@@ -1061,7 +1478,11 @@ void PublishPosition(NodeObj class)
 	/* its open panel is a peer of every other panel at the root, with a   */
 	/* position of its own. Open is only the INITIAL presentation - after  */
 	/* first paint, open/closed is each window's own business.              */
-	PublishProp(class, "Open",   "data", PROP_NULL, "0");
+	/* PROP_ICON is the engine saying what an alias of Open should look     */
+	/* like: another icon for the same thing, a doorway to its one panel -   */
+	/* the client renders the stamped Widget instead of special-casing the   */
+	/* property name.                                                         */
+	PublishProp(class, "Open",   "data", PROP_ICON, "0");
 	PublishProp(class, "PanelX", "data", PROP_NULL, "240");
 	PublishProp(class, "PanelY", "data", PROP_NULL, "60");
 
@@ -1574,6 +1995,26 @@ NodeObj GetClassInterface(NodeObj class){
 		return NULL;
 
 	return GetPropNode(class, "Interface");
+}
+
+/* see the comment in object.h */
+NodeObj InterfacePropForInstance(NodeObj inst, char *propname)
+{
+	NodeObj interface, prop;
+	char *name;
+
+	if (!inst || !propname)
+		return NULL;
+
+	interface = GetClassInterface(GetParent(inst));
+	for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
+	{
+		name = GetPropStr(prop, "Name");
+		if (name && strcmp(name, propname) == 0)
+			return prop;
+	}
+
+	return NULL;
 }
 
 NodeObj PublishProp(NodeObj class, char *name, char *direction, int widget, char *defaultValue){

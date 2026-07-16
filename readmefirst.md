@@ -175,3 +175,40 @@ and app.js got smaller.
 
 **If it matters, it's in the engine; the GUI only asks and shows.**
 When a feature feels like it wants JavaScript, that feeling is the bug.
+
+## Status (2026-07-15): the repair list is executed
+
+All five repairs landed, each proven raw-first (testharness/rawtest.py,
+port 8091 — the harness rule is now enforced by run.sh) and then
+presented, with the GUI pixel- and behavior-identical throughout
+(testharness/guitest.py all green, unchanged expectations):
+
+1. **Atomic birth** — `create-instance` carries container/x/y and the
+   server names the result (`as` optional, still honored for replay).
+   The client-side birth path (`createInstance`, `aliasCounters`,
+   `pendingPositions`/`pendingContainers`) is deleted.
+2. **Engine-stamped presentation** — `create-alias` and the internals
+   builder stamp `Widget`/`Direction` from the target's published
+   Interface (`InterfacePropForInstance`, object.c). `Open` publishes
+   `PROP_ICON`, so the doorway rendering is a stamped fact, not a
+   property-name special case. `renderAliasControl` deduces nothing.
+3. **The card panel is the internals view, presented** — a card's rows
+   are the engine's member aliases (same members Options mode shows as
+   the dissection table; two projections of one panel), its icon LED a
+   plain subscribed readout, its Activate button the `activate` verb.
+   `makeInputWidget`/`makeDisplayWidget`/`makeButtonWidget`, `widgets{}`,
+   the client name mint, and the whole hidden-helper species are deleted;
+   the `_OwnerConn` sweep went with them (nothing is per-connection).
+4. **One-verb move** — `move-instance` (`of`/`container`/`x`/`y`), on
+   `MoveInstance`/`PlaceInstance` in object.c; the engine refuses
+   containment cycles. The drop handler sends exactly one command.
+5. **Event-driven delete** — the optimistic local removal is gone;
+   `instance-removed` is the only remover.
+
+Placement rule that emerged during the work (the VNOS lesson): a verb's
+MECHANISM lives in object.c as a language-neutral engine call
+(PlaceInstance, MoveInstance, InterfacePropForInstance, alongside
+CreateObject/CloneObject/Connect/SetOrDeliverProp/ActivateInstance/
+DeleteInstance); bridge.c is JSON syntax, session naming, and eventing
+only. The Script object and the future MCP server bind to the same
+engine calls — never to the bridge, never to re-implementations.

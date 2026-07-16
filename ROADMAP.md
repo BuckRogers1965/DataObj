@@ -47,6 +47,48 @@ everything after this is cheap.
    `LoadFlow("default.flow")`. This file format *is* the canvas
    document.
    *Already present: containers, the registry tree, instance nodes.*
+   *Shipped (July 2026) as ACTION REPLAY: save records the flow log —
+   the command history that built the session — and load re-dispatches
+   each command through the same path a live one uses (Bridge_LoadFlow,
+   bridge.c). This re-binds function pointers for free (re-running
+   InstanceStart) and doubles as a human-readable script, but see 3a.*
+3a. **Serialize the node view directly, for scale.** Action-replay
+   loads by RE-DOING the work: replaying every clone re-deep-copies,
+   every connect re-wires, so load cost is proportional to everything
+   the session ever did, not to the size of its final state — it does
+   not survive a million nodes. The scalable model is the node tree's
+   own nature: ask a node (a container/view) to serialize itself, write
+   the stream to disk; load reads it back and the tree SELF-ASSEMBLES —
+   the identical operation in reverse, O(state), no replay, no
+   re-cloning. Because everything is a node this is one recursive
+   emit/absorb pair on the node, not a per-class saver. Format is a
+   pluggable decorator — XML, JSON, others — over the same walk, so the
+   wire era's JSON and a compact archive format are the same code with a
+   different skin. The one real constraint (the reason replay exists) is
+   that a node carries process-specific pointers — OnMsg/Activate/
+   InstanceStart, the malloc'd `local` — which must NOT serialize as
+   their raw addresses; the load path re-binds them by class (the shell
+   comes from InstanceStart, the data pours in), so serialization
+   persists DATA + references and code is re-established on absorb. This
+   supersedes action-replay as the persistence mechanism at scale; the
+   flow log can remain as the editable-script/export view.
+3b. **Mount a load at any point — import/export subtrees.** Because
+   emit/absorb is one operation on ANY node, it is not just whole-session
+   save: you serialize any container/view (a subtree) on its own, and
+   absorb it at a chosen mount point in another tree — export from
+   anywhere, import anywhere. Whole-session save is just the root
+   subtree; there is no separate "document" concept, only subtrees
+   grafted and pruned. The mount point re-bases the subtree: every path
+   inside it swaps its old container prefix for the mount's — the exact
+   subtree re-path already built for clone/move (Bridge_RepathSubtree,
+   bridge.c, and the engine's CloneView walk), reused on absorb, with the
+   same collision-safe renaming a clone uses when a name is already taken
+   at the destination. This makes flows composable: a saved panel drops
+   into any session; a library of subtrees is assembled from pieces; a
+   huge tree loads lazily, one subtree absorbed per mount as its
+   container is opened (the same visibility-scoped streaming
+   list-instances already does), so "a million nodes deep" never has to
+   materialize all at once.
 4. **Interface publication**: at ClassStart each class registers a
    description of its ports and properties (name, direction, widget
    type, default value). This is the palette's data source and the

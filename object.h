@@ -86,6 +86,25 @@ ActivateInstance(NodeObj instance);
 void
 SetOrDeliverProp(NodeObj target, char * propname, char * value);
 
+/* Placement is part of birth (and of a move): Container, X, Y in one    */
+/* call, so every verb that puts a thing somewhere - create, clone, move, */
+/* from any translator (Bridge, Script, ...) - places it the same way.   */
+/* NULL container means the top-level canvas; NULL/empty x or y means    */
+/* "leave it where it is".                                                 */
+void
+PlaceInstance(NodeObj inst, char * container, char * x, char * y);
+
+/* The one-verb move: refuse a containment cycle (a view can never enter  */
+/* itself or a descendant - instPath is the mover's session path,          */
+/* container the destination's; paths are the containment chain, so the    */
+/* rule is a prefix test, see ContainmentCycle), then PlaceInstance.        */
+/* Returns 1 moved, 0 refused. Renaming/eventing stay the translator's     */
+/* business, same split as CloneObject.                                     */
+int
+MoveInstance(NodeObj inst, char * instPath, char * container, char * x, char * y);
+int
+ContainmentCycle(char * instPath, char * container);
+
 /* Resolve (instance, propname) through any alias link chain to the pair */
 /* that actually owns the property - *instp is rewritten to the owning   */
 /* instance when the name is a link. Plain properties behave exactly     */
@@ -103,8 +122,33 @@ int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname);
 
 /* A brand-new instance of source's class carrying a snapshot of its     */
 /* published data - the engine-level clone. Naming/containment/eventing  */
-/* are the caller's business.                                              */
+/* are the caller's business. Wiring is too: a snapshot of an object's   */
+/* data says nothing about what it was connected to - see               */
+/* CloneConnections for cloning a whole GROUP's internal wiring.          */
 NodeObj CloneObject(NodeObj source);
+
+/* Clone the wires INSIDE a group being copied: for each of srcInst's    */
+/* outgoing subscriptions whose sink is also being cloned (map holds     */
+/* sink -> sink's clone, keyed by pointer - see GetConnState), wire      */
+/* cloneInst's matching port to that sink's CLONE. This is what keeps a  */
+/* copied group wired to itself instead of arriving dead - the exact     */
+/* rule alias members already follow when a view is deep-cloned.         */
+/* Subscriptions leaving the group are deliberately NOT copied: from     */
+/* here a client's own subscribe tap looks identical to a wire, and      */
+/* copying one would make the clone's traffic report under the           */
+/* original's name.                                                       */
+void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map);
+
+/* Deep-clone a thing into containerPath - the whole clone, in the engine, */
+/* identical whoever asked (a script, or the html through the bridge). The */
+/* caller passes only the thing to clone and the container to put it in;   */
+/* the ENGINE names the clone (unique in that container) and copies        */
+/* everything inside it: members re-homed, alias members re-pointed at the */
+/* clones, wires re-made between the clones - so the copy is as             */
+/* self-contained as the original. Every instance made is recorded in      */
+/* `map` (src -> clone) for the caller to walk out and translate into      */
+/* whatever it shows. Returns the top clone.                               */
+NodeObj CloneView(NodeObj source, char * containerPath, NodeObj map);
 
 /* Wire fromInst's fromPort to an arbitrary, chosen-at-runtime property */
 /* on targetInst (something Connect() alone can't do - see the comment */
@@ -276,7 +320,9 @@ typedef enum {
     PROP_KNOB,
     PROP_LABEL,
     PROP_NULL,
-    PROP_MENU
+    PROP_MENU,
+    PROP_ICON      /* renders as the thing's icon - a doorway that opens   */
+                   /* its one panel; what Open publishes (PublishPosition) */
 } PropertyType;
 
 /* Published interface: what a palette (or anything else outside the     */
@@ -285,6 +331,13 @@ typedef enum {
 /* class declares this itself in ClassStart, right after RegisterClass.  */
 /* direction is "data" for a plain property, "in"/"out" for a port.      */
 NodeObj PublishProp(NodeObj class, char * name, char * direction, int widget, char * defaultValue);
+
+/* One instance property's published metadata - the Interface "Property" */
+/* entry (Name/Direction/Widget/Default) on the instance's class, NULL   */
+/* if unpublished. What a translator stamping presentation defaults onto */
+/* an alias (create-alias, internals) reads: the engine decides what a   */
+/* property's control looks like, clients render it, never deduce it.    */
+NodeObj InterfacePropForInstance(NodeObj inst, char * propname);
 
 /* the published interface for a registered class, or NULL if it hasn't  */
 /* published one - walk it with GetChild/GetNextSibling                  */

@@ -39,6 +39,9 @@ GetTypeStr(int type){
 	case OBJMSGHANDLING:
 		return "Object Message Handling";
 
+	case CLONE:
+		return "Clone";
+
 	default:
 		return "Needs Finished";
 	}
@@ -76,6 +79,10 @@ TypeThreshold(int type){
 	case CMDLINEOPTS:
 	case REGISTER:
 		return 2;
+
+	/* clone step-by-step tracing: off in normal running, on at -v 3 */
+	case CLONE:
+		return 3;
 
 	default:
 		return 1;

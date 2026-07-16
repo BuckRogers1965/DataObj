@@ -30,7 +30,7 @@ Three governing principles:
   free.
 - **The app is an empty view**: the executable is a hollow host; the objects ARE
   the functionality, and an *application* is nothing but a set of objects plus
-  their wiring (eventually a flow file — `CreateTestApp()` hard-coding is interim
+  their wiring (eventually a flow file — `CreateDefaultApp()` hard-coding is interim
   scaffolding). Shipping a different product means shipping different objects and
   a different flow, never a different binary. Corollary for all future work:
   features never go in main.c or the host — if a feature is tempting there, it's
@@ -55,7 +55,7 @@ CLI options (parsed in `main.c:ProcessCmdLine`): `-h` help, `-d` daemonize,
 `-ip <address>` web GUI bind address (127.0.0.1 local-only, default 0.0.0.0),
 `-l <logfile>`, `-p` print node tree on exit, `-port <n>` web GUI port (default
 8083), `-t` run unit tests, `-v <0-9>` verbose level. The ip/port land as `ip`/
-`port` properties on Main; CreateTestApp feeds them to the web flow's TCP as
+`port` properties on Main; CreateDefaultApp feeds them to the web flow's TCP as
 `LocalAddr`/`LocalPort`.
 
 ### Build structure — two sides, one library
@@ -273,14 +273,21 @@ compiled into the module and declared in its header as part of its interface:
 
 ## Current focus (as of July 2026): the "cat" test flow
 
-The near-term milestone is the first end-to-end dataflow, composed in
-`CreateTestApp()` in main.c (the single built-in place that builds a test flow):
+The near-term milestone is the first end-to-end dataflow. It was first
+composed at boot in main.c; since July 2026 the dataflow test flows (cat,
+filter/gate, queue/stack, tcp echo) live in **testharness/flowtest.py**,
+built over the raw JSON protocol and asserting on subscribed events —
+main.c's `CreateDefaultApp()` now builds only the app surfaces (web GUI
+flow; the raw/auth bridge flows are present but disabled — the harness
+composes its own raw TCP bridge through the web bridge at test time,
+`ensure_raw_bridge` in rawtest.py). The flow's design, as originally
+composed:
 
 - A **Reader** instance reads `test.txt`; a **Writer** instance writes `test.txt.back`;
   `Connect(Reader "Out" → Writer "In")` — emulating `cat`.
 - **Design decision: source and sink are two separate object classes**, not one
-  "File" object with a Mode property (an older idea visible in the commented-out
-  `CreateTestApp`). Reader is a pure data **source** (owns `Out`, pushes chunks);
+  "File" object with a Mode property (an older, abandoned idea). Reader is a
+  pure data **source** (owns `Out`, pushes chunks);
   Writer is a pure data **sink** (owns `In`, reacts to arrivals). **The sink
   subscribes to the source**: `Connect()` adds the writer's `In` to a subscription
   list stored on the reader's `Out` property (properties are nodes, so the list
@@ -362,9 +369,9 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   totals). It prints synchronously in its handler and **never schedules a task**,
   so probes can be dropped onto any connection without holding the program open.
   `Echo=0` silences a probe without disconnecting it. It returns `rtrn_propagate`
-  (a probe watches, it doesn't consume). CreateTestApp attaches one to the
-  Reader's `Out` alongside the Writer — two subscribers on one port, exercising
-  fan-out.
+  (a probe watches, it doesn't consume). The cat flow (flowtest.py) proves the
+  same fan-out by subscribing its own tap to the Reader's `Out` alongside the
+  Writer — two subscribers on one port.
 - **Filter** (`objects/filter/filter.c`): a mid-flow object — `In` handler tests
   each message and forwards passers out its own `Out` with a fresh **copy** of
   the data node (the received original is owned by the upstream sender's queued

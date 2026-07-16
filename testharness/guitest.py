@@ -3,8 +3,9 @@
 GUI unit tests: drive the framework's web canvas through a real browser
 and check clone / alias / move / open / close behavior.
 
-Every check documents what was EXPECTED and what was actually OBSERVED,
-in the same print-based spirit as the C modules' own self-tests.
+A passing check prints NOTHING - only failures speak, saying what was
+EXPECTED and what was actually OBSERVED, plus one summary line. Add -v
+to watch every check go by.
 
 Each test stages its artifacts in its own clearly-labelled View
 (CloneTest, AliasTest, ...) with the panels laid out in a grid, never
@@ -29,11 +30,21 @@ CDP_PORT = 9223
 # --------------------------------------------------------------------------
 
 class Report:
-    def __init__(self):
+    """A PASSING TEST PRINTS NOTHING. Only failures speak, and they say
+    everything (what was expected, what was actually observed) - plus one
+    summary line. There will eventually be hundreds of these: a green run
+    must cost a line to read, not a screenful. Pass -v when a human wants
+    to watch every check go by. (Same contract as rawtest.py's Report.)"""
+
+    def __init__(self, label="tests", verbose=False):
         self.results = []
+        self.label = label
+        self.verbose = verbose
 
     def expect(self, name, expected, observed, ok):
         self.results.append((name, expected, observed, bool(ok)))
+        if ok and not self.verbose:
+            return
         print("TEST     %s" % name)
         print("  expected: %s" % expected)
         print("  observed: %s" % observed)
@@ -42,10 +53,8 @@ class Report:
 
     def summary(self):
         failed = [r for r in self.results if not r[3]]
-        print("=" * 60)
-        print("%d tests, %d passed, %d failed" % (len(self.results), len(self.results) - len(failed), len(failed)))
-        for name, expected, observed, _ in failed:
-            print("  FAILED: %s\n    expected: %s\n    observed: %s" % (name, expected, observed))
+        print("%s: %d tests, %d passed, %d failed"
+              % (self.label, len(self.results), len(self.results) - len(failed), len(failed)))
         return len(failed)
 
 
@@ -421,11 +430,73 @@ def test_open_close(t, r):
              st and st.get("closed") and st.get("iconShown"))
 
 
+def test_rename_then_manipulate(t, r):
+    """A renamed thing is the same thing: its gestures keep working.
+    Every gesture resolves the CURRENT name at the moment you make it -
+    a handler that remembered the name its view was born with silently
+    stopped writing anything the moment the view was renamed."""
+    # its own view, in the clear column right of the grid and high enough
+    # that the panel's BOTTOM-right resize handle is inside the window
+    # (the real viewport is ~1400x811 - a panel at y=560 has its corner
+    # off the bottom edge, where synthetic clicks hit nothing). Taking a
+    # grid slot would also push every later test's panel down a row.
+    view = '/Root/RenameTest'
+    t.js("send({cmd:'create-instance',class:'View',as:'%s',container:'',x:'660',y:'8'})" % view)
+    t.wait_js("!!views['%s']" % view, "rename test view")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'1130'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'300'})" % view)
+    t.js("panels['%s'].setOpen(true)" % view)
+    time.sleep(0.8)
+
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'RenamedLive'})" % view)
+    renamed = '/Root/RenamedLive'
+    t.wait_js("!!views['%s']" % renamed, "renamed view")
+    time.sleep(0.4)
+
+    def drag(el_js, dx, dy):
+        p = t.js("(()=>{const e=%s;const r=e.getBoundingClientRect();"
+                 "return {x:r.left+r.width/2,y:r.top+r.height/2,w:r.width};})()" % el_js)
+        if not p or not p.get("w"):
+            return False   # not rendered/visible - the drag would hit nothing
+        t.mouse("mousePressed", p["x"], p["y"])
+        for i in range(1, 6):
+            t.mouse("mouseMoved", p["x"] + dx * i / 5, p["y"] + dy * i / 5)
+            time.sleep(0.02)
+        t.mouse("mouseReleased", p["x"] + dx, p["y"] + dy)
+        time.sleep(0.6)
+        return True
+
+    t.clear_events()
+    drag("views['%s'].resizeHandle" % renamed, 60, 40)
+    sized = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='property-changed'"
+                 " && m.instance==='%s' && (m.port==='W'||m.port==='H'))"
+                 ".map(m=>m.port+'='+m.value))" % renamed)
+    r.expect("rename: a renamed view still resizes",
+             "dragging the corner writes W and H back under the NEW name",
+             "%s" % sized,
+             sized and len(json.loads(sized)) == 2)
+
+    t.clear_events()
+    drag("views['%s'].header" % renamed, 40, 25)
+    moved = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='property-changed'"
+                 " && m.instance==='%s' && (m.port==='PanelX'||m.port==='PanelY'))"
+                 ".map(m=>m.port+'='+m.value))" % renamed)
+    r.expect("rename: a renamed view's panel still drags",
+             "dragging the titlebar writes PanelX and PanelY back under the NEW name",
+             "%s" % moved,
+             moved and len(json.loads(moved)) == 2)
+
+
 def test_lazy_contents(t, r):
     """A closed view's contents are never sent - they stream in on open."""
     t.set_mode('Clone')
     src = t.center_of("instances['/Root/Palette/View']")
-    t.pick_place(src["x"], src["y"], 100, 620)  # the free column under the palette
+    # the free spot under the palette - computed from the palette panel's
+    # real bounds (the engine sizes it to fit its seeds, so it grows as
+    # classes join; a hardcoded y went stale the moment it did)
+    free = t.js("(()=>{const r=panels['/Root/Palette'].el.getBoundingClientRect();"
+                "return {x:100,y:Math.round(r.bottom)+40};})()")
+    t.pick_place(src["x"], src["y"], free["x"], free["y"])
     raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "lazy view clone")
     time.sleep(0.6)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'LazyTest'})" % raw)
@@ -450,6 +521,7 @@ def test_lazy_contents(t, r):
     t.wait_js("typeof instances !== 'undefined' && !!views['%s']" % view, "reboot")
     time.sleep(1.5)
     install_error_trap(t)
+    t.hook_events()   # the reload rebuilt handleEvent - re-hook, later tests count events
     known_before = t.js("!!instances['%s']" % member)
     t.set_mode('Operate')
     src = t.center_of("instances['%s']" % view)
@@ -532,11 +604,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--app", default=APP)
     ap.add_argument("--cdp", type=int, default=CDP_PORT)
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="print every check, not just the failures")
     args = ap.parse_args()
     APP = args.app
 
     t = attach(args.cdp)
-    r = Report()
+    r = Report("browser GUI", args.verbose)
 
     def guarded(name, fn, *deps_named):
         """One test crashing (a timed-out wait, anything) is ONE failure in
@@ -564,6 +638,7 @@ def main():
     guarded("options", lambda: test_options_internals(t, r))
     guarded("move", lambda: test_move(t, r))
     guarded("open-close", lambda: test_open_close(t, r))
+    guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
     guarded("lua-script", lambda: test_lua_script(t, r))
 

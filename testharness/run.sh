@@ -95,10 +95,40 @@ fi
 
 sleep 2   # let chromium's debug endpoint come up too
 
-python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT"
+# Each suite prints ONLY its failures plus one summary line - a green run
+# is four lines total, on purpose (there will be hundreds of tests; a
+# passing report nobody reads is pure cost). Pass -v to any of them by
+# hand to watch every check.
+#
+# Raw-protocol suites first - the readme's harness rule: every mechanism
+# is proven through the raw JSON protocol (port 8091, no browser) before
+# the browser tests prove its presentation. Separate bridge, same engine.
+VERBOSE="${VERBOSE:+-v}"
+
+# the verbs themselves: birth, naming, stamping, internals, save/load,
+# move, delete
+python3 testharness/rawtest.py --host 127.0.0.1 --port 8091 $VERBOSE
+RAW_RC=$?
+
+# the dataflow flows that used to boot inside main.c (cat, filter/gate,
+# queue/stack, tcp echo) - same wiring, built over the raw protocol,
+# asserting on subscribed events instead of printing probes
+python3 testharness/flowtest.py --host 127.0.0.1 --port 8091 $VERBOSE
+FLOW_RC=$?
+
+# deep-cloning a view: members, aliases AND the wires between them, over
+# clone, clone-of-clone, and save/load - proven by driving the copies,
+# never by reading structure back
+python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091 $VERBOSE
+VC_RC=$?
+
+# and the browser, proving presentation: gestures emit the right verb,
+# events paint the right pixels
+python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
 RC=$?
 
-echo
-echo "server log: $LOGDIR/server.log   chrome log: $LOGDIR/chrome.log"
-echo "server still running on http://localhost:$PORT (pid $SERVER_PID) - each test's leftovers are in its own view"
+echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localhost:$PORT (pid $SERVER_PID)"
+[ "$RAW_RC" != 0 ] && exit "$RAW_RC"
+[ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
+[ "$VC_RC" != 0 ] && exit "$VC_RC"
 exit $RC
