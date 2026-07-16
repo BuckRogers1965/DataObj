@@ -288,6 +288,13 @@ void Bridge_Error(NodeObj instance, char *cmd, char *message)
 	NodeObj chunk;
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	/* an error is sent to the client AND logged on the server - a command  */
+	/* that fails (an unresolved subscribe, a name collision, a refused     */
+	/* delete) must never be silent in the log. ERROR prints at every       */
+	/* verbose level (threshold 0, DebugPrint.c)                            */
+	snprintf(buf, sizeof(buf), "BRIDGE ERROR: '%s' - %s", cmd ? cmd : "?", message ? message : "?");
+	DebugPrint(buf, __FILE__, __LINE__, ERROR);
+
 	escCmd = JsonEscapeStr(cmd ? cmd : "");
 	escMessage = JsonEscapeStr(message ? message : "");
 
@@ -548,6 +555,13 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	SetPropLong(local->aliases, alias, (long) inst);
 	Bridge_SetNameFromAlias(inst, alias);
 	Bridge_InstanceEvent(instance, local, alias, "Alias", GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
+
+	{
+		char dbg[600];
+		snprintf(dbg, sizeof(dbg), "CREATE-ALIAS: made '%s' in container '%s' -> Target '%s' prop '%s'",
+				 alias, GetPropStr(inst, "Container"), of, prop);
+		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+	}
 }
 
 /* Cloning does NOT live here anymore. The bridge translates - it does not */
@@ -976,7 +990,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
 static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *oldAlias, char *newAlias)
 {
 	NodeObj snap, entry, inst, ce, table, ks, ke;
-	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560];
+	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560], dbg[700];
 	char *p, *cont, *k, *ok, *escFrom, *escTo, *slash;
 	long cut;
 	int preLen, oldLen, n;
@@ -984,6 +998,9 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	oldLen = (int) strlen(oldAlias);
 	snprintf(prefix, sizeof(prefix), "%s/", oldAlias);
 	preLen = (int) strlen(prefix);
+
+	snprintf(dbg, sizeof(dbg), "REPATH subtree: '%s' -> '%s'", oldAlias, newAlias);
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 
 	/* --- the instances: snapshot descendants, then re-path each --- */
 	snap = NewNode(INTEGER);
@@ -1036,6 +1053,10 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 			SetOrDeliverProp(inst, "Container", newCont);
 		}
 
+		snprintf(dbg, sizeof(dbg), "REPATH:   member '%s' (%s) -> '%s'  (Container now '%s')",
+				 p, GetNameStr(GetParent(inst)), newP, GetPropStr(inst, "Container"));
+		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
 		/* tell whoever is viewing where it lived */
 		escFrom = JsonEscapeStr(p);
 		escTo   = JsonEscapeStr(newP);
@@ -1045,6 +1066,41 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 		Bridge_SendEventScoped(instance, local, buf, oldCont);
 	}
 	DelNode(snap);
+
+	/* --- aliases: rewrite any Target STRING naming the moved subtree --- */
+	/* An alias carries a Target string (watchable metadata the GUI binds   */
+	/* to; the link itself is by pointer and needs no fixup). A member       */
+	/* alias pointing at a sibling in the subtree, or an outside alias       */
+	/* pointing in, now names a path that no longer exists - its control     */
+	/* can't bind, so it looks dead even though the engine link is fine.     */
+	/* This is what left the renamed view's own alias broken while a clone's  */
+	/* (announced with a fresh Target) worked. Swap the prefix, delivered so  */
+	/* the GUI re-binds.                                                      */
+	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
+	{
+		p = GetNameStr(entry);
+		inst = (NodeObj) GetValueLong(entry);
+		if (!inst || !p)
+			continue;
+		if ((NodeObj) GetPropLong(local->aliases, p) != inst)
+			continue;
+		if (strcmp(GetNameStr(GetParent(inst)), "Alias") != 0)
+			continue;
+
+		cont = GetPropStr(inst, "Target");	/* reuse cont as the target string */
+		if (cont && strncmp(cont, oldAlias, oldLen) == 0 && (cont[oldLen] == 0 || cont[oldLen] == '/'))
+		{
+			if (cont[oldLen] == 0)
+				snprintf(newCont, sizeof(newCont), "%s", newAlias);
+			else
+				snprintf(newCont, sizeof(newCont), "%s%s", newAlias, cont + oldLen);
+
+			snprintf(dbg, sizeof(dbg), "REPATH:   alias '%s' Target '%s' -> '%s'", p, cont, newCont);
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+
+			SetOrDeliverProp(inst, "Target", newCont);
+		}
+	}
 
 	/* --- the viewers: migrate every conn's view-keys old -> new --- */
 	for (ce = GetNextProp(local->connViews); ce; ce = GetNextSibling(ce))
@@ -1187,6 +1243,14 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 		oldCont[0] = 0;
 	Bridge_SendEventScoped(instance, local, buf, oldCont);
 
+	{
+		char dbg[400];
+		snprintf(dbg, sizeof(dbg), "RENAME: '%s' -> '%s'  (position unchanged: X=%s Y=%s PanelX=%s PanelY=%s)",
+				 oldAlias, newAlias, GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
+				 GetPropStr(inst, "PanelX"), GetPropStr(inst, "PanelY"));
+		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+	}
+
 	/* the thing was renamed - everything inside it is re-pathed with it */
 	Bridge_RepathSubtree(instance, local, oldAlias, newAlias);
 }
@@ -1209,6 +1273,17 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	SetOrDeliverProp(inst, prop, value);
+
+	/* position/geometry only - trace it (the Value stream would drown the  */
+	/* log); shows the panel-position writes landing on load                */
+	if (strcmp(prop, "X") == 0 || strcmp(prop, "Y") == 0
+		|| strcmp(prop, "W") == 0 || strcmp(prop, "H") == 0
+		|| strcmp(prop, "PanelX") == 0 || strcmp(prop, "PanelY") == 0)
+	{
+		char dbg[300];
+		snprintf(dbg, sizeof(dbg), "SET-POS: %s.%s = %s", alias, prop, value);
+		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+	}
 
 	/* Name and Container are ordinary properties whose value happens to  */
 	/* BE the thing's identity/location - writing either re-keys the       */
@@ -1552,7 +1627,10 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!inst || !port || !port[0])
 	{
-		Bridge_Error(instance, "subscribe", "unknown instance or missing port");
+		char em[300];
+		snprintf(em, sizeof(em), "unknown instance '%s' or missing port '%s'",
+				 alias ? alias : "", port ? port : "");
+		Bridge_Error(instance, "subscribe", em);
 		return;
 	}
 

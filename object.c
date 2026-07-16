@@ -1233,6 +1233,8 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 /* create, clone, and move, whatever translator asked                     */
 void PlaceInstance(NodeObj inst, char *container, char *x, char *y)
 {
+	char dbg[400];
+
 	if (!inst)
 		return;
 
@@ -1241,6 +1243,12 @@ void PlaceInstance(NodeObj inst, char *container, char *x, char *y)
 		SetOrDeliverProp(inst, "X", x);
 	if (y && y[0])
 		SetOrDeliverProp(inst, "Y", y);
+
+	snprintf(dbg, sizeof(dbg), "PLACE: '%s' in '%s' at X=%s Y=%s (PanelX=%s PanelY=%s)",
+			 GetPropStr(inst, "Name"), GetPropStr(inst, "Container"),
+			 GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
+			 GetPropStr(inst, "PanelX"), GetPropStr(inst, "PanelY"));
+	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 }
 
 /* Would placing the thing whose session path is instPath into container  */
