@@ -1460,6 +1460,9 @@ void Bridge_FreeTaps(NodeObj inst)
 	}
 }
 
+/* defined below - Bridge_Delete reclaims the dead alias's recorded history */
+void Bridge_CompactFlow(InstanceData *local, char *alias);
+
 void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *alias, *escAlias, *deletable;
@@ -1490,6 +1493,15 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 		Bridge_FreeTaps(inst);
 		SetPropLong(local->aliases, alias, 0);
 		DeleteInstance(inst);
+
+		/* the flow log's own garbage collection: every recorded command  */
+		/* that referenced the dead alias is history nothing can replay    */
+		/* onto - drop it, or the log (and a saved flow) retains the       */
+		/* whole command history of everything that ever lived. The        */
+		/* delete command itself is recorded after dispatch as usual,      */
+		/* which keeps replay correct for members the log never created    */
+		/* (an internals view's engine-built rows).                        */
+		Bridge_CompactFlow(local, alias);
 
 		escAlias = JsonEscapeStr(alias);
 		snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escAlias);

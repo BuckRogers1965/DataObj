@@ -115,6 +115,19 @@ void PrintNode(NodeObj node)
 }
 
 
+/* allocation accounting: every NewNode counts up, every freed struct     */
+/* counts down - a count that grows and never shrinks across a create/    */
+/* destroy cycle IS a leak, named by its type. The counter is a plain     */
+/* static (never a node property - counting the counter would recurse);   */
+/* publishing it into the tree is an object's job (objects/stats), the    */
+/* same mechanism/behavior split as everything else in the core.          */
+static long nodesAlive = 0;
+
+long NodeCount(void)
+{
+	return nodesAlive;
+}
+
 void DelNode(NodeObj node)
 {
 
@@ -138,6 +151,7 @@ void DelNode(NodeObj node)
 	DelData(node->name);
 	DelData(node->value);
 
+	nodesAlive--;
 	free(node);
 }
 
@@ -147,6 +161,7 @@ NewNode(int type)
 	NodeObj temp = malloc(sizeof(node));
 	if (temp)
 	{
+		nodesAlive++;
 		temp->name = NewData(STRING);
 		temp->value = NewData(type);
 		temp->props = NULL;

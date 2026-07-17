@@ -398,11 +398,20 @@ intptr_t datafunc(DataObj this, int kind, int type, char * val){
 	return 1;
 }
 
+/* allocation accounting - see the twin counter in node.c for the idea */
+static long datasAlive = 0;
+
+long DataCount(void)
+{
+	return datasAlive;
+}
+
 DataObj
 NewData(int type){
 	DataObj ret_val = malloc(sizeof(Data));
 	if (!ret_val)
 		return NULL;
+	datasAlive++;
 	clear(ret_val);
 	ret_val->type = type;
 	switch (type){
@@ -430,6 +439,7 @@ NewData(int type){
 			ret_val->long_set=1;
 			break;
 		default:
+			datasAlive--;
 			free(ret_val);
 			return NULL;
 
@@ -446,6 +456,7 @@ DelData(DataObj this){
 		return;
 
 	clearAll(this);
+	datasAlive--;
 	free(this);
 }
 

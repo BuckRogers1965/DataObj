@@ -44,6 +44,11 @@ GetTask(TaskList list);
 int
 DeleteTask(TaskObj task);
 
+/* allocation accounting: task_entry structs currently allocated (in a  */
+/* list OR parked on the reuse pool) - see NodeCount (node.h)            */
+long
+TaskStructCount(void);
+
 /* minimal read-only introspection for walking a list's pending tasks   */
 /* from outside sched.c - used by object.c to find and neutralize a     */
 /* queued message dispatch whose source instance is being deleted       */

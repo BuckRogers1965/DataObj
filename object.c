@@ -1053,6 +1053,17 @@ typedef struct {
 	TaskObj task;
 } MsgEnvelope;
 
+/* allocation accounting - see the twin counter in node.c for the idea.  */
+/* An envelope lives only between SndMsg and its DispatchMsg firing, so   */
+/* at rest this reads 0; a climb means queued messages are being lost     */
+/* (dropped on the ground) instead of delivered-and-freed.                 */
+static long envelopesAlive = 0;
+
+long EnvelopeCount(void)
+{
+	return envelopesAlive;
+}
+
 /* scheduler callback: actually walk the subscriber list and deliver.   */
 /* Runs from ExecTasks, so every hop is a flat call from the scheduler, */
 /* never nested inside the sender's own call stack the way a direct    */
@@ -1092,6 +1103,7 @@ DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
 	if (env->data)
 		DelNode(env->data);
 
+	envelopesAlive--;
 	free(env);
 
 	return rtrn_handled;
@@ -1169,6 +1181,7 @@ SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 	instance = owner;
 
 	env = malloc(sizeof(MsgEnvelope));
+	envelopesAlive++;
 	env->instance = instance;
 	env->outPort = outPort;
 	env->message = message;

@@ -60,6 +60,12 @@ char *  GetPropStr  (NodeObj node, char * Name);
 void    SetPropLong (NodeObj node, char * Name, long Value);
 long    GetPropLong (NodeObj node, char * Name);
 
+/* allocation accounting: nodes currently alive (NewNode minus freed).   */
+/* A count that grows and never shrinks across a create/destroy cycle    */
+/* is a leak. Published into the tree by the Stats object, never by the  */
+/* core itself.                                                           */
+long    NodeCount (void);
+
 /* deliver one message to one "Subscriber" record - the one definition   */
 /* of what a subscription means, shared by node.c's own property-write   */
 /* fan-out and object.c's queued port dispatch. A record with a Callback */

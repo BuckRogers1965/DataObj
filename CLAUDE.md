@@ -271,6 +271,35 @@ compiled into the module and declared in its header as part of its interface:
   registering their own test entry points through the registry (like `ClassStart`),
   so `-t` would eventually exercise loaded objects too, not just the core library.
 
+## Allocation accounting (July 2026)
+
+The core counts what it allocates: plain static alive-counters at every
+alloc/free choke point, read through exported getters — `NodeCount`/`DataCount`
+(node.c/data.c), `EnvelopeCount` (object.c — queued messages; 0 at rest),
+`TaskStructCount` (sched.c — includes pooled entries), `BuffCount`/`QueueCount`
+(dyn/). Counting is mechanism (core); publishing is behavior: the **Stats
+object** (objects/stats) samples the getters on a timer and writes changed
+values into ordinary properties, so a TextOut wired to `Nodes` is a live leak
+readout and the fabric is its own leak detector. The discipline: a counter
+that grows and never shrinks across a create/destroy cycle IS a leak, named
+by its type — `testharness/leaktest.py` enforces it (structural cycles net
+exactly zero; a 50-message burst costs exactly its one activate log record,
+message-count-independent, proving SndMsg's ownership contract holds).
+
+Leaks this found and fixed: every task-driven object leaked one task_entry
+per RE-activation (`local->task = CreateTask(...)` unconditionally in
+Activate — now created once per instance life); and `Bridge_CompactFlow`
+(the flow log's own GC, dropping a deleted instance's recorded history) was
+written but never called — now wired into Bridge_Delete, so the log no
+longer grows without bound across create/delete churn.
+
+Two measurement disciplines, learned the expensive way: the Stats tick
+samples ALL counters before publishing ANY (publishing is itself allocation
+— interleaving makes the observer watch its own wake oscillate forever), and
+a client reading a continuously-published property must purge its event
+backlog first or it reads stale history (value_of consumes the OLDEST match
+— see leaktest's read_counters).
+
 ## Current focus (as of July 2026): the "cat" test flow
 
 The near-term milestone is the first end-to-end dataflow. It was first

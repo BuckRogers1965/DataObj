@@ -40,6 +40,14 @@ if grep -qE '\*\*\*|Error [0-9]' "$LOGDIR/build.log"; then
     exit 1
 fi
 
+# warnings are kept at zero (core and modules alike) - a new one is a
+# regression, and the silent sub-makes would otherwise swallow it
+if grep -q 'warning:' "$LOGDIR/build.log"; then
+    echo "build has compiler warnings - the tree builds warning-free, keep it that way" >&2
+    grep 'warning:' "$LOGDIR/build.log" | head -10 >&2
+    exit 1
+fi
+
 # the server runs on its own defaults - 0.0.0.0:8083 - reachable from the
 # whole LAN, so you can point YOUR browser at it and watch the tests drive
 # the shared session live
@@ -127,6 +135,11 @@ VC_RC=$?
 python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091 $VERBOSE
 CONN_RC=$?
 
+# allocation accounting: create/destroy and message-burst cycles must
+# come back to rest - a counter that grows and never shrinks is a leak
+python3 testharness/leaktest.py --host 127.0.0.1 --port 8091 $VERBOSE
+LEAK_RC=$?
+
 # and the browser, proving presentation: gestures emit the right verb,
 # events paint the right pixels
 python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
@@ -137,4 +150,5 @@ echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localho
 [ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
 [ "$VC_RC" != 0 ] && exit "$VC_RC"
 [ "$CONN_RC" != 0 ] && exit "$CONN_RC"
+[ "$LEAK_RC" != 0 ] && exit "$LEAK_RC"
 exit $RC

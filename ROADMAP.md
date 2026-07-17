@@ -540,6 +540,13 @@ interpreter.
   delay from next scheduled item" TODO in main.c).
 - Memory: DelNode freeing DataObjs; property update-in-place instead
   of shadowing; ExecTasks runlist reuse.
+  *Accounting landed (July 2026): the core counts every allocation
+  behind getters (NodeCount & co.), the Stats object publishes them as
+  ordinary watchable properties, and testharness/leaktest.py asserts
+  create/destroy and message-burst cycles net zero - which found and
+  fixed the per-re-activation task_entry leak (five objects) and wired
+  in Bridge_CompactFlow (the flow log's never-called GC). The message
+  path itself proved leak-free: SndMsg's ownership contract holds.*
 - Multi-user isolation and quotas once strangers share a server.
 - **Copy has no path of its own.** Every other rendering now follows
   "there is no creation path, only a current path" (aliases are

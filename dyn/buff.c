@@ -21,6 +21,14 @@
 int buffCount = 0;
 int buffSize = 0;
 
+/* allocation accounting - see the twin counter in node.c for the idea */
+static long buffsAlive = 0;
+
+long BuffCount(void)
+{
+	return buffsAlive;
+}
+
 typedef struct object {
 	unsigned int	head;			//  where data is read from for normal LIFO operation
 						//  currently where data is added		
@@ -79,8 +87,10 @@ buffCreate (unsigned int size) {
 	obj = (object *) malloc (sizeof (object));
 
 	/* if we were not able to allocate return a NULL */
-	if (!obj) 
+	if (!obj)
 		return NULL;
+
+	buffsAlive++;
 
 	/* allocate the buffer */
 	obj->buffer = (void *) malloc(size);
@@ -145,6 +155,7 @@ buffDestroy (buff buffer) {
 	/* keep track of size of all created buffers buffers */
 	buffSize = buffSize - obj->size;
 
+	buffsAlive--;
 	if (obj->buffer)
 		free (obj->buffer);
 	free (obj);

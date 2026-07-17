@@ -25,6 +25,10 @@ buffCreate (unsigned int size);
 int
 buffDestroy (buff buffer);
 
+/* allocation accounting: buffers currently alive - see NodeCount (node.h) */
+long
+BuffCount (void);
+
 /********************************************
   to add a block to the end of the buffer
 

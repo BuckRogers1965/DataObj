@@ -5,6 +5,14 @@
 
 #include "buff.h"
 
+/* allocation accounting - see the twin counter in node.c for the idea */
+static long queuesAlive = 0;
+
+long QueueCount(void)
+{
+	return queuesAlive;
+}
+
 
 /*
   queue 
@@ -57,6 +65,7 @@ int
 queueDestroy (queuePtr queue) {
 
 	if (queue != NULL) {
+		queuesAlive--;
 
 		if (queue->dataBuffer != NULL) {
 			buffDestroy(queue->dataBuffer);
@@ -92,6 +101,7 @@ queueCreateWithSize (unsigned int numElements, unsigned int elementSize) {
 	
 	qPtr = malloc(sizeof(queue));
 	if (qPtr != NULL) {
+		queuesAlive++;
 	
 		qPtr->dataBuffer = buffCreate(numElements * elementSize);
 		qPtr->sizeBuffer = buffCreate(numElements * sizeof(SizeType));

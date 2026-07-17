@@ -118,10 +118,24 @@ CreateList(){
 	return list;
 }
 
+/* allocation accounting - see the twin counter in node.c for the idea.  */
+/* Counts malloc'd task_entry structs; pool-recycled ones stay counted    */
+/* (they are still allocated), so a steady climb here means task structs   */
+/* are being lost to neither the pool nor DeleteTask.                      */
+static long tasksAlive = 0;
+
+long TaskStructCount(void)
+{
+	return tasksAlive;
+}
+
 TaskPtr
 CreateTask(TaskList list){
 
 	TaskPtr task = malloc(sizeof(task_entry));
+
+	if (task)
+		tasksAlive++;
 
 	task->next = NULL;
 	task->prev = NULL;
@@ -252,6 +266,7 @@ DeleteTask(TaskPtr task){
 	if (owner->insertHint == task)
 		owner->insertHint = NULL;
 
+	tasksAlive--;
 	free(task);
 
 	task = NULL;
@@ -284,6 +299,7 @@ DeleteList(TaskList list){
 	current = list->pool;
 	while (current) {
 		next = current->next;
+		tasksAlive--;
 		free(current);
 		current = next;
 	}

@@ -432,7 +432,9 @@ int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	Tcp_SetNonBlocking(local->listenfd);
 
-	local->task = CreateTask(ObjGetTaskList());
+	/* one task struct for the instance's whole life - see leaktest.py */
+	if (!local->task)
+		local->task = CreateTask(ObjGetTaskList());
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
 

@@ -675,7 +675,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   /* instance, Alias ghosts an Alias of its primary control - one           */
   /* mousedown, mode decides (startDrag). The control itself keeps its own  */
   /* gesture (a click, a slider drag) - only the chrome around it drags.    */
-  el.onmousedown = (ev) => { if (ev.target !== control) startDrag(ev, el, alias, className, primaryProp); };
+  el.onpointerdown = (ev) => { if (ev.target !== control) startDrag(ev, el, alias, className, primaryProp); };
 
   attachDeleteGesture(el, alias);
   attachOptionsGesture(el, alias);
@@ -761,7 +761,7 @@ function registerView(alias, props, pos, hidden, container) {
   resizeHandle.style.display = 'none'; /* shown once Resizeable arrives as "1" */
   /* the CURRENT name, not the birth name - renaming re-keys every map    */
   /* this gesture is about to look in (see aliasOfEl)                       */
-  resizeHandle.onmousedown = (ev) => startResize(ev, aliasOfEl(wrap, alias));
+  resizeHandle.onpointerdown = (ev) => startResize(ev, aliasOfEl(wrap, alias));
   panel.appendChild(resizeHandle);
 
   /* a view's only extra behavior on open: a closed view's contents were  */
@@ -786,8 +786,8 @@ function registerView(alias, props, pos, hidden, container) {
 
   /* aliasing a view aliases its Open - the alias renders as another icon */
   /* that opens this same panel (see renderAliasControl)                   */
-  icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'Open'); };
-  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
+  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'Open'); };
+  header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
 
@@ -822,7 +822,7 @@ function startResize(ev, alias) {
   resizeState = { alias, el: view.panel, startW: rect.width, startH: rect.height, startX: ev.clientX, startY: ev.clientY };
 }
 
-document.addEventListener('mousemove', (ev) => {
+document.addEventListener('pointermove', (ev) => {
   if (!resizeState) return;
   const w = Math.max(80, resizeState.startW + (ev.clientX - resizeState.startX));
   const h = Math.max(60, resizeState.startH + (ev.clientY - resizeState.startY));
@@ -830,7 +830,7 @@ document.addEventListener('mousemove', (ev) => {
   resizeState.el.style.height = h + 'px';
 });
 
-document.addEventListener('mouseup', () => {
+document.addEventListener('pointerup', () => {
   if (resizeState) {
     /* the identical set-property-on-release pattern X/Y drag-end already   */
     /* uses (startDrag's own mouseup handler) - resizing is not a different  */
@@ -1045,7 +1045,7 @@ function registerCard(alias, className, props, pos, isCopy, container) {
       /* lands there (create-alias, bridge.c), reading and writing the one   */
       /* true value through the link. That's how instrument panels are       */
       /* built.                                                               */
-      row.onmousedown = (ev) => {
+      row.onpointerdown = (ev) => {
         if (effectiveMode(row) !== 'Alias') return;
         startGestureDrag(ev, 'alias', { of: alias, prop: propName }, 'alias: ' + alias + '.' + propName);
       };
@@ -1127,8 +1127,8 @@ function registerCard(alias, className, props, pos, isCopy, container) {
 
   /* aliasing a thing is aliasing its icon - the alias opens this same    */
   /* panel (Open rides the link), exactly like aliasing a view            */
-  icon.onmousedown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
-  header.onmousedown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
+  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
+  header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
 
@@ -1611,7 +1611,7 @@ function registerAliasAtom(alias, pos, container) {
   /* original); Clone goes through the alias to the THING and snapshots    */
   /* it - a new independent instance of the target's class with a copy of  */
   /* its current data, exactly what cloning the thing itself gives you.    */
-  el.onmousedown = (ev) => {
+  el.onpointerdown = (ev) => {
     const cur = aliasOfEl(el, alias);   /* survives renames/moves */
     const rec = aliasAtoms[cur];
     if (!rec || ev.target === rec.control) return;
@@ -1827,10 +1827,14 @@ function cancelGestureDrag() {
   gestureDrag = null;
 }
 
-/* the shared mousedown for every card/atom/view - one dispatch, no          */
+/* the shared pointerdown for every card/atom/view - one dispatch, no        */
 /* per-view or per-kind modes: Move drags the thing itself, Clone drags a   */
 /* ghost that creates an independent instance where dropped, Alias (on a    */
-/* widget atom) drags a ghost that creates an Alias of its primary control  */
+/* widget atom) drags a ghost that creates an Alias of its primary control. */
+/* Pointer events, not mouse events, everywhere: one API covers mouse,      */
+/* touch and pen, so a finger drag on a pad IS the drag (with touch-action: */
+/* none on the draggable chrome, style.css, so the browser doesn't claim    */
+/* the gesture for scrolling).                                               */
 function startDrag(ev, el, alias, className, primaryProp) {
   const mode = effectiveMode(el);
   alias = aliasOfEl(el, alias);   /* the CURRENT name, not the birth name */
@@ -1860,7 +1864,7 @@ function startDrag(ev, el, alias, className, primaryProp) {
 /* position is relative to whatever positioned ancestor the element        */
 /* currently sits in (.view-inner is position:relative; the canvas is the   */
 /* outermost case) - correct DOM nesting instead of coordinate math         */
-document.addEventListener('mousemove', (ev) => {
+document.addEventListener('pointermove', (ev) => {
   if (gestureDrag) {
     gestureDrag.ghost.style.left = (ev.clientX + 8) + 'px';
     gestureDrag.ghost.style.top = (ev.clientY + 8) + 'px';
@@ -1887,7 +1891,7 @@ document.addEventListener('mousemove', (ev) => {
 /* to it (the click means "put it here", not "press this"). The arming     */
 /* click never reaches here: startGestureDrag runs from an element         */
 /* handler after capture has already passed, and stops propagation.        */
-document.addEventListener('mousedown', (ev) => {
+document.addEventListener('pointerdown', (ev) => {
   if (!gestureDrag) return;
   ev.stopPropagation();
   ev.preventDefault();
@@ -1918,6 +1922,16 @@ document.addEventListener('mousedown', (ev) => {
   }
 }, true);
 
+/* a cancelled pointer (the browser reclaimed the gesture - an edge      */
+/* swipe, a palm) must not leave a drag armed forever: drop everything    */
+/* in-flight without committing, the same outcome as Esc                  */
+document.addEventListener('pointercancel', () => {
+  dragState = null;
+  panelDrag = null;
+  resizeState = null;
+  if (gestureDrag) cancelGestureDrag();
+});
+
 /* Esc drops whatever is being carried, nothing happens anywhere - and    */
 /* closes an open file dialog the same way                                */
 document.addEventListener('keydown', (ev) => {
@@ -1928,7 +1942,7 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && flowDialog) closeFlowDialog();
 });
 
-document.addEventListener('mouseup', (ev) => {
+document.addEventListener('pointerup', (ev) => {
   if (panelDrag) {
     /* commit the panel's place - the panel's own shared properties, the  */
     /* icon's X/Y untouched                                                */

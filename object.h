@@ -63,6 +63,12 @@ void DeleteInstance(NodeObj instance);
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
 
+/* allocation accounting: message envelopes currently queued between     */
+/* SndMsg and DispatchMsg - reads 0 at rest; a climb means messages are   */
+/* being lost undelivered. See NodeCount (node.h).                         */
+long
+EnvelopeCount(void);
+
 /* the inverse: remove exactly the one wire Connect() would have made    */
 /* between these four names (aliases resolve the same way). Returns 1    */
 /* if a wire was removed, 0 if none matched.                             */

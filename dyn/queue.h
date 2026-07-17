@@ -41,6 +41,10 @@ queueCreateWithSize ( unsigned int numElements, unsigned int elementSize );
 int
 queueDestroy (queuePtr queue);
 
+/* allocation accounting: queues currently alive - see NodeCount (node.h) */
+long
+QueueCount (void);
+
 /********************************************
   to place an event onto the end of the queue
 

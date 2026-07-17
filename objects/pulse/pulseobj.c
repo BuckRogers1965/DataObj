@@ -153,7 +153,11 @@ int Pulse_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	local->sent = 0;
 	local->next = 1;
-	local->task = CreateTask(ObjGetTaskList());
+	/* one task struct for the instance's whole life, re-armed per run -   */
+	/* a fresh CreateTask on every re-activation orphans the previous one  */
+	/* (the leak counters caught exactly this, testharness/leaktest.py)    */
+	if (!local->task)
+		local->task = CreateTask(ObjGetTaskList());
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
 

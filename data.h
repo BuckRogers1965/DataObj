@@ -22,6 +22,9 @@ DataObj NewData(int type);
 /* Free a data object created by NewData, including its string/hex buffers */
 void DelData(DataObj this);
 
+/* allocation accounting: DataObjs currently alive - see NodeCount (node.h) */
+long DataCount(void);
+
 /* Get the native type (STRING/INTEGER/HEX/REAL/LONG) this object was created as */
 int GetDataType(DataObj this);
 

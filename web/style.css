@@ -215,6 +215,15 @@ svg.view-wires {
   position: absolute;
 }
 
+/* every draggable piece of chrome claims its touch gestures (pointer      */
+/* events reach the drag handlers instead of the browser turning a finger  */
+/* drag into a scroll) - the canvas background deliberately keeps its      */
+/* native touch panning, and widget controls keep their own defaults       */
+.instance-wrap, .widget-atom, .view-header, .node-header,
+.view-resize-handle, .prop-row, .port-row, .port-dot {
+  touch-action: none;
+}
+
 .node-box {
   width: 190px;
   background: #24262e;
