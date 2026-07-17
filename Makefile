@@ -13,7 +13,8 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 GOAL=framework
 
 # Compiler options
-OPT=-w -falign-loops -falign-jumps=2 -falign-functions=2 -fstrength-reduce -fomit-frame-pointer -O6 -Idyn 
+# OPT=-w -falign-loops -falign-jumps=2 -falign-functions=2 -fstrength-reduce -fomit-frame-pointer -O6 -Idyn 
+OPT=-O3 -march=native -flto -Idyn -Wall -Wextra
 
 # Rule to compile .c files to .o files
 %.o : %.c

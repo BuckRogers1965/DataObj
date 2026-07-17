@@ -5,18 +5,18 @@ object over WebSocket. Vanilla JS, no build step - matches the
 framework's own "no external dependencies" discipline.
 
 The whole app is a thin veneer over the Bridge's verbs (create-instance,
-connect, bind-property, bind-activate, set-property, activate,
-subscribe), same as the Bridge itself is a veneer over the C API. This
-file never talks to the framework directly - only ever through
-send()/JSON messages.
+connect, disconnect, set-property, activate, subscribe), same as the
+Bridge itself is a veneer over the C API. This file never talks to the
+framework directly - only ever through send()/JSON messages.
 
 Recursion, not raw HTML: every LED, textbox, checkbox, slider, knob and
 activate button rendered on a node card is backed by a REAL registered
 object instance (LED/Textbox/Checkbox/.../Button), wired to the node it
-decorates with genuine Connect()/bind-property/bind-activate calls -
-never a bare <input> firing set-property straight at the target. A
-composite object (a Reader, say) is instantiated as a COLLECTION of
-those widget objects, not drawn as chrome.
+decorates with genuine Connect() calls (connect reaches any property or
+an Activate directly now - the bind-* verbs are retired) - never a bare
+<input> firing set-property straight at the target. A composite object
+(a Reader, say) is instantiated as a COLLECTION of those widget
+objects, not drawn as chrome.
 
 The recursion has to bottom out somewhere: a widget class's OWN Value/
 State/activate is rendered directly against itself (that's the base
@@ -115,10 +115,10 @@ function applyMode(mode) {
     .join(' ');
 
   if (prevMode === 'Connect' && mode !== 'Connect') {
-    for (const w of wires) w.line.remove();
+    for (const w of wires) removeWire(w);
     wires = [];
     if (pendingPort) {
-      pendingPort.dotEl.classList.remove('armed');
+      pendingPort.el.classList.remove('armed');
       pendingPort = null;
     }
   }
@@ -268,6 +268,9 @@ function handleEvent(msg) {
   switch (msg.event) {
     case 'instances-done':
       setStatus('ready', 'ready');
+      /* members that rendered after the Connect-mode listing (a view      */
+      /* opened mid-mode) have no wires yet - re-list; drawWire dedupes    */
+      if (currentMode === 'Connect') send({ cmd: 'list-connections' });
       break;
     case 'instance-created':
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container);
@@ -280,6 +283,9 @@ function handleEvent(msg) {
       break;
     case 'connected':
       onConnected(msg.from, msg.fromPort, msg.to, msg.toPort);
+      break;
+    case 'disconnected':
+      onDisconnected(msg.from, msg.fromPort, msg.to, msg.toPort);
       break;
     case 'connections-done':
       break;
@@ -1305,29 +1311,97 @@ function onPortClick(alias, port, el) {
   pendingPort.el.classList.remove('armed');
   pendingPort = null;
 
+  /* send the verb; the connected event is the ONLY wire-drawer - same    */
+  /* law as delete (readmefirst repair #5): the GUI never invents a line  */
+  /* the engine hasn't confirmed, and every other window sees the same    */
+  /* event this one does                                                   */
   send({ cmd: 'connect', from: from.alias, fromPort: from.port, to: alias, toPort: port });
-  drawWire(from.alias, from.port, from.el, alias, port, el);
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+/* the view-inner elements above el, innermost first - the containment    */
+/* chain as the DOM already encodes it (placeInContainer nests members    */
+/* inside their View's inner)                                              */
+function innerChain(el) {
+  const chain = [];
+  for (let e = el; e; e = e.parentElement) {
+    if (e.classList && e.classList.contains('view-inner')) chain.push(e);
+  }
+  return chain;
+}
+
+/* which layer a wire renders in: the DEEPEST view both endpoints live     */
+/* inside gets it (so a wire between two members of a view sits IN that    */
+/* view - moves when it moves, hides when it closes); anything spanning    */
+/* containers falls back to the root overlay. Each view-inner grows its    */
+/* own svg on first use.                                                    */
+function wireLayerFor(fromEl, toEl) {
+  const toInners = new Set(innerChain(toEl));
+  for (const inner of innerChain(fromEl)) {
+    if (!toInners.has(inner)) continue;
+    let svg = inner.querySelector(':scope > svg.view-wires');
+    if (!svg) {
+      svg = document.createElementNS(SVGNS, 'svg');
+      svg.setAttribute('class', 'view-wires');
+      inner.appendChild(svg);
+    }
+    return svg;
+  }
+  return $('wires');
+}
+
+function wireKey(fromAlias, fromPort, toAlias, toPort) {
+  return fromAlias + '.' + fromPort + '>' + toAlias + '.' + toPort;
 }
 
 function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
-  const svgns = 'http://www.w3.org/2000/svg';
-  const line = document.createElementNS(svgns, 'line');
-  $('wires').appendChild(line);
-  const wire = { fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line };
+  const key = wireKey(fromAlias, fromPort, toAlias, toPort);
+  if (wires.some((w) => w.key === key)) return;   /* a wire spanning two views is announced once per view */
+
+  const svg = wireLayerFor(fromEl, toEl);
+  const line = document.createElementNS(SVGNS, 'line');
+  svg.appendChild(line);
+
+  /* the mid-wire "x": sends disconnect - the disconnected event is the   */
+  /* only remover, exactly as connected was the only drawer               */
+  const x = document.createElementNS(SVGNS, 'text');
+  x.setAttribute('class', 'wire-x');
+  x.textContent = '×';
+  x.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    send({ cmd: 'disconnect', from: fromAlias, fromPort, to: toAlias, toPort });
+  });
+  svg.appendChild(x);
+
+  const wire = { key, fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line, x, svg };
   wires.push(wire);
   updateWire(wire);
   log(fromAlias + '.' + fromPort + ' → ' + toAlias + '.' + toPort + ' connected', 'event');
 }
 
+function removeWire(wire) {
+  wire.line.remove();
+  wire.x.remove();
+}
+
 function updateWire(wire) {
-  const wrap = $('canvas-wrap');
-  const wrapRect = wrap.getBoundingClientRect();
+  /* coordinates are relative to the wire's own layer: the view-inner it   */
+  /* hangs in, or the root canvas-wrap - the same element that scrolls it  */
+  const origin = wire.svg.id === 'wires' ? $('canvas-wrap') : wire.svg.parentElement;
+  const oRect = origin.getBoundingClientRect();
   const a = wire.fromEl.getBoundingClientRect();
   const b = wire.toEl.getBoundingClientRect();
-  wire.line.setAttribute('x1', a.left + a.width / 2 - wrapRect.left + wrap.scrollLeft);
-  wire.line.setAttribute('y1', a.top + a.height / 2 - wrapRect.top + wrap.scrollTop);
-  wire.line.setAttribute('x2', b.left + b.width / 2 - wrapRect.left + wrap.scrollLeft);
-  wire.line.setAttribute('y2', b.top + b.height / 2 - wrapRect.top + wrap.scrollTop);
+  const x1 = a.left + a.width / 2 - oRect.left + origin.scrollLeft;
+  const y1 = a.top + a.height / 2 - oRect.top + origin.scrollTop;
+  const x2 = b.left + b.width / 2 - oRect.left + origin.scrollLeft;
+  const y2 = b.top + b.height / 2 - oRect.top + origin.scrollTop;
+  wire.line.setAttribute('x1', x1);
+  wire.line.setAttribute('y1', y1);
+  wire.line.setAttribute('x2', x2);
+  wire.line.setAttribute('y2', y2);
+  wire.x.setAttribute('x', (x1 + x2) / 2);
+  wire.x.setAttribute('y', (y1 + y2) / 2);
 }
 
 function updateWiresFor(alias) {
@@ -1336,13 +1410,16 @@ function updateWiresFor(alias) {
   }
 }
 
-/* a connection the server already knew about (list-connections, sent on   */
-/* entering Connect mode - see applyMode) - draw it exactly like one made   */
-/* by clicking two dots just now. Silently skipped if either end isn't a    */
-/* card this client currently has on screen (deleted, or plumbing this      */
-/* client never rendered) - see Bridge_Delete's own doc comment (bridge.c)  */
-/* on why a stale reference can outlive the instance it pointed at.         */
+/* a wire exists - a live connect (this window's or anyone's), or one      */
+/* replayed by list-connections on entering Connect mode; both arrive       */
+/* here and draw identically (drawWire dedupes the overlap). Wires are      */
+/* Connect-mode presentation, so outside Connect mode nothing is drawn -    */
+/* re-entering the mode re-lists. Silently skipped if either end isn't      */
+/* rendered by this client (a closed view's member, hidden plumbing);       */
+/* instances-done re-lists so late-rendered members get their wires.        */
 function onConnected(fromAlias, fromPort, toAlias, toPort) {
+  if (currentMode !== 'Connect') return;
+
   const fromInst = instances[fromAlias];
   const toInst = instances[toAlias];
   if (!fromInst || !toInst) return;
@@ -1352,6 +1429,17 @@ function onConnected(fromAlias, fromPort, toAlias, toPort) {
   if (!fromDot || !toDot) return;
 
   drawWire(fromAlias, fromPort, fromDot, toAlias, toPort, toDot);
+}
+
+/* the one wire-remover, mirroring onConnected the drawer */
+function onDisconnected(fromAlias, fromPort, toAlias, toPort) {
+  const key = wireKey(fromAlias, fromPort, toAlias, toPort);
+  wires = wires.filter((w) => {
+    if (w.key !== key) return true;
+    removeWire(w);
+    return false;
+  });
+  log(fromAlias + '.' + fromPort + ' → ' + toAlias + '.' + toPort + ' disconnected', 'event');
 }
 
 /* Delete mode's gesture: click anywhere on a card to remove it. Attached  */
@@ -1591,7 +1679,7 @@ function onInstanceRemoved(alias) {
 
   wires = wires.filter((w) => {
     if (w.fromAlias !== alias && w.toAlias !== alias) return true;
-    w.line.remove();
+    removeWire(w);
     return false;
   });
 }

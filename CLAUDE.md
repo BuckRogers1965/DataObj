@@ -321,10 +321,21 @@ message flow and exits on its own when the flow drains. How the pieces landed:
 - **Routing** (`object.c`): `SndMsg(instance, "Out", msgid, data)` queues a
   `MsgEnvelope` on the scheduler (one `AddTaskNow`, nothing more); when the task
   fires, `DispatchMsg` walks the `Subscriber` sub-nodes on the named port and
-  calls each subscriber's handler as `handler(sinkInstance, msgid, data)`.
-  `Connect()` builds the subscription: it reads the handler the sink registered
-  as an `OnMsg` long-property on its input port and records `{Instance,
-  Callback}` on the source port via `AddSubscription()`.
+  delivers to each (`DeliverToSubscriber`, node.c — the one definition of
+  delivery, shared with node.c's own synchronous property-write fan-out).
+  `Connect()` builds the subscription: it records `{Instance, Port, Callback}`
+  on the source port via `AddSubscription()` — Callback is the sink port's
+  `OnMsg` handler if it has one, else 0, in which case delivery applies the
+  universal default: store the payload onto the record's `{Instance, Port}`
+  (whose own write fans out in turn, so chains hop). This is what lets
+  `Connect()` reach ANY property — compiled port, plain data property, or
+  `Activate` (an ordinary port since July 2026: `ActivateOnMsg` stamped by
+  `RegisterInstance`) — with no adapter species (the old
+  `PropertyBinding`/`ActivateBinding` adapters are deleted), so every graph
+  walker (list-connections, `CloneConnections`, the delete scrub,
+  `Disconnect()` — Connect's inverse, same resolution rules) reads the same
+  records. The `WIRE` DebugPrint category traces every wire made/removed at
+  `-v 3`.
   **Ownership contract (changed July 2026 with queued dispatch): SndMsg takes
   ownership of `data`** — DispatchMsg frees it after the last subscriber; the
   sender must NOT DelNode it after SndMsg (the old synchronous contract said

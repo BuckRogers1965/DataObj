@@ -23,8 +23,7 @@ Commands in, one JSON object per message:
     {"cmd":"create-instance","class":"Reader","as":"Reader1"}
     {"cmd":"create-instance","class":"LED","as":"_LED1","hidden":"1"}
     {"cmd":"connect","from":"Reader1","fromPort":"Out","to":"Writer1","toPort":"In"}
-    {"cmd":"bind-property","from":"Textbox1","fromPort":"Value","to":"Reader1","toProp":"Filename"}
-    {"cmd":"bind-activate","from":"Button1","fromPort":"Out","to":"Reader1"}
+    {"cmd":"disconnect","from":"Reader1","fromPort":"Out","to":"Writer1","toPort":"In"}
     {"cmd":"set-property","instance":"Reader1","prop":"Filename","value":"test.txt"}
     {"cmd":"activate","instance":"Reader1"}
     {"cmd":"subscribe","instance":"Reader1","port":"Out"}
@@ -54,22 +53,23 @@ separate round trip first to learn what a Reader looks like, since every
 instance-created event (Root or Palette) already carries its class's
 full published Interface inline.
 
-bind-property and bind-activate are the same idea aimed at things
-Connect() alone cannot reach: a target property chosen at runtime (not
-a compiled-in port like Reader's "Enable"), or a target's Activate. Both
-go through the adapter functions in object.c (ConnectToProperty /
-ConnectToActivate) - real dataflow, not the Bridge quietly issuing
-set-property/activate on the widget's behalf. This is what lets a
-Checkbox or Button be an actual registered class in the palette (see
-objects/widget, objects/button) rather than raw HTML standing in for
-one: the client creates a real widget instance and wires it to whatever
-it is meant to control, the same way it would wire any two objects.
+connect reaches ANY property on any instance - a compiled-in port like
+Reader's "Enable", a plain data property like Filename, or an
+instance's Activate - one verb, one engine call (Connect(), object.c,
+universal default delivery). bind-property and bind-activate survive
+only as dispatch synonyms for it, so recorded flows replay; new
+clients should send connect. A wire made or removed is announced with
+a connected/disconnected event to every connection viewing either
+endpoint's container - the client draws and erases from those events
+only, never from its own gesture.
 
 Events out, on success or failure:
 
     {"event":"instance-created","instance":"Reader1","class":"Reader","parent":"Root","interface":{...Interface node, verbatim...}}
     {"event":"property-changed","instance":"Reader1","port":"State","value":"2"}
     {"event":"message-flowed","instance":"Reader1","port":"Out","value":"..."}
+    {"event":"connected","from":"Reader1","fromPort":"Out","to":"Writer1","toPort":"In"}
+    {"event":"disconnected","from":"Reader1","fromPort":"Out","to":"Writer1","toPort":"In"}
     {"event":"logged-in","user":"jim"}
     {"event":"instances-done"}
     {"event":"error","cmd":"connect","message":"..."}
@@ -877,6 +877,46 @@ void Bridge_Move(NodeObj instance, InstanceData *local, NodeObj command)
 	Bridge_Rename(instance, local, curAlias, inst, container ? container : "");
 }
 
+/* one wire event (connected/disconnected), told to every connection      */
+/* viewing either endpoint's container - the same visibility rule          */
+/* instance-created follows (Bridge_SendEventScoped). The clicking client */
+/* draws from THIS, never from its own gesture (readmefirst: send the     */
+/* verb, act on the event), and every other window sees the same wire     */
+/* appear or die. A wire spanning two different views is sent once per    */
+/* view; a client viewing both dedupes by the wire's own four names.      */
+static void Bridge_WireEvent(NodeObj instance, InstanceData *local, char *event,
+							 NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort)
+{
+	char *fromAlias, *toAlias, *fromCont, *toCont;
+	char *escFrom, *escFromPort, *escTo, *escToPort;
+	char buf[700];
+
+	fromAlias = Bridge_AliasForInstance(local, fromInst);
+	toAlias   = Bridge_AliasForInstance(local, toInst);
+	if (!fromAlias || !toAlias)
+		return;		/* hidden plumbing (a raw bridge's TCP, say) - not drawable */
+
+	escFrom     = JsonEscapeStr(fromAlias);
+	escFromPort = JsonEscapeStr(fromPort ? fromPort : "");
+	escTo       = JsonEscapeStr(toAlias);
+	escToPort   = JsonEscapeStr(toPort ? toPort : "");
+
+	snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"from\":%s,\"fromPort\":%s,\"to\":%s,\"toPort\":%s}",
+			 event, escFrom, escFromPort, escTo, escToPort);
+
+	free(escFrom);
+	free(escFromPort);
+	free(escTo);
+	free(escToPort);
+
+	fromCont = GetPropStr(fromInst, "Container");
+	toCont   = GetPropStr(toInst, "Container");
+
+	Bridge_SendEventScoped(instance, local, buf, fromCont);
+	if (strcmp(fromCont ? fromCont : "", toCont ? toCont : "") != 0)
+		Bridge_SendEventScoped(instance, local, buf, toCont);
+}
+
 void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *fromAlias, *fromPort, *toAlias, *toPort;
@@ -897,14 +937,51 @@ void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	if (!Connect(fromInst, fromPort, toInst, toPort))
+	{
 		Bridge_Error(instance, "connect", "connect failed");
+		return;
+	}
+
+	Bridge_WireEvent(instance, local, "connected", fromInst, fromPort, toInst, toPort);
 }
 
-/* {"cmd":"bind-property","from":widgetAlias,"fromPort":"Value",       */
-/*  "to":targetAlias,"toProp":"Filename"} - wires an input widget's    */
-/* edited value into an arbitrary property on the real target, via the */
-/* adapter in object.c (Connect() alone cannot aim at a property whose */
-/* name is only known at runtime)                                     */
+/* {"cmd":"disconnect","from":A,"fromPort":P,"to":B,"toPort":Q} - the     */
+/* inverse of connect (the mid-wire "x" in Connect mode): one engine      */
+/* Disconnect(), one disconnected event, and the disconnected event is    */
+/* the ONLY thing that removes a drawn wire anywhere.                     */
+void Bridge_Disconnect(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char *fromAlias, *fromPort, *toAlias, *toPort;
+	NodeObj fromInst, toInst;
+
+	fromAlias = GetPropStr(command, "from");
+	fromPort  = GetPropStr(command, "fromPort");
+	toAlias   = GetPropStr(command, "to");
+	toPort    = GetPropStr(command, "toPort");
+
+	fromInst = Bridge_ResolveAlias(local, fromAlias);
+	toInst   = Bridge_ResolveAlias(local, toAlias);
+
+	if (!fromInst || !toInst || !fromPort || !toPort)
+	{
+		Bridge_Error(instance, "disconnect", "unknown instance or missing port");
+		return;
+	}
+
+	if (!Disconnect(fromInst, fromPort, toInst, toPort))
+	{
+		Bridge_Error(instance, "disconnect", "no such wire");
+		return;
+	}
+
+	Bridge_WireEvent(instance, local, "disconnected", fromInst, fromPort, toInst, toPort);
+}
+
+/* Retired verbs, kept only so recorded flows replay: plain Connect()    */
+/* reaches any property and any Activate now (universal default          */
+/* delivery + ActivateOnMsg, object.c/node.c), so bind-property and      */
+/* bind-activate are just connect spelled differently. They translate    */
+/* to the same engine call and nothing else.                             */
 void Bridge_BindProperty(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *fromAlias, *fromPort, *toAlias, *toProp;
@@ -924,13 +1001,10 @@ void Bridge_BindProperty(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	if (!ConnectToProperty(fromInst, fromPort, toInst, toProp))
+	if (!Connect(fromInst, fromPort, toInst, toProp))
 		Bridge_Error(instance, "bind-property", "bind failed");
 }
 
-/* {"cmd":"bind-activate","from":buttonAlias,"fromPort":"Out",         */
-/*  "to":targetAlias} - wires a Button's press to an arbitrary         */
-/* target's ActivateInstance, the same adapter idea as bind-property   */
 void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *fromAlias, *fromPort, *toAlias;
@@ -949,7 +1023,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	if (!ConnectToActivate(fromInst, fromPort, toInst))
+	if (!Connect(fromInst, fromPort, toInst, "Activate"))
 		Bridge_Error(instance, "bind-activate", "bind failed");
 }
 
@@ -1244,7 +1318,7 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 	Bridge_SendEventScoped(instance, local, buf, oldCont);
 
 	{
-		char dbg[400];
+		char dbg[1024];
 		snprintf(dbg, sizeof(dbg), "RENAME: '%s' -> '%s'  (position unchanged: X=%s Y=%s PanelX=%s PanelY=%s)",
 				 oldAlias, newAlias, GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
 				 GetPropStr(inst, "PanelX"), GetPropStr(inst, "PanelY"));
@@ -1858,20 +1932,6 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 	SndMsg(instance, "Out", msg_send, chunk);
 }
 
-/* which port on `sink` carries this handler - the reverse of the OnMsg   */
-/* a Subscriber records, so a wire can name the sink's PORT and not just   */
-/* the sink. NULL if none matches (should not happen for a live wire).     */
-static char *Bridge_PortForHandler(NodeObj sink, long callback)
-{
-	NodeObj prop;
-
-	for (prop = GetNextProp(sink); prop; prop = GetNextSibling(prop))
-		if (GetPropLong(prop, "OnMsg") == callback)
-			return GetNameStr(prop);
-
-	return NULL;
-}
-
 /*
  * A client entering Connect mode (app.js) asks "draw all connections."
  * The truth about what is wired is the live subscription graph itself -
@@ -1883,11 +1943,10 @@ static char *Bridge_PortForHandler(NodeObj sink, long callback)
  * Walking the graph reports every real wire once, whatever made it, and
  * cannot double a loaded/cloned one - it is simply what exists now.
  *
- * bind-property/bind-activate wiring is intentionally not reported: those
- * land a bare adapter (no alias) as the sink, so Bridge_AliasForInstance
- * returns NULL and they are skipped - the same reason they were never in
- * this list. Bridge taps are filtered the same way (a tap node has no
- * alias either).
+ * Every record self-describes ({Instance, Port} - AddSubscription,
+ * object.c), so a property-to-property wire reports the same as a wire
+ * into a compiled port. Bridge taps are filtered out by having no alias
+ * (a tap is the Bridge's own plumbing, not a drawable wire).
  */
 void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 {
@@ -1920,11 +1979,11 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 				sink = (NodeObj) GetPropLong(sub, "Instance");
 				toAlias = sink ? Bridge_AliasForInstance(local, sink) : NULL;
 				if (!toAlias)
-					continue;	/* a tap or an adapter - not a drawable wire */
+					continue;	/* a tap - not a drawable wire */
 
-				toPort = Bridge_PortForHandler(sink, GetPropLong(sub, "Callback"));
+				toPort = GetPropStr(sub, "Port");
 				if (!toPort)
-					continue;
+					continue;	/* a record predating port-carrying subscriptions */
 
 				escFrom     = JsonEscapeStr(fromAlias);
 				escFromPort = JsonEscapeStr(GetNameStr(port));
@@ -1983,6 +2042,8 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_Internals(instance, local, command);
 	else if (strcmp(cmd, "connect") == 0)
 		Bridge_Connect(instance, local, command);
+	else if (strcmp(cmd, "disconnect") == 0)
+		Bridge_Disconnect(instance, local, command);
 	else if (strcmp(cmd, "bind-property") == 0)
 		Bridge_BindProperty(instance, local, command);
 	else if (strcmp(cmd, "bind-activate") == 0)
@@ -2024,6 +2085,7 @@ static int Bridge_IsMutating(char *cmd)
 		|| strcmp(cmd, "bind-activate") == 0
 		|| strcmp(cmd, "set-property") == 0
 		|| strcmp(cmd, "activate") == 0
+		|| strcmp(cmd, "disconnect") == 0
 		|| strcmp(cmd, "delete-instance") == 0;
 }
 

@@ -122,6 +122,11 @@ FLOW_RC=$?
 python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091 $VERBOSE
 VC_RC=$?
 
+# connections: every wire is listed, announced, disconnectable, scrubbed
+# on sink delete, and chains - what Connect mode draws and the "x" undoes
+python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091 $VERBOSE
+CONN_RC=$?
+
 # and the browser, proving presentation: gestures emit the right verb,
 # events paint the right pixels
 python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
@@ -131,4 +136,5 @@ echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localho
 [ "$RAW_RC" != 0 ] && exit "$RAW_RC"
 [ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
 [ "$VC_RC" != 0 ] && exit "$VC_RC"
+[ "$CONN_RC" != 0 ] && exit "$CONN_RC"
 exit $RC

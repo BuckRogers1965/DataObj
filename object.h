@@ -54,9 +54,20 @@ void BuildChrome(void);
 void DeleteInstance(NodeObj instance);
 
 /* Connect two properties between two object instances */
-/* the sink's "to" port subscribes to the source's "from" port */
+/* the sink's "to" port subscribes to the source's "from" port. Works    */
+/* against ANY property name on any instance: a port with a compiled     */
+/* OnMsg handler gets its handler called, a plain property receives the  */
+/* universal default delivery (store what arrived - DeliverToSubscriber, */
+/* node.c). Either way the subscription names the real sink and its      */
+/* port, so the live graph IS the connection list.                       */
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
+
+/* the inverse: remove exactly the one wire Connect() would have made    */
+/* between these four names (aliases resolve the same way). Returns 1    */
+/* if a wire was removed, 0 if none matched.                             */
+int
+Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
 
 /* Send a message out a named port of an instance. */
 /* The message is routed to every subscriber of that port. */
@@ -150,15 +161,10 @@ void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map);
 /* whatever it shows. Returns the top clone.                               */
 NodeObj CloneView(NodeObj source, char * containerPath, NodeObj map);
 
-/* Wire fromInst's fromPort to an arbitrary, chosen-at-runtime property */
-/* on targetInst (something Connect() alone can't do - see the comment */
-/* above its definition in object.c). Returns the adapter node (keep   */
-/* it alive for the life of the wiring) or NULL if fromPort is bad.    */
-NodeObj ConnectToProperty(NodeObj fromInst, char * fromPort, NodeObj targetInst, char * targetProp);
-
-/* Same, but for reaching targetInst's ActivateInstance instead of a   */
-/* property - what a Button's Out wires to.                            */
-NodeObj ConnectToActivate(NodeObj fromInst, char * fromPort, NodeObj targetInst);
+/* Retired: ConnectToProperty/ConnectToActivate and their adapter nodes  */
+/* are gone - plain Connect() reaches any property (universal default    */
+/* delivery) and any instance's Activate port (ActivateOnMsg, stamped by */
+/* RegisterInstance), so there is no second or third way to wire.        */
 
 /* One row of a settings panel: which control class represents a named  */
 /* property/port on the object that owns this table, and where it sits. */
@@ -179,12 +185,12 @@ typedef struct ControlSpec
 
 /* Builds target's settings panel, populated per specs: creates each     */
 /* control, positions it (a plain X/Y/W/H write - see InitPosition) and   */
-/* wires it the way its own kind implies - Button reaches target's        */
-/* Activate (ConnectToActivate); a display kind (LED/TextOut/VUMeter/     */
-/* Label) reflects target's property/port (Connect(target, prop,          */
+/* wires it the way its own kind implies, every row a plain Connect() -   */
+/* Button reaches target's Activate port; a display kind (LED/TextOut/    */
+/* VUMeter/Label) reflects target's property/port (Connect(target, prop,  */
 /* control, "In")); anything else (an input kind: Checkbox/Textbox/       */
-/* Slider/Knob) edits it (ConnectToProperty(control, "Value", target,     */
-/* prop)). No container groups these controls - each is independently     */
+/* Slider/Knob) edits it (Connect(control, "Value", target, prop)).       */
+/* No container groups these controls - each is independently             */
 /* placed and wired, discoverable by their shared Connect() to target,    */
 /* the same as anything else in the tree. Returns target.                 */
 NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count);

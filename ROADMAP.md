@@ -126,10 +126,9 @@ per-property or per-object opt-in.
    proves works (`Connect(Pulse, "State", LED, "In")` runs live over
    the bridge today) — just without requiring the object author to
    have asked for it.
-   *Partially done: the mechanism (SetProp* checking an Intercept,
-   PropertyChanged applying-and-fanning-out) exists and is proven;
-   what remains is making it unconditional instead of gated behind a
-   per-property WatchableProp() call.*
+   *Done (July 2026): SetProp* fans out to a property's Subscriber
+   children unconditionally on every write (FanOutSubscribers, node.c);
+   WatchableProp() survives only as a no-op for old call sites.*
 3. **`Connect()` reaches any property — retiring bind-property/
    bind-activate as a separate mechanism.** `ConnectToProperty`/
    `ConnectToActivate` (object.c) and the Bridge's bind-property/
@@ -146,8 +145,16 @@ per-property or per-object opt-in.
    anything gets wired. Plain Connect() was always the right verb; it
    just was not universal yet. The adapter node type and the two extra
    Bridge commands retire once this lands.
-   *Superseded by this: `PropertyBindingOnMsg`/`ActivateBindingOnMsg`
-   (object.c), `Bridge_BindProperty`/`Bridge_BindActivate` (bridge.c).*
+   *Done (July 2026): a Subscriber records {Instance, Port, Callback};
+   delivery with no Callback applies the universal default - store what
+   arrived (DeliverToSubscriber, node.c, shared by both fan-out
+   walkers). Activate is an ordinary port (ActivateOnMsg stamped by
+   RegisterInstance). The adapters are deleted; bind-property/
+   bind-activate survive only as bridge dispatch synonyms for connect
+   so recorded flows replay. Because the record names the REAL sink,
+   list-connections, CloneConnections, Disconnect and the delete scrub
+   all read the same graph - no adapter special-casing anywhere.
+   Proven raw-first in testharness/connectiontest.py.*
 4. **View: the container primitive.** Everything past this point
    depends on View existing as a real class, not a special case. A
    View is a first-class object on the palette exactly like LED or
@@ -222,17 +229,21 @@ per-property or per-object opt-in.
    Note the verbs are exactly the existing C API: CreateObject,
    Connect, SetProp*, ActivateInstance, plus a probe. The protocol is
    a veneer over functions that already work.
-   *Done: create-instance, connect, set-property, activate, subscribe,
-   list-instances (replays the palette and the live session to a
-   (re)connecting client — see Phase 2.4/4). bind-property/bind-activate
-   were added and are being retired again (Phase 2.3) now that plain
-   Connect() reaches any property directly — they were a workaround for
-   a gap that closed, not a permanent third way to wire something.
+   *Done: create-instance, connect, disconnect, set-property, activate,
+   subscribe, list-instances (replays the palette and the live session
+   to a (re)connecting client — see Phase 2.4/4), list-connections
+   (walks the live subscription graph — every wire, whatever made it).
+   bind-property/bind-activate are retired (Phase 2.3, July 2026): they
+   were a workaround for a gap that closed, and survive only as
+   dispatch synonyms for connect so recorded flows replay.
    Still needed:*
-   - *`Disconnect`, the missing counterpart to `connect` — there is no
-     remove-subscription primitive in the C API at all yet (`Connect()`/
-     `AddSubscription()` have no inverse). Required for Connect mode's
-     per-wire "×" (Phase 4).*
+   - *`Disconnect` — done (July 2026): `Disconnect()` in object.c is
+     Connect()'s exact inverse (same alias resolution, removes the one
+     matching {Instance, Port} record); the bridge's `disconnect` verb
+     drives Connect mode's per-wire "×", and every wire made or removed
+     is announced (`connected`/`disconnected` events, scoped to viewers
+     of the endpoints' containers) — the client draws and erases only
+     from those events.*
    - *`place`, to put an instance in a View's slot table (X/Y/W/H) —
      used both for a fresh placement and for Move mode repositioning an
      instance already there — and `unplace`, to remove just that one

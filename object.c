@@ -581,14 +581,21 @@ NodeObj CloneObject(NodeObj source)
 	return inst;
 }
 
-/* record a subscription on a source port */
-/* each Subscriber carries the sink instance and the handler */
-/* the sink registered as OnMsg on its input port            */
-void AddSubscription(NodeObj fromPort, NodeObj toNode, long handler){
+/* record a subscription on a source port. Each Subscriber carries the   */
+/* sink instance, the NAME of the sink port/property the wire lands on,  */
+/* and the handler the sink registered as OnMsg there - or 0 for a plain */
+/* property, in which case delivery applies the universal default        */
+/* (DeliverToSubscriber, node.c: store what arrived). Recording the port */
+/* name is what makes the record self-describing: list-connections,     */
+/* CloneConnections, Disconnect and the delete scrub all read the wire   */
+/* straight off it, no adapter, no reverse handler lookup.               */
+void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handler){
 
 	NodeObj sub = NewNode(INTEGER);
 	SetName(sub, "Subscriber");
 	SetPropLong(sub, "Instance", (long)toNode);
+	if (toPort)
+		SetPropStr(sub, "Port", toPort);
 	SetPropLong(sub, "Callback", handler);
 	AddProp(fromPort, sub);
 }
@@ -597,9 +604,8 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, long handler){
 /* itself, the same rule a deep-cloned view's aliases already follow    */
 void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map){
 
-	NodeObj port, sub, clonePort, sink, sinkClone, realSink, realSinkClone;
-	long callback;
-	char *portName, *sinkName, *targetProp;
+	NodeObj port, sub, sink, sinkClone;
+	char *portName, *toPort;
 
 	char dbg[256];
 
@@ -625,80 +631,37 @@ void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map){
 			if (!CmpName(sub, "Subscriber"))
 				continue;
 
+			/* every wire is one uniform record naming its REAL sink and    */
+			/* the port it lands on ({Instance, Port} - AddSubscription).   */
+			/* A record with no Port is not a user wire (a Bridge tap       */
+			/* predating a reconnect, a test stub) and is left alone; a     */
+			/* sink outside this cloned group (including every tap - taps   */
+			/* are never in the map) is left alone too.                     */
 			sink = (NodeObj) GetPropLong(sub, "Instance");
-			callback = GetPropLong(sub, "Callback");
-			if (!sink || !callback)
+			toPort = GetPropStr(sub, "Port");
+			if (!sink || !toPort)
 				continue;
 
-			clonePort = GetPropNode(cloneInst, portName);
-			if (!clonePort) {
-				SetPropInt(cloneInst, portName, 0);
-				clonePort = GetPropNode(cloneInst, portName);
-			}
-
-			/* Two shapes of wire land on a source port as a Subscriber:   */
-			/*                                                              */
-			/*  1. a direct wire into a real port that has a message        */
-			/*     handler (a Pulse's Out into a Slider's In): the          */
-			/*     subscriber's Instance IS the sink instance.              */
-			/*  2. a property-to-property wire (a Slider's Value driving    */
-			/*     another Slider's Value, which has no handler): Connect    */
-			/*     routes it through a PropertyBinding ADAPTER, and the      */
-			/*     subscriber's Instance is that nameless adapter - the      */
-			/*     REAL sink and property are stored ON it (Target/          */
-			/*     TargetProp). This is what the user connected and what     */
-			/*     the clone used to drop on the floor.                      */
-			/*                                                              */
-			/* Either way, we only re-make a wire whose sink was cloned into */
-			/* this same group; a sink outside it (or a client's own update  */
-			/* tap, which is neither a real instance nor an adapter) is left  */
-			/* alone.                                                         */
-			sinkName = GetNameStr(sink);
-
-			if (sinkName && strcmp(sinkName, "PropertyBinding") == 0)
-			{
-				realSink      = (NodeObj) GetPropLong(sink, "Target");
-				targetProp    = GetPropStr(sink, "TargetProp");
-				realSinkClone = realSink ? (NodeObj) GetConnState(map, (long) realSink) : NULL;
-
-				snprintf(dbg, sizeof(dbg),
-						 "CloneConnections:   found property wire %s.%s -> '%s'.%s; that sink %s cloned",
-						 GetPropStr(srcInst, "Name"), portName,
-						 realSink ? GetPropStr(realSink, "Name") : "?", targetProp ? targetProp : "?",
-						 realSinkClone ? "WAS" : "was NOT");
-				DebugPrint(dbg, __FILE__, __LINE__, CLONE);
-
-				if (realSinkClone && targetProp)
-				{
-					ConnectToProperty(cloneInst, portName, realSinkClone, targetProp);
-					snprintf(dbg, sizeof(dbg),
-							 "CloneConnections:   ADDED property wire on clone: '%s'.%s -> '%s'.%s",
-							 GetPropStr(cloneInst, "Name"), portName,
-							 GetPropStr(realSinkClone, "Name"), targetProp);
-					DebugPrint(dbg, __FILE__, __LINE__, CLONE);
-				}
-				continue;
-			}
-
-			/* the direct-handler wire */
 			sinkClone = (NodeObj) GetConnState(map, (long) sink);
 
 			snprintf(dbg, sizeof(dbg),
-					 "CloneConnections:   found wire %s.%s -> '%s'; that sink %s cloned in this group",
-					 GetPropStr(srcInst, "Name"), portName, sinkName ? sinkName : "?",
+					 "CloneConnections:   found wire %s.%s -> '%s'.%s; that sink %s cloned in this group",
+					 GetPropStr(srcInst, "Name"), portName, GetPropStr(sink, "Name"), toPort,
 					 sinkClone ? "WAS" : "was NOT");
 			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 
 			if (!sinkClone)
 				continue;
 
-			/* the sink's clone is the same class as the sink, so the    */
-			/* handler it registered is the same function                 */
-			AddSubscription(clonePort, sinkClone, callback);
+			/* re-make the wire between the copies with the same call a    */
+			/* live one uses - the sink's clone is the same class, so       */
+			/* Connect() finds the same handler (or the same absence of     */
+			/* one) on the same port name                                    */
+			Connect(cloneInst, portName, sinkClone, toPort);
 
 			snprintf(dbg, sizeof(dbg),
-					 "CloneConnections:   ADDED wire on clone: '%s'.%s -> '%s'",
-					 GetPropStr(cloneInst, "Name"), portName, GetPropStr(sinkClone, "Name"));
+					 "CloneConnections:   ADDED wire on clone: '%s'.%s -> '%s'.%s",
+					 GetPropStr(cloneInst, "Name"), portName, GetPropStr(sinkClone, "Name"), toPort);
 			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 		}
 	}
@@ -925,7 +888,7 @@ NodeObj CloneView(NodeObj source, char *containerPath, NodeObj map)
 {
 	NodeObj top;
 	char name[200], srcPath[256], clonePath[256];
-	char dbg[400];
+	char dbg[1024];
 
 	if (!source || !map)
 		return NULL;
@@ -992,21 +955,79 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 		return 0;
 	}
 
+	/* one record either way - a port with a compiled handler records it,  */
+	/* a plain property records Callback 0 and delivery applies the        */
+	/* universal default (store what arrived - DeliverToSubscriber,        */
+	/* node.c). Every property is both a source and a sink: node.c's       */
+	/* unconditional write fan-out is the source half, the default         */
+	/* delivery is the sink half, and the Subscriber always names the      */
+	/* REAL sink - no adapter standing in between for the graph walkers    */
+	/* (list-connections, clone, scrub) to trip over. The recorded name    */
+	/* is the RESOLVED node's own - wiring to an alias records what the    */
+	/* alias stands for, same rule as SetOrDeliverProp.                    */
 	handler = GetPropLong(toPort, "OnMsg");
-	if (handler)
+	AddSubscription(fromPort, toOwner, GetNameStr(toPort), handler);
+
 	{
-		AddSubscription(fromPort, toOwner, handler);
+		char dbg[256];
+		snprintf(dbg, sizeof(dbg), "Connect: '%s'.%s -> '%s'.%s (%s)",
+				 GetPropStr(fromOwner, "Name"), from, GetPropStr(toOwner, "Name"),
+				 GetNameStr(toPort), handler ? "handler" : "default delivery");
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+	}
+
+	return 1;
+}
+
+/* the inverse of Connect() - remove exactly the one wire that matches,   */
+/* by the same resolution rules (either end may be an alias). Returns 1   */
+/* if a wire was removed, 0 if no such wire existed. Taps and handlers    */
+/* are all the same record shape, so "which wire" is just {Instance,      */
+/* Port} equality on the resolved sink.                                    */
+int
+Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
+
+	NodeObj fromPort, toPort, fromOwner, toOwner, sub;
+	char * toName;
+
+	if (!fromNode || !from || !toNode || !to)
+		return 0;
+
+	fromOwner = fromNode;
+	fromPort = ResolvePort(&fromOwner, from);
+	if (!fromPort)
+		return 0;
+
+	toOwner = toNode;
+	toPort = ResolvePort(&toOwner, to);
+	if (!toPort)
+		return 0;
+	toName = GetNameStr(toPort);
+
+	for (sub = GetNextProp(fromPort); sub; sub = GetNextSibling(sub))
+	{
+		if (!CmpName(sub, "Subscriber"))
+			continue;
+		if ((NodeObj) GetPropLong(sub, "Instance") != toOwner)
+			continue;
+		if (!GetPropStr(sub, "Port") || !toName
+			|| strcmp(GetPropStr(sub, "Port"), toName) != 0)
+			continue;
+
+		RemoveProp(fromPort, sub);
+		DelNode(sub);
+
+		{
+			char dbg[256];
+			snprintf(dbg, sizeof(dbg), "Disconnect: '%s'.%s -/-> '%s'.%s",
+					 GetPropStr(fromOwner, "Name"), from, GetPropStr(toOwner, "Name"), toName);
+			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+		}
+
 		return 1;
 	}
 
-	/* no compiled handler on this property - every property is both a    */
-	/* source and a sink (node.c's own unconditional fan-out already is    */
-	/* the source half); ConnectToProperty's generic adapter is the sink    */
-	/* half, wired in automatically instead of forcing a caller to know or  */
-	/* care whether "to" happens to be a port with real receive logic       */
-	/* (Enable) or a plain data property (Filename, a Label's Value) - it   */
-	/* is still just "wire these two things together" either way.          */
-	return ConnectToProperty(fromNode, from, toOwner, to) != NULL;
+	return 0;
 }
 
 /* one of these rides on a queued dispatch task between SndMsg (which   */
@@ -1034,8 +1055,7 @@ static int
 DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
 
 	MsgEnvelope * env = (MsgEnvelope *) envArg;
-	NodeObj sub, toInstance;
-	msgobj handler;
+	NodeObj sub;
 
 	/* outPort is NULL if CancelPendingSends neutralized this envelope   */
 	/* because its source instance was deleted before this fired - the   */
@@ -1044,12 +1064,11 @@ DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
 	if (reason == task_callback && env->outPort) {
 		sub = GetNextProp(env->outPort);
 		while (sub) {
-			if (CmpName(sub, "Subscriber")) {
-				handler    = (msgobj)  GetPropLong(sub, "Callback");
-				toInstance = (NodeObj) GetPropLong(sub, "Instance");
-				if (handler)
-					handler(toInstance, env->message, env->data);
-			}
+			if (CmpName(sub, "Subscriber"))
+				/* one shared definition of delivery (node.c): a       */
+				/* recorded handler is called; a plain-property wire   */
+				/* gets the universal default - store what arrived     */
+				DeliverToSubscriber(sub, env->message, env->data);
 			sub = GetNextSibling(sub);
 		}
 	}
@@ -1233,7 +1252,7 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 /* create, clone, and move, whatever translator asked                     */
 void PlaceInstance(NodeObj inst, char *container, char *x, char *y)
 {
-	char dbg[400];
+	char dbg[1024];
 
 	if (!inst)
 		return;
@@ -1308,97 +1327,25 @@ void SetConnState(NodeObj table, long connId, long value)
 }
 
 /*
- * Connect() only works when the target side already has a compiled-in,
- * fixed OnMsg handler - Reader_OnEnable knows, by construction, that it
- * is about "Enable". Wiring a widget's Value into an arbitrary, chosen-
- * at-runtime property (a Textbox's Value into some instance's Filename,
- * say) has no such handler to find: a single generic receiver couldn't
- * know which property name it's for, since AddSubscription only ever
- * hands a handler the owning instance, never which port/property it
- * arrived through. The fix is the same shape as Bridge's subscribe tap:
- * a bare adapter node, not a registered class instance, carrying the
- * target and the property name as its own properties, standing in as
- * the "to" side of an ordinary Connect(). Caller keeps it alive for the
- * life of the wiring, same as a tap.
+ * The generic handler behind every instance's Activate port. Modules
+ * store their activation function as an "Activate" long property
+ * (ActivateInstance calls it); RegisterInstance stamps this handler as
+ * OnMsg on that same property node, which makes Activate an ordinary
+ * port: Connect(button, "Out", anything, "Activate") is one plain,
+ * listable, clonable, scrubbable wire - no separate bind-activate
+ * species. It also protects the stored function pointer: without a
+ * handler here, a wire into Activate would fall to the default
+ * store-what-arrived delivery and overwrite the pointer with a string.
+ * msg_eof is ignored, same convention as every Enable handler - an
+ * upstream ending is not a click.
  */
-int PropertyBindingOnMsg(NodeObj adapter, MsgId message, NodeObj data)
+int ActivateOnMsg(NodeObj instance, MsgId message, NodeObj data)
 {
-	NodeObj target;
-	char *propName, *value;
+	if (message == msg_eof)
+		return rtrn_handled;
 
-	/* no message-type filter, deliberately: a watchable property's own  */
-	/* fan-out (PropertyChanged) always arrives as msg_change, not       */
-	/* msg_send, and this needs to accept both - the same reasoning      */
-	/* Bridge_TapOnIn already settled for subscribe                      */
-	target = (NodeObj) GetPropLong(adapter, "Target");
-	propName = GetPropStr(adapter, "TargetProp");
-	value = GetValueStr(data);
-
-	if (target && propName && value)
-		SetOrDeliverProp(target, propName, value);
-
+	ActivateInstance(instance);
 	return rtrn_handled;
-}
-
-NodeObj ConnectToProperty(NodeObj fromInst, char *fromPort, NodeObj targetInst, char *targetProp){
-
-	NodeObj adapter, port;
-
-	if (!fromInst || !fromPort || !targetInst || !targetProp)
-		return NULL;
-
-	adapter = NewNode(INTEGER);
-	SetName(adapter, "PropertyBinding");
-	SetPropLong(adapter, "Target", (long) targetInst);
-	SetPropStr(adapter, "TargetProp", targetProp);
-	SetPropInt(adapter, "In", 0);
-	port = GetPropNode(adapter, "In");
-	SetPropLong(port, "OnMsg", (long) PropertyBindingOnMsg);
-
-	if (!Connect(fromInst, fromPort, adapter, "In")) {
-		DelNode(adapter);
-		return NULL;
-	}
-
-	return adapter;
-}
-
-/* same idea, for a Button's Out reaching an arbitrary target's Activate - */
-/* there is no property to set here, just a function pointer to call      */
-int ActivateBindingOnMsg(NodeObj adapter, MsgId message, NodeObj data)
-{
-	NodeObj target;
-
-	/* no message-type filter, same reasoning as PropertyBindingOnMsg -  */
-	/* Button's Out sends msg_send, but a watchable property wired here  */
-	/* instead would arrive as msg_change                                */
-	target = (NodeObj) GetPropLong(adapter, "Target");
-	if (target)
-		ActivateInstance(target);
-
-	return rtrn_handled;
-}
-
-NodeObj ConnectToActivate(NodeObj fromInst, char *fromPort, NodeObj targetInst){
-
-	NodeObj adapter, port;
-
-	if (!fromInst || !fromPort || !targetInst)
-		return NULL;
-
-	adapter = NewNode(INTEGER);
-	SetName(adapter, "ActivateBinding");
-	SetPropLong(adapter, "Target", (long) targetInst);
-	SetPropInt(adapter, "In", 0);
-	port = GetPropNode(adapter, "In");
-	SetPropLong(port, "OnMsg", (long) ActivateBindingOnMsg);
-
-	if (!Connect(fromInst, fromPort, adapter, "In")) {
-		DelNode(adapter);
-		return NULL;
-	}
-
-	return adapter;
 }
 
 /* LED/TextOut/VUMeter/Label reflect a value; everything else in a       */
@@ -1434,12 +1381,15 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
 		SetPropInt(control, "W", specs[i].w);
 		SetPropInt(control, "H", specs[i].h);
 
+		/* every row is a plain Connect() - a Button reaches the target's   */
+		/* Activate port (ActivateOnMsg), a display reflects the property,  */
+		/* an input edits it through the universal default delivery         */
 		if (strcmp(specs[i].controlClass, "Button") == 0)
-			ConnectToActivate(control, "Out", target);
+			Connect(control, "Out", target, "Activate");
 		else if (IsDisplayControlClass(specs[i].controlClass))
 			Connect(target, specs[i].property, control, "In");
 		else
-			ConnectToProperty(control, "Value", target, specs[i].property);
+			Connect(control, "Value", target, specs[i].property);
 	}
 
 	return target;
@@ -2172,9 +2122,21 @@ NodeObj LoadSkin(NodeObj class, char *filename){
 }
 
 NodeObj RegisterInstance(NodeObj class, NodeObj Instance){
+	NodeObj activate;
+
 	PrintRegInfo("Registering instance of '%s'", Instance);
 
 	AddChild(class, Instance);
+
+	/* Activate is an ordinary port on every instance that has an          */
+	/* activation function: modules store the pointer as an "Activate"     */
+	/* property before registering (every InstanceStart ends here), and    */
+	/* the generic handler makes it wireable - see ActivateOnMsg. Stamped  */
+	/* on the property NODE (never SetProp* by the port's name - the       */
+	/* shadowing landmine).                                                 */
+	activate = GetPropNode(Instance, "Activate");
+	if (activate && !GetPropLong(activate, "OnMsg"))
+		SetPropLong(activate, "OnMsg", (long) ActivateOnMsg);
 
 	/* leave the newest instance where CreateObject can find it */
 	SetPropLong(class, "LastInstance", (long)Instance);
@@ -2203,6 +2165,12 @@ static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
 		next = GetNextSibling(prop);
 
 		if (CmpName(prop, "Subscriber") && (NodeObj)GetPropLong(prop, "Instance") == deadInstance) {
+			{
+				char dbg[256];
+				snprintf(dbg, sizeof(dbg), "Scrub: removed a wire into dying '%s' (from port '%s')",
+						 GetPropStr(deadInstance, "Name"), GetNameStr(node));
+				DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+			}
 			RemoveProp(node, prop);
 			DelNode(prop);
 		} else {

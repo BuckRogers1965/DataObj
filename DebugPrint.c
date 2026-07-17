@@ -42,6 +42,9 @@ GetTypeStr(int type){
 	case CLONE:
 		return "Clone";
 
+	case WIRE:
+		return "Wire";
+
 	default:
 		return "Needs Finished";
 	}
@@ -82,6 +85,10 @@ TypeThreshold(int type){
 
 	/* clone step-by-step tracing: off in normal running, on at -v 3 */
 	case CLONE:
+		return 3;
+
+	/* wire tracing: every Connect/Disconnect/scrub, on at -v 3 */
+	case WIRE:
 		return 3;
 
 	default:

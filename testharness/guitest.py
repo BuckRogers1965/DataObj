@@ -585,6 +585,66 @@ def test_lua_script(t, r):
              counts and json.loads(counts) == ["1", "2", "3"])
 
 
+def test_connect_wires(t, r):
+    """Presentation of connections (raw twin: connectiontest.py). The
+    gesture sends ONE connect verb and draws nothing itself - the wire
+    appears when the connected event comes back, in the VIEW's own layer
+    (the reported bug drew it into the root). Re-entering Connect mode
+    redraws existing wires from list-connections (the other reported
+    bug: they never came back). The mid-wire x sends disconnect, and the
+    disconnected event is the only remover."""
+    view = make_test_view(t, 'WireTest')
+
+    t.js("send({cmd:'create-instance',class:'Slider',container:'%s',x:'30',y:'25'})" % view)
+    a = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view, "first slider")
+    t.js("send({cmd:'create-instance',class:'Slider',container:'%s',x:'30',y:'95'})" % view)
+    b = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_') && k!=='%s') || false)"
+                  % (view, a), "second slider")
+    time.sleep(0.6)
+    key = "%s.Value>%s.Value" % (a, b)
+
+    t.set_mode('Connect')
+    time.sleep(0.4)
+    pa = t.center_of("instances['%s']" % a)
+    pb = t.center_of("instances['%s']" % b)
+    t.click(pa["x"], pa["y"])
+    time.sleep(0.2)
+    t.click(pb["x"], pb["y"])
+
+    drawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire drawn from the connected event")
+    in_view_layer = t.js("(()=>{const w=wires.find(w=>w.key==='%s');"
+                         "return !!(w && w.svg.classList.contains('view-wires')"
+                         " && w.svg.parentElement===views['%s'].innerEl);})()" % (key, view))
+    r.expect("connect: two clicks, one verb, wire drawn in the view's own layer",
+             "the wire for %s renders in WireTest's inner svg, not the root overlay" % key,
+             "drawn=%s inViewLayer=%s" % (drawn, in_view_layer),
+             drawn and in_view_layer)
+
+    t.set_mode('Operate')
+    time.sleep(0.4)
+    cleared = t.js("!wires.some(w=>w.key==='%s')" % key)
+    t.set_mode('Connect')
+    redrawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire redrawn on re-entering Connect")
+    r.expect("connect: re-entering the mode shows existing wires (the reported bug)",
+             "wires clear on leaving Connect mode and come back from list-connections on re-entry",
+             "cleared=%s redrawn=%s" % (cleared, redrawn),
+             cleared and redrawn)
+
+    px = t.js("(()=>{const w=wires.find(w=>w.key==='%s');if(!w)return null;"
+              "const r=w.x.getBoundingClientRect();"
+              "return {x:r.left+r.width/2,y:r.top+r.height/2};})()" % key)
+    t.click(px["x"], px["y"])
+    removed = t.wait_js("!wires.some(w=>w.key==='%s')" % key, "wire removed by the disconnected event")
+    r.expect("disconnect: the mid-wire x removes the wire via the event",
+             "clicking the x sends disconnect; the disconnected event erases the line everywhere",
+             "removed=%s" % removed,
+             removed)
+
+    t.set_mode('Operate')
+    # lower the panel so it can't sit over anything a later test clicks
+    t.js("panels['%s'].setOpen(false)" % view)
+
+
 def post_mortem(t):
     """A timed-out wait usually means the page stopped keeping up with the
     session - dump what it saw so the failure explains itself."""
@@ -641,6 +701,10 @@ def main():
     guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
     guarded("lua-script", lambda: test_lua_script(t, r))
+    # keep this one LAST of the view-staging tests: its view takes a grid
+    # slot, and inserting a slot ahead of lua-script shifted that test's
+    # panel onto the palette icons it clicks
+    guarded("connect-wires", lambda: test_connect_wires(t, r))
 
     # last step, every time, pass or fail: put the shared session back in
     # Operate mode so whoever opens a browser next gets a usable canvas

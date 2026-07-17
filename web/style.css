@@ -152,19 +152,53 @@ body {
     #1a1b20;
 }
 
+/* the root wire overlay: only wires SPANNING containers land here (a      */
+/* same-view wire lives in that view's own layer, see .view-wires), so it   */
+/* sits above the panels its wires stretch between                          */
 #wires {
   position: absolute;
   top: 0; left: 0;
   width: 100%; height: 100%;
   pointer-events: none;
+  overflow: visible;
+  z-index: 45;
 }
-#wires line {
+
+/* one per view-inner, grown on first use (wireLayerFor, app.js): a wire    */
+/* between two members of a view is drawn IN the view, so it moves when     */
+/* the view moves and closes when it closes - correct DOM nesting instead   */
+/* of coordinate math, same rule the members themselves follow              */
+svg.view-wires {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 30;
+}
+
+#wires line, svg.view-wires line {
   stroke: #6b9fe6;
   stroke-width: 2;
 }
-#wires line.pending {
+#wires line.pending, svg.view-wires line.pending {
   stroke: #e6c66b;
   stroke-dasharray: 4 3;
+}
+
+/* the mid-wire disconnect: the one thing in a wire layer that takes the    */
+/* mouse - clicking it sends the disconnect verb; the disconnected event    */
+/* is what actually removes the line                                         */
+.wire-x {
+  fill: #e66b6b;
+  font: bold 14px sans-serif;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: auto;
+  cursor: pointer;
+  paint-order: stroke;
+  stroke: #1a1b20;
+  stroke-width: 3px;
 }
 
 #canvas {

@@ -119,8 +119,16 @@ on the titlebar or off the panel just repositions at the root.
 
 In Connect mode, port dots appear. Click one port, then another (either
 order) and they are wired: messages flow from source to sink through the
-engine. Wiring **to or from an alias wires the original** — that's what
-doorways are for. Existing connections draw when you enter the mode.
+engine. Any property is a valid endpoint — a compiled port (`In`,
+`Enable`), a plain data property (`Value`, `Filename`), or `Activate`
+(a Button wired there presses the target). Wiring **to or from an
+alias wires the original** — that's what doorways are for. Existing
+connections draw when you enter the mode; a wire between two members
+of a view draws inside that view and travels with it. The line only
+appears when the engine confirms the wire, so every open window shows
+the same connections. Each wire carries an **× at its midpoint — click
+it to disconnect** (the raw verb is `disconnect`, the exact inverse of
+`connect`).
 
 ## Delete
 
@@ -206,6 +214,8 @@ The command vocabulary, on either transport:
     {"cmd":"move-instance","of":"/Root/Slider_1","container":"/Root/MyPanel","x":"25","y":"35"}
     {"cmd":"set-property","instance":"/Root/Slider_1","prop":"Value","value":"42"}
     {"cmd":"connect","from":"/Root/Slider_1","fromPort":"Value","to":"/Root/LED_1","toPort":"In"}
+    {"cmd":"disconnect","from":"/Root/Slider_1","fromPort":"Value","to":"/Root/LED_1","toPort":"In"}
+    {"cmd":"list-connections"}          // every live wire, as connected events
     {"cmd":"subscribe","instance":"/Root/Slider_1","port":"Value"}
     {"cmd":"internals","instance":"/Root/Slider_1"}
     {"cmd":"list-instances"}            // root; add "container" for a view's members
@@ -219,7 +229,11 @@ name (`/Root/Slider_1`). Supplying your own name with `as` still works.
 reposition, rename; the engine refuses to move a view into itself or a
 descendant. Aliases are stamped at birth with the target property's
 published `Widget` type (and `Direction`) — a client renders what the
-alias says, it never has to look the type up.
+alias says, it never has to look the type up. `connect` reaches **any**
+property (compiled port, plain data property, or `Activate`) — one verb
+for every wire — and `disconnect` is its exact inverse; both are
+announced to every connection viewing the endpoints (`connected` /
+`disconnected` events), which is the only thing a client draws from.
 
 Events come back as JSON too — and only for what you're looking at: you
 receive updates for things you subscribed to and containers you listed,

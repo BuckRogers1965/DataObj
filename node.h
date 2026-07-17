@@ -60,6 +60,13 @@ char *  GetPropStr  (NodeObj node, char * Name);
 void    SetPropLong (NodeObj node, char * Name, long Value);
 long    GetPropLong (NodeObj node, char * Name);
 
+/* deliver one message to one "Subscriber" record - the one definition   */
+/* of what a subscription means, shared by node.c's own property-write   */
+/* fan-out and object.c's queued port dispatch. A record with a Callback */
+/* calls it; one without gets the universal default: the payload is      */
+/* stored onto the record's {Instance, Port} (which fans out in turn).   */
+void    DeliverToSubscriber (NodeObj sub, int message, NodeObj data);
+
 /* symlinks: a node can stand for another node (an alias's control     */
 /* property links to the original's - value, subscribers, and wiring   */
 /* live only on the target). LinkNode(n, NULL) unlinks; ResolveNode    */

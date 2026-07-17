@@ -548,6 +548,59 @@ NodeObj GetNextProp(NodeObj node)
 	return node->props;
 }
 
+/* deliver one message to one Subscriber record - the single definition   */
+/* of what a subscription MEANS, shared by both fan-out walkers            */
+/* (FanOutSubscribers below for synchronous property writes, DispatchMsg  */
+/* in object.c for queued port sends). A record carries {Instance, Port,  */
+/* Callback}: with a Callback it is a wire into a compiled handler (or a  */
+/* Bridge tap) and the handler is called as ever; with no Callback it is  */
+/* a wire into a plain property, and the universal default applies -      */
+/* store what arrived (write the payload onto Instance's Port, whose own  */
+/* write then fans out in turn, so chains hop onward). This default is    */
+/* what lets Connect() reach ANY property with no adapter standing in     */
+/* between - the Subscriber names the real sink, so everything that walks */
+/* the graph (list-connections, CloneConnections, the delete scrub) sees  */
+/* the user's actual wire.                                                 */
+void DeliverToSubscriber(NodeObj sub, int message, NodeObj data)
+{
+	NodeObj toInstance, portnode, chunk;
+	int (*callback)(NodeObj, int, NodeObj);
+	int (*onmsg)(NodeObj, int, NodeObj);
+	char *port, *value;
+
+	callback   = (int (*)(NodeObj, int, NodeObj)) GetPropLong(sub, "Callback");
+	toInstance = (NodeObj) GetPropLong(sub, "Instance");
+
+	if (callback)
+	{
+		callback(toInstance, message, data);
+		return;
+	}
+
+	port  = GetPropStr(sub, "Port");
+	value = data ? GetValueStr(data) : NULL;
+	if (!toInstance || !port || !value)
+		return;
+
+	/* a handler that appeared on the port after the wire was made still  */
+	/* wins - deliver to it the way genuine port traffic arrives (the     */
+	/* same distinction SetOrDeliverProp draws, natively so node.c never  */
+	/* calls up into object.c)                                            */
+	portnode = GetPropNode(toInstance, port);
+	onmsg = portnode ? (int (*)(NodeObj, int, NodeObj)) GetPropLong(portnode, "OnMsg") : NULL;
+	if (onmsg)
+	{
+		chunk = NewNode(STRING);
+		SetName(chunk, port);
+		SetValueStr(chunk, value);
+		onmsg(toInstance, message, chunk);
+		DelNode(chunk);
+		return;
+	}
+
+	SetPropStr(toInstance, port, value);
+}
+
 /* every property write fans out, unconditionally, to whatever has       */
 /* subscribed to it - Connect() (object.c) already leaves "Subscriber"   */
 /* children on whatever node it targets, port or plain property alike    */
@@ -556,19 +609,13 @@ NodeObj GetNextProp(NodeObj node)
 /* step - a property is watchable simply by existing, same as a port.    */
 static void FanOutSubscribers(NodeObj propnode)
 {
-	NodeObj sub, toInstance;
-	int (*callback)(NodeObj, int, NodeObj);
+	NodeObj sub;
 
 	sub = GetNextProp(propnode);
 	while (sub)
 	{
 		if (CmpName(sub, "Subscriber"))
-		{
-			callback   = (int (*)(NodeObj, int, NodeObj)) GetPropLong(sub, "Callback");
-			toInstance = (NodeObj) GetPropLong(sub, "Instance");
-			if (callback)
-				callback(toInstance, msg_change, propnode);
-		}
+			DeliverToSubscriber(sub, msg_change, propnode);
 		sub = GetNextSibling(sub);
 	}
 }

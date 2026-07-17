@@ -212,3 +212,114 @@ CreateObject/CloneObject/Connect/SetOrDeliverProp/ActivateInstance/
 DeleteInstance); bridge.c is JSON syntax, session naming, and eventing
 only. The Script object and the future MCP server bind to the same
 engine calls — never to the bridge, never to re-implementations.
+
+## Status (2026-07-16): clone / rename / load, the same law again
+
+A long debugging session on cloning a view, renaming it, and saving/
+loading. Every bug was the same disease as the repair list, and the
+fixes are worth reading before touching clone, rename, or load:
+
+1. **The engine clones AND names; the bridge only translates.** Deep-
+   cloning a view — its members, its aliases re-pointed at the copies,
+   the wires re-made between the copies — was living in bridge.c
+   (`Bridge_CloneViewMembers`, `Bridge_CloneAliasMember`, `Bridge_CloneOne`)
+   with the walk and the naming both there. Wrong side. It is now one
+   engine operation, `CloneView` (object.c): the caller passes only the
+   thing to clone and the container to put it in; the ENGINE walks the
+   members (by their `Container`, in its own registry), copies them,
+   remaps the alias links and the wires, and mints the name (registry-
+   unique, source-name with any trailing `_N` stripped — the `Slider_1`
+   → `Slider_1_1` bug was the bridge naming it). `Bridge_CloneCmd` is now
+   resolve → `CloneView` → walk the result into paths and events. Same
+   clone whether a script or the html asks.
+
+2. **A rename or move is a RE-PATH OF THE WHOLE SUBTREE, not a re-key of
+   one node.** Containment is a string path (`Container = "/Root/View_1"`),
+   so renaming `View_1`→`slider` must swap that prefix everywhere it
+   appears or the members are orphaned: a clone finds zero of them, a set
+   by the new path misses. `Bridge_RepathSubtree` (bridge.c) now rewrites,
+   across the subtree: each descendant's **alias key**, its **`Container`**,
+   any alias's **`Target` string** that named the old path (the link is by
+   pointer and survives, but the GUI binds by the Target string — a stale
+   Target is why a renamed view's own alias looked dead while a clone's
+   worked), and every viewing connection's **scope key**. Partial re-path
+   = subtle, invisible breakage. Both `Bridge_Rename` (move) and
+   `Bridge_RenameName` (rename) call it.
+
+3. **A property-to-property wire has an ADAPTER as its sink, not the
+   instance.** Connecting a Slider's `Value` to another's `Value` (a
+   property with no message handler) routes through a `PropertyBinding`
+   adapter (object.c) — so the source port's Subscriber points at the
+   nameless adapter, and the real target lives on the adapter's
+   `Target`/`TargetProp`. Anything walking subscribers (CloneConnections,
+   and by the same token any future scrub) must recognise the adapter and
+   read through it, or it silently drops the user's connection.
+
+4. **Load is action-replay, and a client that renders through the replay
+   burst races its own subscribes.** The GUI subscribed to `/Root/View_1`
+   for position, the load renamed it to `slider` before the subscribe
+   arrived, and the subscribe resolved to nothing — the view came up at
+   the wrong spot. A projector RE-PROJECTS after a bulk state change: the
+   GUI now reloads on `flow-loaded` and re-lists the engine's final state.
+   (Roadmap 3a/3b — direct node serialization + subtree mount — retires
+   replay and this whole race class.)
+
+Two working-discipline lessons that cost the most time, recorded so they
+are not relearned:
+
+- **Do not argue with the user's observation using a passing test.** A
+  green test that never failed for the reported reason proves nothing; it
+  means the test does not exercise the bug. Reproduce the REPORTED bug,
+  watch it fail, then fix. (Every bug here was real; each of my "the
+  engine is fine, look at my test" replies was wrong.)
+- **Use the standard debug framework; make failures loud.** The killer
+  race was invisible for many messages because `Bridge_Error` only told
+  the client, never the log. Route failures through `DebugPrint` (it now
+  logs at ERROR, always), trace a new subsystem with its OWN category
+  gated to a high `-v` level (the `CLONE` category), and observe before
+  concluding. A silent failure is a debugging session you pay for twice.
+
+## Status (2026-07-16, later): connections — the adapter was the last fake
+
+Connect mode showed no existing wires, and a new wire drew onto the root
+canvas instead of into the view. Both were the same law again, and the
+fix retired an interim mechanism the roadmap had already sentenced
+(Phase 2.3):
+
+1. **The engine had two kinds of wire, and the walkers could only see
+   one.** A wire into a compiled port recorded the real sink; a wire
+   into a plain property (the GUI's own Value→Value gesture, always)
+   hid behind a nameless `PropertyBinding` adapter — invisible to
+   `list-connections`' graph walk, special-cased in `CloneConnections`,
+   invisible to the delete scrub (a freed sink left the adapter's
+   `Target` dangling — a live use-after-free), and leaked besides.
+   Now a Subscriber records `{Instance, Port, Callback}` and delivery
+   with no Callback applies the universal default — store what arrived
+   (`DeliverToSubscriber`, node.c, shared by both fan-out walkers).
+   `Activate` is an ordinary port (`ActivateOnMsg`, stamped by
+   `RegisterInstance`). The adapters are deleted; every graph walker
+   reads the same records; bind-property/bind-activate are dispatch
+   synonyms for `connect` kept only for flow replay.
+
+2. **A wire was never announced.** `Bridge_Connect` succeeded silently,
+   so the clicking window drew its own line (repair #6's optimistic
+   mutation, still alive in `onPortClick`) and no other window ever
+   learned. Now `connected`/`disconnected` events go to every
+   connection viewing the endpoints' containers, and the client draws
+   and erases ONLY from those events — the exact shape of repair #5.
+   `disconnect` (engine `Disconnect()`, Connect's inverse — it never
+   had one) drives the mid-wire ×.
+
+3. **The one genuinely-GUI bug was DOM nesting, not coordinates.** One
+   root SVG sat behind every view panel (z-index), so a same-view wire
+   painted "onto the root". Each view-inner now grows its own wire
+   layer; a wire renders in the deepest view both endpoints share and
+   travels/hides with it — the same correct-nesting rule the members
+   themselves follow. Only container-spanning wires use the root
+   overlay.
+
+Raw twins: testharness/connectiontest.py (listing, announcing,
+disconnect, delete-scrub, chaining, Activate wires — all one command
+each). Presentation twin: guitest's connect-wires (event-drawn, in the
+view's layer, redrawn on mode re-entry, × removes). New `WIRE` debug
+category traces every Connect/Disconnect/scrub at `-v 3`.
