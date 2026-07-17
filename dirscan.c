@@ -121,6 +121,10 @@ ScanDirectoryFiles (char *name, char *extension, FoundFile * function,
 
   int length;
 
+  // the scan already chdir'd into the directory, so entries are stat'd
+  // by bare name; the directory's own name only matters to the caller
+  (void) name;
+
   // for each name
   while (n-- > 0)
     {
@@ -174,12 +178,12 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
 		int SearchDirection)
 {
   struct dirent **namelist;
-  int n, ignoreint;
+  int n;
   char oldpath[PATH_MAX];
 
   // store the current directory path to restore later
-  char * ignore = getcwd (oldpath, PATH_MAX);
-  if (ignore == NULL) ;
+  if (getcwd (oldpath, PATH_MAX) == NULL)
+    oldpath[0] = '\0';
 
   // change to the new directory path
   if (chdir (name) == -1)
@@ -203,9 +207,9 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
   if (n < 0)
     {
       perror ("scandir");
-       ignoreint = chdir (oldpath);
-       if (ignoreint == 0) ;
-       return 0;
+      if (chdir (oldpath) != 0)
+        perror ("chdir");
+      return 0;
     }
   else
     {
@@ -244,7 +248,8 @@ PrivateScanDir (char *name, char *extension, FoundFile * function,
   }
   free(namelist);
 
-  ignoreint = chdir (oldpath);
+  if (chdir (oldpath) != 0)
+    perror ("chdir");
   return 1;
 }
 

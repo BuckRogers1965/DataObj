@@ -499,7 +499,7 @@ long GetPropLong(NodeObj node, char *name)
 #ifndef S_SPLINT_S
 
 	if (!node || !name)
-		return NULL;
+		return 0;
 	NodeObj current = node->props;
 	while (current)
 	{
@@ -561,6 +561,10 @@ NodeObj GetNextProp(NodeObj node)
 /* between - the Subscriber names the real sink, so everything that walks */
 /* the graph (list-connections, CloneConnections, the delete scrub) sees  */
 /* the user's actual wire.                                                 */
+/* defined below - default delivery recurses into it (SetPropStr's own    */
+/* fan-out is what makes chained property wires hop onward)                */
+void SetPropStr(NodeObj node, char *name, char *value);
+
 void DeliverToSubscriber(NodeObj sub, int message, NodeObj data)
 {
 	NodeObj toInstance, portnode, chunk;
@@ -1286,6 +1290,8 @@ static int SubscriberTestMessage;
 /* are fanned out to identically.                                        */
 int SubscriberTestCallback(NodeObj instance, int message, NodeObj data)
 {
+	(void) instance;
+
 	SubscriberTestMessage = message;
 	SubscriberTestSeen = GetValueInt(data);
 	return rtrn_handled;

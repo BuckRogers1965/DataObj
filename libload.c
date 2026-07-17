@@ -20,15 +20,18 @@ int
 LoadObject (char *name, int depth)
 {
 	void *ClassHandle;
-	int *ClassMsgFunc;
 	char *error;
 	char hereName[BUFFLEN];
 	char DebugMsg[BUFFLEN];
 	//LPVCLASS pnewDevClass;
 
         char bundlePath[PATH_MAX];
-	char * ignore = getcwd( bundlePath, PATH_MAX );
-        if (ignore == NULL) ;
+
+	/* part of the FoundFile callback signature (ScanDir) */
+	(void) depth;
+
+	if (getcwd( bundlePath, PATH_MAX ) == NULL)
+		bundlePath[0] = '\0';
 
 	fflush(NULL);
 	//printf("\n");
@@ -45,8 +48,11 @@ LoadObject (char *name, int depth)
 		DebugPrint ((char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
-	ClassMsgFunc = dlsym(ClassHandle, "Handle_Message");
-        if (ClassMsgFunc == NULL) ;
+	/* clear any stale error first - a NULL result alone is not proof the  */
+	/* symbol is missing (a present symbol can legitimately be NULL); the  */
+	/* dlerror() check below is the real test                              */
+	dlerror();
+	(void) dlsym(ClassHandle, "Handle_Message");
 	if ((error = dlerror()) != NULL) {
 
 		// couldn't find the proper start point, unload library

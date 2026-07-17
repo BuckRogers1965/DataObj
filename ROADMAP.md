@@ -431,17 +431,37 @@ objects bound to their connector.
    descriptions — each endpoint a palette object with typed input
    properties and a response Out port. Webhook receiver object for
    the inbound direction (a route on the HTTP server → an Out port).
-3. **MCP client object**: connects to an MCP server (stdio or HTTP
-   transport), calls tools/list, and registers each tool as a class:
-   the tool's input schema becomes properties/ports with widgets,
-   results flow out Out. Dragging "search" from the palette drops a
-   live tool into a dataflow. MCP resources map to reader-like
-   sources, prompts to template objects.
-4. **The framework as an MCP server** (the symmetric direction):
-   published flows become MCP tools, so LLM agents can invoke
-   user-built dataflows — and, given create/connect commands from the
-   Phase 3 bridge, build flows themselves. The canvas becomes
-   something an agent and a human can edit together.
+3. **The MCP client View**: a View that, pointed at an MCP server
+   (stdio transport first — an Exec object holding a subprocess with
+   its stdio as In/Out ports is Reader/Writer-shaped; HTTP transport
+   once 6.1 lands), calls tools/list and fills ITSELF with the served
+   interface: each tool registers as a class (the tool's input schema
+   becomes properties/ports with stamped widget types, results flow
+   out Out), and the View holds a live, wireable instance of each.
+   You get the widgets of THEIR served interfaces on YOUR canvas -
+   rendered, paneled and connectable with zero client changes, since
+   a class was always just published-interface data. Dragging
+   "search" out of that View drops a live remote tool into a
+   dataflow. MCP resources map to reader-like sources, prompts to
+   template objects. The translator is bridge.c's shape: syntax
+   only, over the same engine calls.
+4. **The MCP server View** (the symmetric direction): a View that
+   SERVES whatever is dropped into it. Its members are known (the
+   Container relationship), their interfaces are already published
+   nodes (GetClassInterface - what the bridge ships inline today),
+   so tools/list is a member walk translated to schemas and
+   tools/call translates onto SetOrDeliverProp / ActivateInstance /
+   SndMsg - the same verbs every translator uses. The View boundary
+   is the security model for free: you serve exactly what you
+   dropped in, nothing else - the same "you only hear about
+   containers you opened" rule the bridge already enforces. Published
+   flows become MCP tools, so LLM agents can invoke user-built
+   dataflows - and, given create/connect commands from the Phase 3
+   bridge, build flows themselves. The canvas becomes something an
+   agent and a human can edit together. Two frameworks each serving
+   a View and consuming the other's is federation whole: a wire
+   whose middle hop is a tool call - the same cross-instance IPC the
+   multi-user architecture uses, wearing a standard protocol.
 5. **Connector lifecycle**: connectors are ordinary objects with
    Enable lines and State LEDs, so a dead MCP server or API outage
    shows up on the panel like any other instrument, and a timer can

@@ -127,10 +127,11 @@ int Str2Int(char * val){
 }
 
 char * Long2Str(long val){
-	char * ret_val = malloc(20);
+	/* LONG_MIN is 20 characters plus the terminator */
+	char * ret_val = malloc(24);
 	if (!ret_val)
 		return NULL;
-	sprintf(ret_val, "%llu", val);
+	sprintf(ret_val, "%ld", val);
 	return ret_val;
 }
 

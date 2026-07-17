@@ -338,6 +338,10 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_micros, FuncPtr func, in
 
 	unsigned long seconds;
 	unsigned long micros;
+	unsigned long dueSeconds;
+	unsigned long dueMicros;
+
+	(void) mesgid;
 
 	/* Get the time */
 	GetCurrentTime(&seconds, &micros);
@@ -348,20 +352,18 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_micros, FuncPtr func, in
 	/* objects pass their instance node through here               */
 	task->data = data;
 
-	delay_seconds = delay_seconds + seconds;
+	/* the absolute due time, in the same unsigned type the task and the  */
+	/* sorted-insert comparisons below carry                               */
+	dueSeconds = seconds + (unsigned long) delay_seconds;
+	dueMicros  = micros  + (unsigned long) delay_micros;
 
-	delay_micros = delay_micros + micros;
-
-
-	if (delay_micros > 1000000) {
-		delay_micros = delay_micros - 1000000;
-		delay_seconds += 1;
+	if (dueMicros > 1000000) {
+		dueMicros = dueMicros - 1000000;
+		dueSeconds += 1;
 	}
-//	printf("\n\n*** Schedule %d %d\n\n", seconds, micros);
-//	printf("\n\n*** Schedule %d %d\n\n", delay_seconds, delay_micros);
 
-	task->seconds = delay_seconds;
-	task->micros = delay_micros;
+	task->seconds = dueSeconds;
+	task->micros = dueMicros;
 	task->next=NULL;
 	task->prev=NULL;
 	task->linked=1;
@@ -396,12 +398,12 @@ AddTaskDelay(TaskPtr task, int delay_seconds, int delay_micros, FuncPtr func, in
 	/* too (the list stays sorted), and free/pool-recycle both go through paths  */
 	/* that invalidate the hint first, so it never dangles onto freed memory.    */
 	current = (list->insertHint && list->insertHint->linked
-		&& (list->insertHint->seconds < delay_seconds
-			|| (list->insertHint->seconds == delay_seconds && list->insertHint->micros <= delay_micros)))
+		&& (list->insertHint->seconds < dueSeconds
+			|| (list->insertHint->seconds == dueSeconds && list->insertHint->micros <= dueMicros)))
 		? list->insertHint : list->head;
 
-	for ( ; current && (current->seconds < delay_seconds
-		|| (current->seconds == delay_seconds && current->micros <= delay_micros)); ) {
+	for ( ; current && (current->seconds < dueSeconds
+		|| (current->seconds == dueSeconds && current->micros <= dueMicros)); ) {
         current = current->next;
     }
 
@@ -476,7 +478,7 @@ AddTaskToTail(TaskList list, TaskPtr task){
 /* print out the names, msg id, and data values of each item in the given task list */
 void
 PrintDebugList(TaskList list){
-
+	(void) list;
 }
 
 void
@@ -594,6 +596,9 @@ SchedNextWakeMicros(TaskList list){
 
 int
 testcallback(NodeObj object, NodeObj data, int value){
+	(void) object;
+	(void) data;
+	(void) value;
 
 	printf("!!! ");
 	return 1;

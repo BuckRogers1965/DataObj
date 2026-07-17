@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include "timer.h"
 
 
 #define DAYOFSECONDS 86400
@@ -81,7 +82,7 @@ This is to allow the main loop to reschedule running tasks.
 
 
 long
-TimeUpdate (){
+TimeUpdate (void){
 
 	struct timeval tv;
 	struct timezone tz;

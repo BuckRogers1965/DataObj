@@ -85,7 +85,8 @@ static int DependenciesReady(NodeObj library)
  * load in registration order, same as before this existed, with a single
  * warning; a best-effort ordering pass, not a hard requirement to start.
  */
-loadClasses(){
+void
+loadClasses(void){
 	NodeObj library;
 	int madeProgress, remaining;
 	msgobj ClassStart;
@@ -129,7 +130,8 @@ loadClasses(){
 	}
 }
 
-UnloadClasses(){
+void
+UnloadClasses(void){
 	NodeObj library = GetChild( RegObjList );
 	while (library) {
 		msgobj ClassEnd = (msgobj)GetPropLong(library, "ClassEnd");
@@ -433,6 +435,10 @@ CreateObject(NodeObj container, char * classname){
 
 	NodeObj class;
 	msgobj InstanceStart;
+
+	/* containment is a recorded property (Container/PlaceInstance), not   */
+	/* tree parentage - the parameter stays for the API's sake             */
+	(void) container;
 
 	class = FindClass(classname);
 	if (!class) {
@@ -1057,6 +1063,8 @@ DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
 	MsgEnvelope * env = (MsgEnvelope *) envArg;
 	NodeObj sub;
 
+	(void) unused;
+
 	/* outPort is NULL if CancelPendingSends neutralized this envelope   */
 	/* because its source instance was deleted before this fired - the   */
 	/* port (and everything else the deleted instance owned) is already  */
@@ -1341,6 +1349,8 @@ void SetConnState(NodeObj table, long connId, long value)
  */
 int ActivateOnMsg(NodeObj instance, MsgId message, NodeObj data)
 {
+	(void) data;	/* a press is a press, whatever rode in on it */
+
 	if (message == msg_eof)
 		return rtrn_handled;
 
@@ -1407,6 +1417,8 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
  */
 void WatchableProp(NodeObj instance, char *propname)
 {
+	(void) instance;
+	(void) propname;
 }
 
 /* see the doc comment in object.h - opt-in, ordinary, no different from */
@@ -1869,6 +1881,8 @@ static int PropertyWatchTestValue;
 /* proving a plain property change reaches it exactly like a port would   */
 int PropertyWatchTestOnIn(NodeObj instance, MsgId message, NodeObj data)
 {
+	(void) instance;
+
 	PropertyWatchTestMessage = message;
 	PropertyWatchTestValue = GetValueInt(data);	/* copy now - data is gone once this returns */
 	return rtrn_handled;
@@ -1907,6 +1921,7 @@ void PropertyWatchTest(){
 
 
 // Handle registration of objects, classes, and instances,
+static void
 PrintRegInfo(char* message, NodeObj obj){
 	char buffer[255];
 	sprintf((char *)&buffer, message, GetNameStr(obj));
@@ -1940,6 +1955,7 @@ NodeObj RegisterClass(NodeObj library, NodeObj class){
 }
 
 void UnRegisterClass(NodeObj library, NodeObj class){
+	(void) class;
     PrintRegInfo("Unregistering class '%s'", library);
 	//DelNode(node);
 }
@@ -2146,6 +2162,7 @@ NodeObj RegisterInstance(NodeObj class, NodeObj Instance){
 
 void
 UnRegisterInstance(NodeObj class, NodeObj Instance){
+	(void) Instance;
     PrintRegInfo("Unregistering instance of '%s'", class);
 	//DelNode(node);
 }

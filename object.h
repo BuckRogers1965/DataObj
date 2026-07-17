@@ -301,6 +301,14 @@ RegisterInstance(NodeObj class, NodeObj inst);
 void
 UnRegisterInstance(NodeObj class, NodeObj inst);
 
+/* the deferred second phase of InstallObjects (see main.c): after every  */
+/* .object is scanned and loaded, start each library's classes in         */
+/* dependency order; UnloadClasses is the symmetric teardown              */
+void
+loadClasses(void);
+void
+UnloadClasses(void);
+
 
 /* The main funtion must sent a property node of it's main to accept the register list */
 void

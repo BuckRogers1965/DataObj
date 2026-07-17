@@ -11,8 +11,11 @@ Should only ever be updated by the main thread just before the scheduled tasks a
 
 #include <time.h>
 
-int
-TimeUpdate ();
+/* returns the whole-second jump since the last update when the clock     */
+/* moved unsmoothly (see timer.c), 0 in normal running - long, matching   */
+/* the definition (the old int declaration was an LTO type mismatch)      */
+long
+TimeUpdate (void);
 
 /* microsecond resolution, not millisecond - sched.c is the only caller,   */
 /* and needs real precision now that SndMsg queues every message through   */

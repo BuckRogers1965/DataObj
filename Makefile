@@ -40,7 +40,7 @@ $(GOAL): $(OBJECTS)
 
 # Shared library build rule
 libframework.so: $(OBJECTS)
-	$(CC) -dynamic-lib -shared -o libframework.so $(OPT) *.o dyn/*.o -lc -ldl -lm
+	$(CC) -shared -o libframework.so $(OPT) *.o dyn/*.o -lc -ldl -lm
 
 # Clean up build artifacts
 clean:

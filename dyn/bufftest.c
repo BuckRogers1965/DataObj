@@ -26,7 +26,9 @@ int BuffTest (){
 		"<event originatingID=\"12345\",UnityEventID=\"3434346347\",UnityOriginator=\"QA Server\",EventCategory=\"NA\",UnityEventCategory=\"NetworkEvent\",PhysicalSource=\"Unitytest.singlestep.com\",OriginatingTime=\"05/31/2002 00:44:02\",Message=\"\",Severity=\"3\",Priority=\"1\",Assignee=\"None\",Count=\"1\",Description=\"new event 7 Something very very very very very very very naughty happenned on the network.\",State=\"UP\",Status=\"3\",Path=\"/EventGen-1.1!DBI!\",GenericKey=\"UnityStartingPolicyOutput\"/>\n"
 	};
 
-	unsigned int tStrLen[STRING_ENTRIES];
+	/* int, not unsigned: these are compared against buffGetLine's int    */
+	/* return everywhere below                                             */
+	int tStrLen[STRING_ENTRIES];
 
 	for (k=0; k < STRING_ENTRIES; k++)
 		tStrLen[k] = strlen(tStr[k]);

@@ -353,7 +353,7 @@ buffAdd (buff buffer, char * pointer, unsigned int length) {
 
 	} else if (obj->addType == buff_FixCarbon){
 
-		for (i=0; i < length; i++){
+		for (i=0; i < (int) length; i++){
 			if (pointer[i] == '\r')
 				charPoint[i] = '\n';
 			else
@@ -403,6 +403,8 @@ buffAdd (buff buffer, char * pointer, unsigned int length) {
 			switch (lineSkip){
 				case 2:
 					j++;
+					/* fall through - a two-character line end skips its  */
+					/* second byte, then substitutes exactly like a one   */
 				case 1:
 					for (k=0;k<l;k++)
 						charPoint[i+k] = obj->lineEnd[k];
