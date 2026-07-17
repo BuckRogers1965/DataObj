@@ -323,3 +323,30 @@ disconnect, delete-scrub, chaining, Activate wires — all one command
 each). Presentation twin: guitest's connect-wires (event-drawn, in the
 view's layer, redrawn on mode re-entry, × removes). New `WIRE` debug
 category traces every Connect/Disconnect/scrub at `-v 3`.
+
+## Status (2026-07-17): addressing moved into the engine
+
+Phase 1.5 landed as groundwork for the script-language hosts (which
+are Bridges whose wire is function calls — same verbs, same paths):
+path → instance is now ONE engine index (the namespace trie) instead
+of a per-bridge alias table, and the reverse direction is DERIVED from
+Name + Container, verified by resolving back. Lessons paid for:
+
+1. **A derived reverse lookup must be captured BEFORE mutating what it
+   derives from.** Bridge_Set wrote the new Name first, then asked for
+   the instance's path — which now derived from the already-changed
+   Name, failed verification, and silently skipped the re-key. Capture
+   the current path, then write. (And the skip is loud now.)
+2. **Deleting from a shared structure needs tests for SHARED parts.**
+   NSDelete's tail-chop freed trie chains still shared by sibling keys
+   (deleting Slider_9 destroyed Slider_8). The validation had covered
+   prefix-overlap but not last-character siblings — the case the
+   session mints constantly (`_8`/`_9`). Rewritten as walk-down/unwind:
+   free only nodes carrying no other key, re-link the sibling level.
+3. **One namespace is a semantic upgrade that tests can trip over:**
+   instances created over the raw port are now addressable from the
+   GUI (before, each bridge's private table hid them — a split-brain
+   nobody had noticed). GUI tests that grabbed "any /Root/View_N"
+   started grabbing the raw suites' leftovers; they now snapshot
+   before creating and match only the NEW name. The engine behavior
+   is the correct one: one session, one truth.

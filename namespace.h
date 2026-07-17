@@ -21,3 +21,7 @@ NSDelete (NSObj *, char *);
 
 int
 NameSpaceTest ();
+
+/* allocation accounting: trie nodes currently alive - see NodeCount (node.h) */
+long
+NSNodeCount (void);

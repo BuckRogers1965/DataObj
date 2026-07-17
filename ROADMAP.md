@@ -97,8 +97,20 @@ everything after this is cheap.
    improvement note in main.c; class nodes in the registry.*
 5. **Addressing**: name/path lookup so anything can be found as
    `Main/Users/jim/Canvas1/Reader1`.
-   *Already present: namespace.c (currently unused), node names,
-   parent pointers.*
+   *Done (July 2026): the ENGINE owns path -> instance on the namespace
+   trie (namespace.c, written for exactly this decades early) -
+   RegisterPath/UnregisterPath/ResolvePath in O(path length) at any
+   session size, PathOfInstance derived from Name + Container and
+   verified by resolving back (object.c). The web bridge is re-based on
+   it: no per-bridge alias tables, so every translator - bridge, script
+   hosts, the future MCP server - resolves the same names against the
+   same index, and instances created over one wire are addressable from
+   every other (the raw port and the GUI now genuinely share one
+   namespace). Retired names actually reclaim their keys (NSDelete
+   rewritten: the old prune freed chains still shared by sibling keys).
+   Still to come on top of it: MoveBranch - the engine-level prefix
+   re-base (today's Bridge_RepathSubtree pushed down), which 3b's
+   subtree mount then reuses.*
 
 ## Phase 2 — Objects grow skins
 

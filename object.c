@@ -7,6 +7,73 @@
 #include "DebugPrint.h"
 #include "callback.h"
 #include "sched.h"
+#include "namespace.h"
+
+/*
+ * Addressing (roadmap Phase 1.5): the ENGINE owns path -> instance.
+ * Identity was always a path in this system (Container is a path string,
+ * "there is no creation path, only a current path") - this is the one
+ * resolver over that fact, a character trie (namespace.c, written for
+ * exactly this) resolving in O(path length) regardless of session size.
+ * Translators (the JSON bridge, script language hosts, the future MCP
+ * server) all resolve the same names against the same index instead of
+ * each keeping a private alias table; naming something is RegisterPath,
+ * un-naming is UnregisterPath (a real delete - retired names reclaim
+ * their keys), and the reverse direction needs no table at all:
+ * PathOfInstance derives from the Name and Container properties the
+ * instance already carries, verified by resolving back.
+ */
+static NSObj * PathIndex = NULL;
+
+static NSObj * GetPathIndex(void)
+{
+	if (!PathIndex)
+		PathIndex = NSCreate();
+	return PathIndex;
+}
+
+void RegisterPath(char * path, NodeObj inst)
+{
+	if (!path || !path[0] || !inst)
+		return;
+	NSInsert(GetPathIndex(), path, (long) inst);
+}
+
+void UnregisterPath(char * path)
+{
+	if (!path || !path[0])
+		return;
+	NSDelete(GetPathIndex(), path);
+}
+
+NodeObj ResolvePath(char * path)
+{
+	if (!path || !path[0])
+		return NULL;
+	return (NodeObj) NSSearch(GetPathIndex(), path);
+}
+
+/* the derived reverse lookup: an instance's path is its Container plus  */
+/* its Name (empty Container means the top-level canvas, /Root). Only a  */
+/* path that resolves back to the same instance is returned - anything   */
+/* unnamed, engine-internal, or mid-rename simply has no path, the same  */
+/* answer a missing alias-table entry used to give.                       */
+int PathOfInstance(NodeObj inst, char * out, int outlen)
+{
+	char * name, * cont;
+
+	if (!inst || !out || outlen < 2)
+		return 0;
+
+	name = GetPropStr(inst, "Name");
+	if (!name || !name[0])
+		return 0;
+
+	cont = GetPropStr(inst, "Container");
+	snprintf(out, outlen, "%s/%s", (cont && cont[0]) ? cont : "/Root", name);
+
+	return ResolvePath(out) == inst;
+}
 
 NodeObj RegObjList;
 

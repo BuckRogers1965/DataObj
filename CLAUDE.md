@@ -271,6 +271,22 @@ compiled into the module and declared in its header as part of its interface:
   registering their own test entry points through the registry (like `ClassStart`),
   so `-t` would eventually exercise loaded objects too, not just the core library.
 
+## Addressing (July 2026, roadmap Phase 1.5)
+
+The ENGINE owns path -> instance: `RegisterPath`/`UnregisterPath`/
+`ResolvePath` (object.c) over the namespace trie (namespace.c) — O(path
+length) at any session size, and retired names really reclaim their keys.
+The reverse is derived, not stored: `PathOfInstance` builds
+Container + "/" + Name and verifies by resolving back (anything unnamed
+or mid-rename has no path — capture a path BEFORE mutating Name/
+Container, see Bridge_Set). The bridge keeps NO alias table — it
+registers/resolves against the engine index, and enumeration (listing,
+repath walks) is a registry walk + PathOfInstance. Consequence: all
+translators share one namespace — instances created over the raw port
+are addressable from the GUI and vice versa. Chrome's short names
+("ModeMenu") stay in the separate GetChrome table, deliberately outside
+the path index.
+
 ## Allocation accounting (July 2026)
 
 The core counts what it allocates: plain static alive-counters at every

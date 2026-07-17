@@ -3,6 +3,14 @@
 
 #define IN_NAMESPACE
 
+/* allocation accounting - see the twin counter in node.c for the idea */
+static long nsAlive = 0;
+
+long NSNodeCount(void)
+{
+	return nsAlive;
+}
+
 /* Given a set of strings, create a search tree of values */
 
 typedef struct NSObj
@@ -28,6 +36,7 @@ typedef struct NSObj
 	Root = (NSObj *)calloc(sizeof(NSObj), 1);
 	if (Root == NULL)
 		return NULL;
+	nsAlive++;
 
 	// put the NSObjs in a big loop around the Root.
 
@@ -53,6 +62,7 @@ void NSRelease(NSObj *Root)
 		DeleteNext = DeleteNow->Next;
 		if (DeleteNow->Child)
 			NSRelease(DeleteNow->Child);
+		nsAlive--;
 		free(DeleteNow);
 		DeleteNow = DeleteNext;
 	}
@@ -69,6 +79,7 @@ void NSRelease(NSObj *Root)
 	Root = (NSObj *)calloc(sizeof(NSObj), 1);
 	if (Root == NULL)
 		return NULL;
+	nsAlive++;
 
 	// put the NSObjs in a big loop around the Root.
 
@@ -235,124 +246,69 @@ long NSSearch(NSObj *Root, char *String)
 	return 0;
 }
 
+/*
+ * Remove one key. The value is cleared, then the walk unwinds freeing
+ * every trailing node that holds no other key - a node survives if it
+ * carries a Value (another key ends there), has a Child (longer keys
+ * pass through), or once its own removal re-links the sibling list,
+ * which is how keys diverging at any character keep their chains. The
+ * original tail-chop from the "last branch" freed chains still shared
+ * by siblings (deleting Slider_9 destroyed Slider_8) - found the day
+ * the engine's path index started deleting real names, by its tests.
+ */
 int NSDelete(NSObj *Root, char *String)
 {
-	NSObj *Current;
-	// NSObj * Previous;
-	NSObj *LastBranch;
-	int StrLoc = 0;
+	NSObj *node[512];	/* matched node per character              */
+	NSObj **link[512];	/* the pointer that points at that node    */
+	NSObj *cur, **lnk, *nx;
+	int depth = 0, i;
 
-	// check values to make sure they are valid.
-	if (String && String[0] && Root)
+	if (!String || !String[0] || !Root)
+		return 0;
+
+	lnk = &Root->Child;
+	cur = Root->Child;
+
+	for (i = 0; String[i]; i++)
 	{
+		if (i >= 512)
+			return 0;	/* longer than any path this system mints */
 
-		Current = Root->Child;
-		// Previous   = Root;
-		LastBranch = Current; // Remember the last value point,
-							  // delete from there to current when found.
-
-		while (Current && String[StrLoc])
+		while (cur && cur->Character != String[i])
 		{
-			if (String[StrLoc] > Current->Character)
-			{
-				while (Current && String[StrLoc] > Current->Character)
-					Current = Current->Next;
-
-				if (!Current)
-					break;
-
-				if (String[StrLoc] == Current->Character)
-					if (!String[StrLoc + 1])
-					{
-
-						NSObj *DeleteNSObj;
-						NSObj *DeleteNext;
-						// Found
-
-						// If there is no value here
-						// Then we didn't find anything.
-						if (!Current->Value)
-							return 0;
-
-						// if there is more from here, then leave it,
-						// just remove the stored value
-						if (Current->Child)
-						{
-							Current->Value = 0;
-							return (1);
-						}
-
-						// Delete the extra NSObjs
-						DeleteNSObj = LastBranch->Child;
-						LastBranch->Child = NULL;
-						while (DeleteNSObj)
-						{
-							// printf("%c", DeleteNSObj->Character);
-							DeleteNext = DeleteNSObj->Child;
-							free(DeleteNSObj);
-							DeleteNSObj = DeleteNext;
-						}
-
-						return (1);
-					}
-
-				if (Current->Value > 0)
-					LastBranch = Current;
-				Current = Current->Child;
-			}
-			else if (String[StrLoc] == Current->Character)
-			{
-
-				if (!String[StrLoc + 1])
-				{
-
-					NSObj *DeleteNSObj;
-					NSObj *DeleteNext;
-					// Found
-
-					// If there is no value here
-					// Then we didn't find anything.
-					if (!Current->Value)
-						return 0;
-
-					// if there is more from here, then leave it,
-					// just remove the stored value
-					if (Current->Child)
-					{
-						Current->Value = 0;
-						return (1);
-					}
-
-					// Delete the extra NSObjs
-					DeleteNSObj = LastBranch->Child;
-					LastBranch->Child = NULL;
-					while (DeleteNSObj)
-					{
-						// printf("%c", DeleteNSObj->Character);
-						DeleteNext = DeleteNSObj->Child;
-						free(DeleteNSObj);
-						DeleteNSObj = DeleteNext;
-					}
-
-					return (1);
-				}
-
-				if (Current->Value > 0)
-					LastBranch = Current;
-				Current = Current->Child;
-			}
-			else
-			{
-				break;
-			}
-
-			StrLoc++;
+			lnk = &cur->Next;
+			cur = cur->Next;
 		}
+		if (!cur)
+			return 0;	/* not found */
+
+		node[i] = cur;
+		link[i] = lnk;
+		depth = i;
+
+		lnk = &cur->Child;
+		cur = cur->Child;
 	}
 
-	// Not Found
-	return 0;
+	if (!node[depth]->Value)
+		return 0;		/* no key ends here */
+
+	node[depth]->Value = 0;
+
+	for (i = depth; i >= 0; i--)
+	{
+		if (node[i]->Value || node[i]->Child)
+			break;		/* still carrying other keys */
+
+		nx = node[i]->Next;
+		*link[i] = nx;	/* siblings survive: the level re-links around it */
+		nsAlive--;
+		free(node[i]);
+	}
+
+	return 1;
 }
+
 
 #include <stdio.h>
 #include <unistd.h>

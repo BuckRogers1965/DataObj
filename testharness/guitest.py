@@ -378,9 +378,13 @@ def test_open_close(t, r):
     the root. The test view is cloned from the palette and RENAMED to
     OpenCloseTest - the label is just the Name property doing its job."""
     t.set_mode('Clone')
+    # ours is the NEW View_N - the shared engine namespace means the raw
+    # suites' leftovers are visible here too, so "any View_N" grabs theirs
+    t.js("window.__preViews = Object.keys(views).join('|')")
     src = t.center_of("instances['/Root/Palette/View']")
     t.pick_place(src["x"], src["y"], 100, 500)  # the free column under the palette
-    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "view clone")
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)"
+                    " && window.__preViews.split('|').indexOf(k) < 0) || false)", "view clone")
     time.sleep(0.6)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'OpenCloseTest'})" % raw)
     view = "/Root/OpenCloseTest"
@@ -496,8 +500,10 @@ def test_lazy_contents(t, r):
     # classes join; a hardcoded y went stale the moment it did)
     free = t.js("(()=>{const r=panels['/Root/Palette'].el.getBoundingClientRect();"
                 "return {x:100,y:Math.round(r.bottom)+40};})()")
+    t.js("window.__preViews = Object.keys(views).join('|')")
     t.pick_place(src["x"], src["y"], free["x"], free["y"])
-    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "lazy view clone")
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)"
+                    " && window.__preViews.split('|').indexOf(k) < 0) || false)", "lazy view clone")
     time.sleep(0.6)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'LazyTest'})" % raw)
     view = "/Root/LazyTest"

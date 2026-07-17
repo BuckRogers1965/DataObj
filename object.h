@@ -63,6 +63,17 @@ void DeleteInstance(NodeObj instance);
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
 
+/* Addressing (roadmap Phase 1.5): the engine owns path -> instance, one */
+/* trie-backed index every translator resolves against. RegisterPath     */
+/* names, UnregisterPath un-names (a real delete), ResolvePath finds in  */
+/* O(path length). PathOfInstance derives the reverse from Name +        */
+/* Container and verifies by resolving back - returns 0 for anything     */
+/* unnamed or inconsistent (treat as "has no path").                     */
+void    RegisterPath(char * path, NodeObj inst);
+void    UnregisterPath(char * path);
+NodeObj ResolvePath(char * path);
+int     PathOfInstance(NodeObj inst, char * out, int outlen);
+
 /* allocation accounting: message envelopes currently queued between     */
 /* SndMsg and DispatchMsg - reads 0 at rest; a climb means messages are   */
 /* being lost undelivered. See NodeCount (node.h).                         */

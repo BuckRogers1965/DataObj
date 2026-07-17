@@ -117,7 +117,6 @@ together.
 
 typedef struct InstanceData
 {
-	NodeObj aliases;	/* alias string -> instance NodeObj, as long props - shared, not per-Conn */
 	NodeObj container;	/* passed to CreateObject; currently decorative    */
 	NodeObj connAuth;	/* Conn id -> authenticated (0/1), see GetConnState/SetConnState */
 	NodeObj connViews;	/* Conn id -> (NodeObj) table of container keys this conn is viewing - the GUI is an alias, it only receives events about what it looked at */
@@ -329,7 +328,9 @@ static NodeObj Bridge_ResolveAlias(InstanceData *local, char *alias)
 	if (!alias)
 		return NULL;
 
-	inst = (NodeObj) GetPropLong(local->aliases, alias);
+	/* the ENGINE's path index (object.c, on the namespace trie) - one   */
+	/* resolver shared by every translator, not a per-bridge table       */
+	inst = ResolvePath(alias);
 	if (inst)
 		return inst;
 
@@ -342,18 +343,30 @@ static NodeObj Bridge_ResolveAlias(InstanceData *local, char *alias)
  * (/Root/Palette/Reader, see Bridge_Set's Container handling) that changes
  * whenever the instance moves to a different Container - a live tap
  * (Bridge_TapOnIn) can't just cache the alias it was created with, or its
- * events would keep reporting a stale path forever after a move. A linear
- * scan is fine here: it only runs when a tap actually fires, not per
- * frame, and local->aliases is not a large table.
+ * events would keep reporting a stale path forever after a move. No table
+ * or scan: the path is DERIVED from the Name and Container the instance
+ * carries (PathOfInstance, object.c), verified by resolving back. A small
+ * ring of static buffers keeps the returned strings valid across the
+ * couple of concurrent uses an event formatter needs (the fabric is
+ * single-threaded; this is reuse, not races).
  */
 static char *Bridge_AliasForInstance(InstanceData *local, NodeObj inst)
 {
+	static char bufs[4][300];
+	static int rot = 0;
 	NodeObj entry;
+	char *buf;
 
 	if (!local || !inst)
 		return NULL;
 
-	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
+	rot = (rot + 1) & 3;
+	buf = bufs[rot];
+	if (PathOfInstance(inst, buf, sizeof(bufs[0])))
+		return buf;
+
+	/* chrome instances go by their short well-known names */
+	for (entry = GetNextProp(GetChrome()); entry; entry = GetNextSibling(entry))
 		if ((NodeObj) GetValueLong(entry) == inst)
 			return GetNameStr(entry);
 
@@ -379,7 +392,7 @@ static void Bridge_FreshAlias(InstanceData *local, char *prefix, char *base, cha
 	for (n = 1; n < 100000; n++)
 	{
 		snprintf(out, outlen, "%s/%s_%d", (prefix && prefix[0]) ? prefix : "/Root", base, n);
-		if (!GetPropLong(local->aliases, out))
+		if (!ResolvePath(out))
 			return;
 	}
 }
@@ -432,14 +445,14 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	/* every binding through it dead (what Import into a session that      */
 	/* already had the name used to do). The final name is stamped back    */
 	/* into the command so the flow log records a fully-determined birth.  */
-	if (!alias || !alias[0] || GetPropLong(local->aliases, alias))
+	if (!alias || !alias[0] || ResolvePath(alias))
 	{
 		Bridge_FreshAlias(local, container, classname, fresh, sizeof(fresh));
 		alias = fresh;
 		SetPropStr(command, "as", alias);
 	}
 
-	SetPropLong(local->aliases, alias, (long) inst);
+	RegisterPath(alias, inst);
 	Bridge_SetNameFromAlias(inst, alias);
 	Bridge_InstanceEvent(instance, local, alias, classname, GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
 }
@@ -545,14 +558,14 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	/* given (scripts), otherwise - or when the name is already taken,    */
 	/* see Bridge_Create - minted where it lives, and stamped back into   */
 	/* the command for a fully-determined replay                           */
-	if (!alias || !alias[0] || GetPropLong(local->aliases, alias))
+	if (!alias || !alias[0] || ResolvePath(alias))
 	{
 		Bridge_FreshAlias(local, container, "Alias", fresh, sizeof(fresh));
 		alias = fresh;
 		SetPropStr(command, "as", alias);
 	}
 
-	SetPropLong(local->aliases, alias, (long) inst);
+	RegisterPath(alias, inst);
 	Bridge_SetNameFromAlias(inst, alias);
 	Bridge_InstanceEvent(instance, local, alias, "Alias", GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
 
@@ -587,7 +600,7 @@ static void Bridge_RegisterClone(InstanceData *local, NodeObj clone, char *pathO
 	else
 		snprintf(pathOut, outlen, "/Root/%s", nm ? nm : "");
 
-	SetPropLong(local->aliases, pathOut, (long) clone);
+	RegisterPath(pathOut, clone);
 }
 
 /*
@@ -629,7 +642,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		curAlias = of;
 
 	existing = GetPropStr(inst, "_Internals");
-	if (!(existing && existing[0] && GetPropLong(local->aliases, existing)))
+	if (!(existing && existing[0] && ResolvePath(existing)))
 	{
 		view = CreateObject(local->container, "View");
 		if (!view)
@@ -652,7 +665,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		SetPropInt(view, "PanelY", 120);
 		SetPropInt(view, "W", 300);
 
-		SetPropLong(local->aliases, viewAlias, (long) view);
+		RegisterPath(viewAlias, view);
 		Bridge_SetNameFromAlias(view, viewAlias);
 		Bridge_InstanceEvent(instance, local, viewAlias, "View", GetParent(view), "Root", "", 1, 0);
 
@@ -693,7 +706,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			row++;
 
 			Bridge_FreshAlias(local, viewAlias, "Alias", memberAlias, sizeof(memberAlias));
-			SetPropLong(local->aliases, memberAlias, (long) member);
+			RegisterPath(memberAlias, member);
 			Bridge_SetNameFromAlias(member, memberAlias);
 		}
 
@@ -1033,9 +1046,9 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
  * it's called, so moving it to a different Container really does mean a
  * different alias from here on, not a rename of a fixed identity. This is
  * the one place that happens: after the Container write lands, the old
- * local->aliases entry is retired (zeroed, same as Bridge_Delete does -
- * local->aliases is a plain prop chain, not a child list, so there is no
- * DelSibling here) and a new one takes over, then every connected client
+ * path is un-registered from the ENGINE's index and the new one takes
+ * over (UnregisterPath/RegisterPath - a real re-key, the trie reclaims
+ * the old name), then every connected client
  * is told via instance-renamed so it can re-key its own instances/
  * propertyValues/etc maps (web/app.js's onInstanceRenamed) instead of
  * quietly going stale. Bridge_TapOnIn already resolves its alias fresh
@@ -1063,8 +1076,8 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
  */
 static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *oldAlias, char *newAlias)
 {
-	NodeObj snap, entry, inst, ce, table, ks, ke;
-	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560], dbg[700];
+	NodeObj snap, entry, inst, ce, table, ks, ke, lib, cls;
+	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560], dbg[1400], pbuf[300];
 	char *p, *cont, *k, *ok, *escFrom, *escTo, *slash;
 	long cut;
 	int preLen, oldLen, n;
@@ -1076,20 +1089,21 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	snprintf(dbg, sizeof(dbg), "REPATH subtree: '%s' -> '%s'", oldAlias, newAlias);
 	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 
-	/* --- the instances: snapshot descendants, then re-path each --- */
+	/* --- the instances: snapshot descendants, then re-path each.        */
+	/* Enumeration comes from the REGISTRY (the engine's path index is a   */
+	/* trie - lookups, not walks); each instance's current path derives     */
+	/* from its own Name/Container, which still carry the OLD prefix here.  */
 	snap = NewNode(INTEGER);
-	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
-	{
-		p = GetNameStr(entry);
-		inst = (NodeObj) GetValueLong(entry);
-		if (!inst || !p)
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	  {
+		if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 			continue;
-		if ((NodeObj) GetPropLong(local->aliases, p) != inst)
-			continue;	/* stale / zeroed */
-		if (strncmp(p, prefix, preLen) != 0)
+		if (strncmp(pbuf, prefix, preLen) != 0)
 			continue;	/* not a descendant */
-		SetPropLong(snap, p, (long) inst);	/* key = old path, value = instance */
-	}
+		SetPropLong(snap, pbuf, (long) inst);	/* key = old path, value = instance */
+	  }
 
 	for (entry = GetNextProp(snap); entry; entry = GetNextSibling(entry))
 	{
@@ -1098,9 +1112,9 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 
 		snprintf(newP, sizeof(newP), "%s/%s", newAlias, p + preLen);
 
-		/* re-key the alias */
-		SetPropLong(local->aliases, p, 0);
-		SetPropLong(local->aliases, newP, (long) inst);
+		/* re-key the path in the engine's index */
+		UnregisterPath(p);
+		RegisterPath(newP, inst);
 
 		/* the old container is where a viewing conn is registered - read  */
 		/* it off the old path before we change Container                   */
@@ -1150,16 +1164,15 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	/* This is what left the renamed view's own alias broken while a clone's  */
 	/* (announced with a fresh Target) worked. Swap the prefix, delivered so  */
 	/* the GUI re-binds.                                                      */
-	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
-	{
-		p = GetNameStr(entry);
-		inst = (NodeObj) GetValueLong(entry);
-		if (!inst || !p)
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	  {
+		if (!CmpName(cls, "Alias"))
 			continue;
-		if ((NodeObj) GetPropLong(local->aliases, p) != inst)
+		if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 			continue;
-		if (strcmp(GetNameStr(GetParent(inst)), "Alias") != 0)
-			continue;
+		p = pbuf;
 
 		cont = GetPropStr(inst, "Target");	/* reuse cont as the target string */
 		if (cont && strncmp(cont, oldAlias, oldLen) == 0 && (cont[oldLen] == 0 || cont[oldLen] == '/'))
@@ -1227,8 +1240,8 @@ static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias,
 	if (strcmp(newAlias, oldAlias) == 0)
 		return;
 
-	SetPropLong(local->aliases, oldAlias, 0);
-	SetPropLong(local->aliases, newAlias, (long) inst);
+	UnregisterPath(oldAlias);
+	RegisterPath(newAlias, inst);
 
 	escFrom = JsonEscapeStr(oldAlias);
 	escTo   = JsonEscapeStr(newAlias);
@@ -1296,15 +1309,15 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 	if (strcmp(newAlias, oldAlias) == 0)
 		return;
 
-	if (GetPropLong(local->aliases, newAlias))
+	if (ResolvePath(newAlias))
 	{
 		Bridge_SetNameFromAlias(inst, oldAlias);	/* put it back */
 		Bridge_Error(instance, "set-property", "that name is already taken here");
 		return;
 	}
 
-	SetPropLong(local->aliases, oldAlias, 0);
-	SetPropLong(local->aliases, newAlias, (long) inst);
+	UnregisterPath(oldAlias);
+	RegisterPath(newAlias, inst);
 
 	escFrom = JsonEscapeStr(oldAlias);
 	escTo   = JsonEscapeStr(newAlias);
@@ -1346,30 +1359,33 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	SetOrDeliverProp(inst, prop, value);
-
-	/* position/geometry only - trace it (the Value stream would drown the  */
-	/* log); shows the panel-position writes landing on load                */
-	if (strcmp(prop, "X") == 0 || strcmp(prop, "Y") == 0
-		|| strcmp(prop, "W") == 0 || strcmp(prop, "H") == 0
-		|| strcmp(prop, "PanelX") == 0 || strcmp(prop, "PanelY") == 0)
-	{
-		char dbg[300];
-		snprintf(dbg, sizeof(dbg), "SET-POS: %s.%s = %s", alias, prop, value);
-		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
-	}
-
 	/* Name and Container are ordinary properties whose value happens to  */
 	/* BE the thing's identity/location - writing either re-keys the       */
 	/* alias. Judged on the RESOLVED property (a dissection-table member's */
 	/* "Value" slot may stand for the target's Name), and applied to the    */
 	/* resolved owner: setting them through a member renames/moves the      */
-	/* THING, never the member.                                              */
+	/* THING, never the member. The owner's CURRENT path is captured        */
+	/* BEFORE the write lands: the reverse lookup derives from Name +       */
+	/* Container (PathOfInstance), so writing Name first would make the      */
+	/* thing unaddressable mid-rename and the re-key would silently skip.    */
 	{
 		NodeObj owner = inst;
 		NodeObj node = ResolvePort(&owner, prop);
 		char *realProp = node ? GetNameStr(node) : prop;
 		char *ownAlias = Bridge_AliasForInstance(local, owner);
+
+		SetOrDeliverProp(inst, prop, value);
+
+		/* position/geometry only - trace it (the Value stream would drown  */
+		/* the log); shows the panel-position writes landing on load        */
+		if (strcmp(prop, "X") == 0 || strcmp(prop, "Y") == 0
+			|| strcmp(prop, "W") == 0 || strcmp(prop, "H") == 0
+			|| strcmp(prop, "PanelX") == 0 || strcmp(prop, "PanelY") == 0)
+		{
+			char dbg[300];
+			snprintf(dbg, sizeof(dbg), "SET-POS: %s.%s = %s", alias, prop, value);
+			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+		}
 
 		/* the flow log records the FACT, not the doorway it came through: */
 		/* a write through an alias (a panel member, a dragged-out control) */
@@ -1391,6 +1407,10 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 				else
 					Bridge_RenameName(instance, local, ownAlias, owner, value);
 			}
+			else
+				/* an identity write on something with no resolvable path  */
+				/* is a re-key that cannot happen - never silent            */
+				DebugPrint("SET: Name/Container write on an instance with no resolvable path - no re-key", __FILE__, __LINE__, ERROR);
 		}
 	}
 }
@@ -1414,21 +1434,17 @@ void Bridge_DoActivate(NodeObj instance, InstanceData *local, NodeObj command)
 
 /*
  * {"cmd":"delete-instance","instance":"Reader1"} - deliberately uses
- * local->aliases directly rather than Bridge_ResolveAlias, since Chrome
+ * ResolvePath directly rather than Bridge_ResolveAlias, since Chrome
  * (the topbar's File/Mode menus - real app UI, not a session object) is
- * never a delete-instance target. The Palette's own bootstrap instances
- * ARE reachable through local->aliases now (they're ordinary Root
- * instances - see InstanceStart's seeding step and Bridge_ListInstances'
- * doc comment), so what stops them from being deleted is the same
+ * never in the path index and so never a delete-instance target. The
+ * Palette's own bootstrap instances ARE resolvable (they're ordinary
+ * Root instances), so what stops them from being deleted is the same
  * Deletable="0" property BuildPalette (object.c) already set on them -
  * an ordinary property check, not a structural exclusion.
  *
- * The alias entry is zeroed rather than removed - local->aliases is a
- * plain prop chain (AddProp, not AddChild), which DelSibling can't
- * unlink (see its own doc comment, node.c); a value of 0 is exactly
- * what Bridge_ResolveAlias already treats as "not found", so this is
- * enough to make the alias unresolvable without touching node shape,
- * the same pragmatic non-cleanup UnregisterLibrary already accepts.
+ * The path is UnregisterPath'd - a real delete; the trie reclaims the
+ * key (the old zeroed-alias non-cleanup went with the per-bridge
+ * table).
  *
  * Stale-subscriber gap, closed July 2026: DeleteInstance itself now
  * scrubs every Subscriber registry-wide that points at the dying
@@ -1470,7 +1486,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 	char buf[256];
 
 	alias = GetPropStr(command, "instance");
-	inst  = alias ? (NodeObj) GetPropLong(local->aliases, alias) : NULL;
+	inst  = alias ? ResolvePath(alias) : NULL;
 
 	if (!inst)
 	{
@@ -1491,7 +1507,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 		snprintf(cont, sizeof(cont), "%s", c ? c : "");
 
 		Bridge_FreeTaps(inst);
-		SetPropLong(local->aliases, alias, 0);
+		UnregisterPath(alias);
 		DeleteInstance(inst);
 
 		/* the flow log's own garbage collection: every recorded command  */
@@ -1921,20 +1937,22 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 		}
 	}
 
-	entry = GetNextProp(local->aliases);
-	while (entry)
 	{
-		inst = (NodeObj) GetValueLong(entry);
-		class = inst ? GetParent(inst) : NULL;
+		NodeObj lib;
+		char pbuf[300];
 
-		if (inst && class)
-		{
+		for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+		 for (class = GetChild(lib); class; class = GetNextSibling(class))
+		  for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
+		  {
+			/* unnamed engine internals derive no path - they were never  */
+			/* in the alias table before either                            */
+			if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
+				continue;
 			cont = GetPropStr(inst, "Container");
 			if (strcmp(cont ? cont : "", container) == 0)
-				Bridge_InstanceEvent(instance, local, GetNameStr(entry), GetNameStr(class), class, "Root", cont, GetPropInt(inst, "_Hidden"), local->replyConn);
-		}
-
-		entry = GetNextSibling(entry);
+				Bridge_InstanceEvent(instance, local, pbuf, GetNameStr(class), class, "Root", cont, GetPropInt(inst, "_Hidden"), local->replyConn);
+		  }
 	}
 
 	chunk = NewNode(STRING);
@@ -1962,22 +1980,21 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
  */
 void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 {
-	NodeObj entry, port, sub, sink, chunk;
+	NodeObj port, sub, sink, chunk, lib, cls;
 	NodeObj inst;
 	char *fromAlias, *toAlias, *toPort;
+	char fromBuf[300];
 	char *escFrom, *escFromPort, *escTo, *escToPort;
 	char buf[600];
 
-	for (entry = GetNextProp(local->aliases); entry; entry = GetNextSibling(entry))
-	{
-		fromAlias = GetNameStr(entry);
-		inst = (NodeObj) GetValueLong(entry);
-
-		/* live entries only - a zeroed/renamed alias holds a stale       */
-		/* pointer (same guard the scrub and clear paths use)             */
-		if (!inst || !fromAlias
-			|| (NodeObj) GetPropLong(local->aliases, fromAlias) != inst)
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	  {
+		/* unnamed - not addressable, so not a drawable wire end */
+		if (!PathOfInstance(inst, fromBuf, sizeof(fromBuf)))
 			continue;
+		fromAlias = fromBuf;
 
 		/* every property is a potential source port; the wired ones are  */
 		/* exactly those carrying Subscriber entries                       */
@@ -2462,7 +2479,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	NodeObj instance, port;
 	InstanceData *local = malloc(sizeof(InstanceData));
 
-	local->aliases = NewNode(INTEGER);
 	local->container = NULL;
 	local->connAuth = NewNode(INTEGER);
 	local->connViews = NewNode(INTEGER);
@@ -2485,10 +2501,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	{
 		NodeObj entry = GetNextProp(GetPalette());
 		while (entry) {
-			SetPropLong(local->aliases, GetNameStr(entry), GetValueLong(entry));
+			RegisterPath(GetNameStr(entry), (NodeObj) GetValueLong(entry));
 			entry = GetNextSibling(entry);
 		}
-		SetPropLong(local->aliases, "/Root/Palette", (long) GetPaletteView());
+		RegisterPath("/Root/Palette", GetPaletteView());
 	}
 
 	instance = NewNode(INTEGER);
@@ -2556,7 +2572,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 		}
 		DelNode(local->connViews);
 
-		DelNode(local->aliases);
 		DelNode(local->connAuth);
 		DelNode(local->flow);
 		free(local);
