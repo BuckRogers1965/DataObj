@@ -5,9 +5,16 @@
 # server, drive it with a headless chromium, clean up.
 #
 #   ./testharness/run.sh            # default port 8083
+#   ./testharness/run.sh -v         # verbose: every check prints, pass or fail
 #   PORT=9090 ./testharness/run.sh  # somewhere else if you must
 #
 cd "$(dirname "$0")/.." || exit 1
+
+# -v as an argument or VERBOSE=1 in the environment - either turns on
+# every suite's full expected/observed output for passing tests too
+for arg in "$@"; do
+    [ "$arg" = "-v" ] && VERBOSE=1
+done
 
 PORT="${PORT:-8083}"
 CDP_PORT="${CDP_PORT:-9223}"
@@ -140,6 +147,22 @@ CONN_RC=$?
 python3 testharness/leaktest.py --host 127.0.0.1 --port 8091 $VERBOSE
 LEAK_RC=$?
 
+# the JS language host (QuickJS): a script as a dataflow object AND as a
+# bridge client speaking the JSON protocol - the second language proving
+# the "language host is a bridge" pattern
+python3 testharness/jstest.py --host 127.0.0.1 --port 8091 $VERBOSE
+JS_RC=$?
+
+# the ScriptBox shell: discovers script hosts, runs code, collects output,
+# swaps languages - the script widget's engine behavior
+python3 testharness/scriptboxtest.py --host 127.0.0.1 --port 8091 $VERBOSE
+SB_RC=$?
+
+# the scripted composite widget: a View with container In/Out ports, inner
+# controls, and a script that puppets them - a coded widget coded in script
+python3 testharness/widgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
+WIDGET_RC=$?
+
 # and the browser, proving presentation: gestures emit the right verb,
 # events paint the right pixels
 python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
@@ -151,4 +174,7 @@ echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localho
 [ "$VC_RC" != 0 ] && exit "$VC_RC"
 [ "$CONN_RC" != 0 ] && exit "$CONN_RC"
 [ "$LEAK_RC" != 0 ] && exit "$LEAK_RC"
+[ "$JS_RC" != 0 ] && exit "$JS_RC"
+[ "$SB_RC" != 0 ] && exit "$SB_RC"
+[ "$WIDGET_RC" != 0 ] && exit "$WIDGET_RC"
 exit $RC

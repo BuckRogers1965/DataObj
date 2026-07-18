@@ -220,12 +220,16 @@ svg.view-wires {
 /* drag into a scroll) - the canvas background deliberately keeps its      */
 /* native touch panning, and widget controls keep their own defaults       */
 .instance-wrap, .widget-atom, .view-header, .node-header,
-.view-resize-handle, .prop-row, .port-row, .port-dot {
+.view-resize-handle, .prop-row, .port-row {
   touch-action: none;
 }
 
 .node-box {
-  width: 190px;
+  /* the card fits whatever its object declared: a ScriptBox's 48-column    */
+  /* Source box widens it, a plain object's card sits at the 190px floor    */
+  width: fit-content;
+  min-width: 190px;
+  max-width: 680px;
   background: #24262e;
   border: 1px solid #3a3d47;
   border-radius: 8px;
@@ -267,18 +271,8 @@ svg.view-wires {
   font-weight: 600;
 }
 
-.icon-dot.in {
-  position: absolute;
-  left: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-.icon-dot.out {
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-}
+/* there are NO port dots: the icon itself is the wire target, clicked in  */
+/* Connect mode exactly like any control (registerCard's icon handler)      */
 
 /* a widget primitive standing on its own - a control (or a dot, for LED) */
 /* and a label, nothing else: no panel, no header, no ports                */
@@ -291,23 +285,6 @@ svg.view-wires {
   padding: 6px;
   cursor: move;
   user-select: none;
-}
-
-/* Connect-mode-only wiring dots, pinned to the edge they wire from/to -   */
-/* absolutely positioned against the atom itself so they don't disturb its  */
-/* centered control+label column. Visibility/pointer-events still come      */
-/* entirely from the shared .port-dot rules (mode-connect gating).          */
-.widget-atom-dot.in {
-  position: absolute;
-  left: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-.widget-atom-dot.out {
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  transform: translateY(-50%);
 }
 
 .widget-atom-label {
@@ -329,6 +306,24 @@ svg.view-wires {
   padding: 2px 4px;
   font-size: 11px;
   cursor: auto;
+}
+
+/* the Textbox: the ONE text control, any size of text. Its box comes from  */
+/* the object's declared Rows/Cols floor plus its content (app.js sets      */
+/* rows/width), so no width here; monospace so columns of code line up      */
+.textbox {
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.4;
+  overflow: auto;
+  white-space: pre;
+  cursor: text;
+  display: block;
 }
 .widget-atom input[type=range] {
   width: 70px;
@@ -406,13 +401,28 @@ svg.view-wires {
 .prop-row input[type=checkbox] {
   margin: 0;
 }
+.prop-row select, select.widget-menu {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
 .prop-row input[type=range] {
   flex: 1 1 auto;
   min-width: 0;
+  /* a fixed basis so a fit-content card sits at its 190px floor - the      */
+  /* control still stretches to fill whatever row it lands in               */
+  width: 70px;
 }
 .prop-row input[type=number] {
   flex: 1 1 auto;
   min-width: 0;
+  width: 70px;
   background: #1a1b20;
   border: 1px solid #3a3d47;
   color: #e6e6e6;
@@ -496,8 +506,15 @@ body:not(.mode-operate) .wireable > * {
   flex: 1 1 auto;
   min-width: 0;
 }
-.wireable.armed,
-.widget-atom.armed {
+/* a Textbox keeps the size the object declared - it doesn't stretch to    */
+/* the row, the row (and the card) grows to it                              */
+.wireable > .textbox {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* ONE armed look for any wire endpoint - control, row, icon, whatever the  */
+/* click landed on: nothing about an endpoint is special                     */
+.armed {
   outline: 2px solid #e6c66b;
   outline-offset: 2px;
 }

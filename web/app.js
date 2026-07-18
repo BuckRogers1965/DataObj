@@ -40,7 +40,7 @@ const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_S
       PROP_ICON = 12;   /* a doorway: renders as the target's icon, opens its one panel */
 
 /* palette classes that ARE widgets - the base case of the recursion */
-const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton']);
+const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton', 'Dropdown']);
 
 /* which widget class backs which property widget-type, split by whether  */
 /* the widget is something the user edits or something that only displays */
@@ -335,6 +335,11 @@ function parseInterface(interfaceNode) {
     Direction: nodeProp(p, 'Direction'),
     Widget: parseInt(nodeProp(p, 'Widget'), 10),
     Default: nodeProp(p, 'Default'),
+    /* an object can declare its own box size on the published entry       */
+    /* (ScriptBox's Source is 12x48) - carried here so the control renders  */
+    /* the declared, fixed size                                              */
+    Rows: parseInt(nodeProp(p, 'Rows'), 10) || 0,
+    Cols: parseInt(nodeProp(p, 'Cols'), 10) || 0,
   }));
 }
 
@@ -371,11 +376,24 @@ function buildValueControl(widgetClass, defaultValue, onCommit) {
       el.value = defaultValue || '0';
       el.onchange = () => onCommit(el.value);
       break;
-    default: /* Textbox */
-      el = document.createElement('input');
-      el.type = 'text';
+    default: /* Textbox - the ONE text control, whatever size its text is.  */
+             /* NOT a textarea (there is no textarea in this system): an     */
+             /* editable text box. It answers .value like any control, so    */
+             /* every existing read/write path works on it unchanged.         */
+      el = document.createElement('div');
+      el.className = 'textbox';
+      el.contentEditable = 'plaintext-only';
+      Object.defineProperty(el, 'value', {
+        get() { return this.innerText.replace(/\n$/, ''); },
+        set(v) { this.innerText = v || ''; },
+      });
       el.value = defaultValue || '';
       el.onchange = () => onCommit(el.value);
+      el.addEventListener('blur', () => onCommit(el.value));
+      /* fixed one-line size until the object's declared Rows/Cols are      */
+      /* applied (bindLiveControl); boxes never resize by content            */
+      el.style.height = '1lh';
+      el.style.width = '10ch';
   }
   return el;
 }
@@ -561,6 +579,15 @@ document.addEventListener('click', () => {
 /* Connect()ed source) shows up here too, the same way selfDisplays does */
 function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit) {
   const el = buildValueControl(widgetClass, defaultValue, onCommit);
+  /* a Textbox takes the size its OBJECT declared on the published entry   */
+  /* (subscribeAlias is always the real instance, whatever rendering asked  */
+  /* - card row, dissection member, copied-out atom)                         */
+  if (widgetClass === 'Textbox') {
+    const inst = instances[subscribeAlias];
+    const pub = inst && (classes[inst.className] || []).find((p) => p.Name === subscribeProp);
+    if (pub && pub.Rows) el.style.height = pub.Rows + 'lh';  /* lh = one line */
+    if (pub && pub.Cols) el.style.width = pub.Cols + 'ch';
+  }
   send({ cmd: 'subscribe', instance: subscribeAlias, port: subscribeProp });
   /* more than one rendering can subscribe to the same alias.prop (an       */
   /* Alias atom binds to its target's prop alongside the target's own       */
@@ -585,8 +612,27 @@ function wireSlot(alias, propName, controlEl) {
 }
 
 function updateLiveControl(entry, value) {
-  if (entry.widgetClass === 'Checkbox') entry.el.checked = value === '1';
-  else entry.el.value = value;
+  if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
+  if (entry.widgetClass === 'MenuItems') {
+    /* rebuild the <option>s, preserving the current selection */
+    const keep = entry.el.value;
+    entry.el.textContent = '';
+    for (const item of (value || '').split(',')) {
+      if (!item) continue;
+      const opt = document.createElement('option');
+      opt.value = item; opt.textContent = item;
+      entry.el.appendChild(opt);
+    }
+    if (keep) entry.el.value = keep;
+    return;
+  }
+  if (entry.widgetClass === 'MenuValue') {
+    /* selecting a value that isn't among the options yet is harmless -    */
+    /* the MenuItems update re-applies it once the list arrives            */
+    if (value) entry.el.value = value;
+    return;
+  }
+  entry.el.value = value;
 }
 
 /* --- base case: a widget class's own Value/State/activate, rendered against itself --- */
@@ -641,6 +687,18 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   if (className === 'MenuButton') {
     control = makeMenuButtonEl(alias);
     primaryProp = 'Selected';
+  } else if (className === 'Dropdown') {
+    /* the dropdown primitive: a native select whose options are the       */
+    /* object's own Items property and whose selection is its Value        */
+    const sel = document.createElement('select');
+    sel.className = 'widget-menu';
+    sel.onchange = () => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: sel.value });
+    (liveControls[alias + '.Value'] = liveControls[alias + '.Value'] || []).push({ el: sel, widgetClass: 'MenuValue' });
+    send({ cmd: 'subscribe', instance: alias, port: 'Value' });
+    (liveControls[alias + '.Items'] = liveControls[alias + '.Items'] || []).push({ el: sel, widgetClass: 'MenuItems' });
+    send({ cmd: 'subscribe', instance: alias, port: 'Items' });
+    control = sel;
+    primaryProp = 'Value';
   } else if (className === 'Button') {
     control = makeSelfActivateButton(alias);
     primaryProp = 'Out';
@@ -790,6 +848,9 @@ function registerView(alias, props, pos, hidden, container) {
   header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
+  /* same as a card: the panel is a root-level peer, so it carries the      */
+  /* view's own Options gesture (members' gestures stopPropagation and win)  */
+  attachOptionsGesture(panel, alias);
 
   const view = { el: wrap, panel, innerEl, header, resizeHandle, icon, setOpen: p.setOpen };
   views[alias] = view;
@@ -912,9 +973,9 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
 
 /* a composite object is an icon that opens into a panel - the icon's own   */
 /* in/out anchors are the exact same aliases as the panel's, just a second   */
-/* place to click them (see the iconDots/panelRows swap in setExpanded      */
-/* below): collapsed or expanded is a display choice, not a different        */
-/* object or a different wire.                                               */
+/* place to click them (see the icon/panelRows swap in setExpanded below):   */
+/* collapsed or expanded is a display choice, not a different object or a    */
+/* different wire.                                                            */
 /*                                                                            */
 /* The panel's rows are the ENGINE's answer to "what is this object's        */
 /* panel": its internals view's member aliases (Bridge_Internals). The       */
@@ -973,29 +1034,20 @@ function registerCard(alias, className, props, pos, isCopy, container) {
 
   const ports = {};
   const panelRows = {};
-  const iconDots = {};
   const outPorts = [];
   const builtRows = {};
   let panelOpen = false;
   let rowsAsked = false;
 
-  /* the icon's port dots render straight from the class's published        */
-  /* Interface (it rides on instance-created for exactly this): a bare       */
-  /* port - one carrying no widget metadata - gets a clickable dot. The       */
-  /* panel's ROWS are not built here at all: they are the internals view's    */
+  /* NO dots, no special case: the ICON is the wire target, the same        */
+  /* one-click gesture as any control (see the icon click handler below).    */
+  /* Every in/out port anchors at the icon while the panel is closed; the     */
+  /* panel's ROWS are not built here at all - they are the internals view's   */
   /* members, streamed in on first open (addMemberRow below).                 */
   for (const p of props) {
     if (p.Direction !== 'in' && p.Direction !== 'out') continue;
     if (p.Direction === 'out') outPorts.push(p.Name);
-    if (DISPLAY_WIDGET_CLASS[p.Widget] || INPUT_WIDGET_CLASS[p.Widget]) continue;
-
-    const dot = document.createElement('span');
-    dot.className = 'port-dot icon-dot ' + p.Direction;
-    dot.title = p.Name;
-    dot.addEventListener('click', ((name) => (ev) => { ev.stopPropagation(); onPortClick(alias, name, ports[name]); })(p.Name));
-    icon.appendChild(dot);
-    iconDots[p.Name] = dot;
-    ports[p.Name] = dot;
+    ports[p.Name] = icon;
   }
 
   /* one row per internals-view member: which control, and whether it's a   */
@@ -1018,6 +1070,33 @@ function registerCard(alias, className, props, pos, isCopy, container) {
     const pub = props.find((q) => q.Name === propName) || {};
 
     if (rec.direction === 'data') {
+      /* PROP_MENU: a dropdown row - options from the companion            */
+      /* "<prop>List" property, current value from the property itself,    */
+      /* commits through the member's link like every other input row      */
+      if (Number(rec.widget) === PROP_MENU) {
+        const sel = document.createElement('select');
+        sel.className = 'widget-menu';
+        sel.onchange = () => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: sel.value });
+        const valKey = alias + '.' + propName;
+        (liveControls[valKey] = liveControls[valKey] || []).push({ el: sel, widgetClass: 'MenuValue' });
+        send({ cmd: 'subscribe', instance: alias, port: propName });
+        const listKey = alias + '.' + propName + 'List';
+        (liveControls[listKey] = liveControls[listKey] || []).push({ el: sel, widgetClass: 'MenuItems' });
+        send({ cmd: 'subscribe', instance: alias, port: propName + 'List' });
+
+        const row = document.createElement('div');
+        row.className = 'prop-row';
+        const label = document.createElement('label');
+        label.textContent = propName;
+        row.appendChild(label);
+        row.appendChild(wireSlot(alias, propName, sel));
+        /* the row IS the member instance, projected - so Options on it     */
+        /* opens the MEMBER's own panel, exactly as its atom form does      */
+        attachOptionsGesture(row, memberAlias);
+        body.insertBefore(row, body.firstChild);
+        return;
+      }
+
       if (!inputClass && !displayClass) return; /* plumbing (PROP_NULL, PROP_ICON): no row */
 
       let controlEl;
@@ -1035,6 +1114,8 @@ function registerCard(alias, className, props, pos, isCopy, container) {
       label.textContent = propName;
       row.appendChild(label);
       row.appendChild(wireSlot(alias, propName, controlEl));
+      /* same as the menu row: the member is clickable-through, not filtered */
+      attachOptionsGesture(row, memberAlias);
       /* members replay newest-first (the session table prepends), so     */
       /* prepending each row restores the class's published order - the    */
       /* same top-to-bottom the Interface declares                          */
@@ -1054,6 +1135,7 @@ function registerCard(alias, className, props, pos, isCopy, container) {
 
       const row = document.createElement('div');
       row.className = 'port-row ' + rec.direction + (hasControl ? ' has-control' : '');
+      attachOptionsGesture(row, memberAlias);
 
       const label = document.createElement('span');
       label.textContent = propName;
@@ -1113,7 +1195,7 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   /* to "what is this object's panel" - and the member rows stream in.      */
   const p = registerPanel(alias, panel, 'block', (open) => {
     panelOpen = open;
-    for (const name in ports) ports[name] = (open && panelRows[name]) || iconDots[name] || ports[name];
+    for (const name in ports) ports[name] = (open && panelRows[name]) || icon;
     if (open && !rowsAsked) {
       rowsAsked = true;
       const cur = aliasOfEl(wrap, alias);
@@ -1122,7 +1204,18 @@ function registerCard(alias, className, props, pos, isCopy, container) {
     }
   });
 
-  icon.addEventListener('click', () => { if (effectiveMode(icon) === 'Operate') p.setOpen(true); });
+  icon.addEventListener('click', () => {
+    const m = effectiveMode(icon);
+    if (m === 'Operate') { p.setOpen(true); return; }
+    if (m !== 'Connect') return;
+    /* the icon is the object, clicked like any control: landing a wire on   */
+    /* it means its first published in port, starting one from it means its   */
+    /* first published out port                                                */
+    const first = (dir) => { const q = props.find((x) => x.Direction === dir); return q && q.Name; };
+    const port = (pendingPort && pendingPort.alias !== alias) ? (first('in') || first('out'))
+                                                              : (first('out') || first('in'));
+    if (port) onPortClick(alias, port, icon);
+  });
   collapseBtn.addEventListener('click', (ev) => { ev.stopPropagation(); p.setOpen(false); });
 
   /* aliasing a thing is aliasing its icon - the alias opens this same    */
@@ -1131,6 +1224,11 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
+  /* the panel opens as a PEER at the root, not inside the wrap - so it     */
+  /* carries the object's Options gesture itself, or clicks on its chrome    */
+  /* (the Activate button, the header, the background) would reach nothing.   */
+  /* Member rows' own gestures stopPropagation, so they still win.            */
+  attachOptionsGesture(panel, alias);
 
   /* an out port still needs its own subscribe wherever this rendering      */
   /* lives - message-flowed log lines aren't state, there's nothing to       */
@@ -1552,6 +1650,31 @@ function renderAliasControl(alias) {
     rec.slot.appendChild(ic);
     rec.control = ic;
     rec.labelEl.textContent = '';
+    instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
+    instances[alias].ports['Value'] = rec.el;
+    return;
+  }
+
+  /* PROP_MENU: a dropdown. Its selectable options come from a companion   */
+  /* property on the target named "<prop>List" (e.g. Language -> the        */
+  /* discovered LanguageList) - the same one-property-carries-the-options   */
+  /* convention a MenuButton uses with its Items, applied to any menu prop. */
+  if (Number(rec.widget) === PROP_MENU) {
+    rec.slot.textContent = '';
+    const sel = document.createElement('select');
+    sel.className = 'widget-atom-control widget-menu';
+    sel.onchange = () => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: sel.value });
+    rec.slot.appendChild(sel);
+    rec.control = sel;
+    rec.labelEl.textContent = rec.label || (baseName(rec.target) + '.' + rec.targetProp);
+    /* the current value drives selection, the companion List drives the    */
+    /* options - two subscriptions, both landing on this one <select>       */
+    const valKey = rec.target + '.' + rec.targetProp;
+    (liveControls[valKey] = liveControls[valKey] || []).push({ el: sel, widgetClass: 'MenuValue' });
+    send({ cmd: 'subscribe', instance: rec.target, port: rec.targetProp });
+    const listKey = rec.target + '.' + rec.targetProp + 'List';
+    (liveControls[listKey] = liveControls[listKey] || []).push({ el: sel, widgetClass: 'MenuItems' });
+    send({ cmd: 'subscribe', instance: rec.target, port: rec.targetProp + 'List' });
     instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
     instances[alias].ports['Value'] = rec.el;
     return;

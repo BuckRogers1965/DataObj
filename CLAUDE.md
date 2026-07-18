@@ -271,6 +271,48 @@ compiled into the module and declared in its header as part of its interface:
   registering their own test entry points through the registry (like `ClassStart`),
   so `-t` would eventually exercise loaded objects too, not just the core library.
 
+## Scripting: language hosts as bridge clients (July 2026, roadmap Phase 7)
+
+A scripting language is one more loadable `.object` that speaks the JSON
+protocol as a BRIDGE CLIENT — "the web bridge is the pattern to follow."
+Two hosts exist: `objects/script` (Lua, the first) and `objects/jsscript`
+(QuickJS/JavaScript, `objects/jsscript/quickjs/` vendored — MUST include
+libbf.c or `dlopen` fails on `bf_context_init`). A host: one interpreter
+per instance; `Activate` (re)runs the `Source` property in a fresh
+context; ports `In`/`Out` (dataflow), `Print` (output + loud errors),
+`Cmd`/`Evt` (wire to a Bridge = full protocol: create/connect/subscribe/…
+with session naming and events, a script is a peer of the browser); a
+runaway guard (QuickJS interrupt handler with a wall-clock budget — Lua
+still lacks one); `ScriptHost=1` on the class node = the runtime-discovery
+marker. Details and the full pattern: the `design-language-host-bridge`
+memory. Twin tests: `testharness/jstest.py`.
+
+**Scripted composite widget** (Phase 5 + 7 together): a View made into a
+black-box widget. `bind-port` (bridge command -> `LinkPropertyAs`) makes
+a container's OWN port a transparent link to a child's port (container
+ports = the existing alias mechanism, not a new record type) - wiring
+to/from the container port resolves through to the child (`ResolvePort`).
+So a View.In bound to an inner input control, a View.Out bound to an
+inner output control, plus a script INSIDE (a language host wired to a
+Bridge = a protocol client) that subscribes to the input control and
+drives the output control by path = a widget that behaves like compiled
+code but whose LOGIC is editable script. `testharness/widgettest.py`
+builds and proves one. This only works because of path addressing (the
+script reaches its siblings by path) - the reason Phase 1.5 came first.
+
+`objects/scriptbox` (ScriptBox) is the script WIDGET shell: it holds no
+interpreter, it CONTAINS a language-host instance and drives it. Its
+panel (the engine's internals view) shows a `Language` dropdown
+(`PROP_MENU`, options from the companion `LanguageList` — a registry walk
+of `ScriptHost=1` classes), a `Source` box and an `Output` box (both the ONE
+`PROP_TEXTBOX` — there is no separate textarea widget; the Textbox
+displays text of any size, and an object declares its own box size as
+`Rows`/`Cols` annotations on its published Interface entry — properties
+are nodes, so no new mechanism), and Run = Activate. Picking a Language SWAPS the inner host
+(the code carries over) — Lua works as an inner language with zero
+changes to script.c because the inner host is created with `CreateObject`
+and wired with `Connect()` like any two objects. `testharness/scriptboxtest.py`.
+
 ## Addressing (July 2026, roadmap Phase 1.5)
 
 The ENGINE owns path -> instance: `RegisterPath`/`UnregisterPath`/

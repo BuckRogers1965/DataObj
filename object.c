@@ -364,12 +364,29 @@ NodeObj GetPaletteView(void){
 /* user actually composes with.                                         */
 static int IsPaletteExcluded(char *className)
 {
-	return strcmp(className, "Bridge") == 0
-		|| strcmp(className, "TCP") == 0
-		/* an Alias only means something bound to a target - they are    */
-		/* born from the Alias-mode drag (create-alias), never dragged    */
-		/* out of the palette as a blank                                   */
-		|| strcmp(className, "Alias") == 0;
+	(void) className;
+	return 0;
+}
+
+/* ask an instance for the main view it built for itself: scan its        */
+/* properties for one whose value IS a View instance - a widget defined   */
+/* one when it built itself, a plain object (TCP, lua, quickjs) has none.  */
+/* Nothing is "set" specially; the view a widget created is found by       */
+/* scanning. Safe: property values are compared as integers against the    */
+/* known View instances, never dereferenced as pointers.                   */
+/* ask an instance for its view: a widget took on the View machinery      */
+/* (InitPosition/PublishPosition gave it X/Y and the rest of a view's      */
+/* presentation), so it has a view. A pure object like TCP never did -     */
+/* no X/Y, no view - so it returns NULL and stays out of the palette. No   */
+/* list, no foreknowledge; the object itself decides by whether it is a    */
+/* view.                                                                    */
+NodeObj GetMainView(NodeObj instance)
+{
+	if (!instance)
+		return NULL;
+	if (!GetPropNode(instance, "X") || !GetPropNode(instance, "Y"))
+		return NULL;
+	return instance;
 }
 
 void BuildPalette(void){
@@ -413,7 +430,7 @@ void BuildPalette(void){
 			if (!IsPaletteExcluded(GetNameStr(class)))
 			{
 				inst = CreateObject(NULL, GetNameStr(class));
-				if (inst) {
+				if (inst && GetMainView(inst)) {
 					SetPropStr(inst, "Container", "/Root/Palette");
 					SetPropStr(inst, "Name", GetNameStr(class));
 					SetPropInt(inst, "X", 10 + (slot % 2) * 80);

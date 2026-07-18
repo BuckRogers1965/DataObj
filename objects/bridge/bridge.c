@@ -958,6 +958,43 @@ void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
 	Bridge_WireEvent(instance, local, "connected", fromInst, fromPort, toInst, toPort);
 }
 
+/*
+ * {"cmd":"bind-port","container":View,"port":"In","target":Slider,
+ *  "targetProp":"In"} - CONTAINER PORTS (roadmap Phase 5.1 / 2.4): make a
+ * container's OWN port a transparent link to a child's port. Wiring to or
+ * from the container port then resolves through to the child (ResolvePort,
+ * object.c - the same link mechanism an Alias uses), so a composed View
+ * can expose a curated In/Out that the outside wires to without knowing
+ * what's inside. This is what makes a View a black-box widget: its In
+ * forwards to an inner input control, its Out is fed by an inner output
+ * control, and a script inside puppets the rest.
+ */
+void Bridge_BindPort(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char *contAlias, *port, *targetAlias, *targetProp;
+	NodeObj cont, target;
+
+	contAlias   = GetPropStr(command, "container");
+	port        = GetPropStr(command, "port");
+	targetAlias = GetPropStr(command, "target");
+	targetProp  = GetPropStr(command, "targetProp");
+
+	cont   = Bridge_ResolveAlias(local, contAlias);
+	target = Bridge_ResolveAlias(local, targetAlias);
+
+	if (!cont || !target || !port || !port[0] || !targetProp || !targetProp[0])
+	{
+		Bridge_Error(instance, "bind-port", "container/port/target/targetProp required");
+		return;
+	}
+
+	if (!LinkPropertyAs(cont, port, target, targetProp))
+	{
+		Bridge_Error(instance, "bind-port", "no such property on the target");
+		return;
+	}
+}
+
 /* {"cmd":"disconnect","from":A,"fromPort":P,"to":B,"toPort":Q} - the     */
 /* inverse of connect (the mid-wire "x" in Connect mode): one engine      */
 /* Disconnect(), one disconnected event, and the disconnected event is    */
@@ -2071,6 +2108,8 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_Internals(instance, local, command);
 	else if (strcmp(cmd, "connect") == 0)
 		Bridge_Connect(instance, local, command);
+	else if (strcmp(cmd, "bind-port") == 0)
+		Bridge_BindPort(instance, local, command);
 	else if (strcmp(cmd, "disconnect") == 0)
 		Bridge_Disconnect(instance, local, command);
 	else if (strcmp(cmd, "bind-property") == 0)
@@ -2110,6 +2149,7 @@ static int Bridge_IsMutating(char *cmd)
 		|| strcmp(cmd, "clone-instance") == 0
 		|| strcmp(cmd, "move-instance") == 0
 		|| strcmp(cmd, "connect") == 0
+		|| strcmp(cmd, "bind-port") == 0
 		|| strcmp(cmd, "bind-property") == 0
 		|| strcmp(cmd, "bind-activate") == 0
 		|| strcmp(cmd, "set-property") == 0

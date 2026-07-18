@@ -543,52 +543,261 @@ def test_lazy_contents(t, r):
 # --------------------------------------------------------------------------
 
 
-def test_lua_script(t, r):
-    """A Lua Script object: wire a Pulse into it, its oninput callback
-    counts rising edges and sends the count out its Out port."""
-    view = make_test_view(t, 'ScriptTest')
-    t.set_mode('Clone')
-    src = t.center_of("instances['/Root/Palette/Script']")
-    tgt = inner_center(t, view, -30, -30)
-    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
-    script = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Script_')) || false)" % view, "script clone")
-    src = t.center_of("instances['/Root/Palette/Pulse']")
-    tgt = inner_center(t, view, 30, 40)
-    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
-    pulse = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Pulse_')) || false)" % view, "pulse clone")
+def test_script_pulse(t, r, lang, snippet):
+    """The script pulse generator as a real WIDGET: a ScriptBox (the
+    script widget - dropdown, source box, output box) powered by `lang`,
+    counting pulse edges and speaking out its Out like any coded widget.
+    The raw language host never appears in any view - it lives INSIDE
+    the ScriptBox as plumbing."""
+    view = make_test_view(t, lang + 'PulseTest')
+    box = view + '/Counter'
+    pulse = view + '/P'
+    sink = view + '/Shown'
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'20',y:'20'})" % (box, view))
+    t.js("send({cmd:'create-instance',class:'Pulse',as:'%s',container:'%s',x:'20',y:'90'})" % (pulse, view))
+    t.js("send({cmd:'create-instance',class:'Textbox',as:'%s',container:'%s',x:'20',y:'160'})" % (sink, view))
+    t.wait_js("!!instances['%s']" % sink, "widget parts")
     time.sleep(0.5)
 
-    lua = "local c = 0 oninput(function(v, k) if v == '1' then c = c + 1 send(tostring(c)) end end)"
-    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (script, json.dumps(lua)))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Language',value:'%s'})" % (box, lang))
+    time.sleep(0.3)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(snippet)))
     t.js("send({cmd:'set-property',instance:'%s',prop:'Interval',value:'150'})" % pulse)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Count',value:'3'})" % pulse)
-    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, script))
-    t.js("send({cmd:'subscribe',instance:'%s',port:'Out'})" % script)
-    time.sleep(0.5)
-    t.clear_events()
-    t.js("send({cmd:'activate',instance:'%s'})" % script)
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, box))
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (box, sink))
+    t.js("send({cmd:'subscribe',instance:'%s',port:'Value'})" % sink)
+    time.sleep(0.4)
+    t.js("send({cmd:'activate',instance:'%s'})" % box)
     t.js("send({cmd:'activate',instance:'%s'})" % pulse)
+    time.sleep(3.0)
+
+    final = t.js("propertyValues['%s.Value']" % sink)
+    r.expect("%s pulse widget: a ScriptBox counts pulses like a coded widget" % lang.lower(),
+             "the %s-powered ScriptBox counts 3 rising edges; the wired Textbox shows 3" % lang,
+             "Textbox shows: %s" % final,
+             final == "3")
+
+
+def test_lua_pulse(t, r):
+    test_script_pulse(t, r, 'Lua',
+        "local c = 0\n"
+        "oninput(function(v, k)\n"
+        "  if v == '1' then\n"
+        "    c = c + 1\n"
+        "    send(tostring(c))\n"
+        "  end\n"
+        "end)\n")
+
+
+def test_js_pulse(t, r):
+    test_script_pulse(t, r, 'JSScript',
+        "var c = 0;\n"
+        "oninput(function(v, k) {\n"
+        "  if (v === '1') {\n"
+        "    c = c + 1;\n"
+        "    send(String(c));\n"
+        "  }\n"
+        "});\n")
+
+
+def test_textbox_any_size(t, r):
+    """The ONE Textbox control holds text of any size at a FIXED size: a
+    ScriptBox's Source box opens at its declared 12x48 (Rows/Cols on the
+    published entry), renders a multi-line script with its newlines
+    (overflow scrolls inside the box - it never resizes by content), and
+    commits an edited multi-line value intact - while an undeclared row
+    (Name) stays one line. Raw twin: scriptboxtest.py already runs
+    multi-line Source through the protocol; this proves presentation."""
+    view = make_test_view(t, 'TextSizeTest')
+    box = view + '/Box'
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'20',y:'20'})" % (box, view))
+    t.wait_js("!!instances['%s']" % box, "scriptbox instance")
+
+    # open the card's panel the way the Operate click does - rows are the
+    # internals view's members, streamed in on open
+    t.js("internalsAskMode['%s']='card'; send({cmd:'internals',instance:'%s'})" % (box, box))
+    t.wait_js("!!(liveControls['%s.Source']||[]).length" % box, "Source control")
+    time.sleep(1.0)  # let the member rows finish streaming
+
+    # the box is big BEFORE any code is typed - the size the OBJECT declared
+    empty = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+                 "return {h:el.clientHeight,w:el.clientWidth};})()" % box)
+    r.expect("textbox: the ScriptBox Source box opens at its declared size",
+             "an empty Source control is already a code-sized area (>=100px tall, >=200px wide)",
+             "empty Source control: %s" % empty,
+             empty and empty["h"] >= 100 and empty["w"] >= 200)
+
+    source = ("-- six lines, one long\n"
+              "local total = 0\n"
+              "for i = 1, 10 do\n"
+              "    total = total + i * i  -- a deliberately long line that needs real width\n"
+              "end\n"
+              "print(total)")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(source)))
+    time.sleep(0.8)
+
+    shown = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+                 "return {val:el.value,h:el.clientHeight};})()" % box)
+    r.expect("textbox: a multi-line value renders with its newlines",
+             "the Source control shows the six-line script verbatim, newlines intact",
+             "control value: %r" % (shown and shown["val"]),
+             shown and shown["val"] == source)
+
+    # the user edits multi-line code in the box; the commit carries it intact
+    edited = "print('one')\nprint('two')\nprint('three')"
+    t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+         "el.value=%s;el.dispatchEvent(new Event('change'));})()" % (box, json.dumps(edited)))
+    time.sleep(0.8)
+    stored = t.js("propertyValues['%s.Source']" % box)
+    r.expect("textbox: an edited multi-line value commits intact",
+             "typing three lines into the box stores all three lines on the instance",
+             "stored Source: %r" % stored,
+             stored == edited)
+
+    # uniformity guard: the same widget on a one-line property stays small
+    name_h = t.js("(()=>{const l=liveControls['%s.Name']||[];if(!l.length)return false;"
+                  "return l[l.length-1].el.clientHeight;})()" % box)
+    r.expect("textbox: a one-line row stays one line",
+             "the Name control on the same panel is compact (<40px tall)",
+             "Name control height: %s" % name_h,
+             name_h and name_h < 40)
+
+
+def test_options_on_panel_control(t, r):
+    """A control INSIDE a panel is an ordinary instance - Options-clicking
+    it opens the CONTROL'S OWN dissection panel (its Target/Label/X/Y laid
+    out), which is how a panel's controls get repositioned to fit a
+    graphics background. Regression guard: clone/alias/options work on
+    controls anywhere, panels included - nothing is blocked."""
+    view = make_test_view(t, 'CtlOptTest')
+    thing = view + '/S'
+    t.js("send({cmd:'create-instance',class:'Slider',as:'%s',container:'%s',x:'20',y:'20'})" % (thing, view))
+    t.wait_js("!!instances['%s']" % thing, "slider")
+
+    # the slider's own dissection panel, parked clear of the grid (opened
+    # last, so it sits topmost where we click)
+    t.js("send({cmd:'internals',instance:'%s'})" % thing)
+    panel = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % thing,
+                      "slider internals")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'880'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'430'})" % panel)
+    time.sleep(1.5)  # members stream in
+
+    member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"
+                  " && aliasAtoms[k].targetProp==='Value') || false)" % panel)
+    r.expect("panel-control options: the panel's Value control is a real instance",
+             "the dissection panel holds an addressable Alias member for Value",
+             "member: %s" % member, bool(member))
+
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % member)
+    t.click(src["x"], src["y"])
+    member_panel = t.wait_js(
+        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % member,
+        "the control's own internals")
+    time.sleep(1.2)  # its members stream in
+
+    shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (member_panel, member_panel))
+    props = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
+                 ".map(k=>aliasAtoms[k].targetProp))" % member_panel)
+    plist = json.loads(props) if props else []
+    r.expect("panel-control options: a control opens like anything else",
+             "Options-clicking the Value control opens ITS own panel, laid out with "
+             "the control's own state (Target and X among the members)",
+             "panel %s shown=%s members=%s" % (member_panel, shown, sorted(plist)),
+             member_panel and shown and "Target" in plist and "X" in plist)
+
+    # the SAME members projected as a CARD's rows must not lose their
+    # instance-hood (the reported bug: rows filtered the member away and an
+    # Options click fell through to the card itself)
+    pulse = view + '/P'
+    t.js("send({cmd:'create-instance',class:'Pulse',as:'%s',container:'%s',x:'20',y:'90'})" % (pulse, view))
+    t.wait_js("!!instances['%s']" % pulse, "pulse")
+    t.js("internalsAskMode['%s']='card'; send({cmd:'internals',instance:'%s'})" % (pulse, pulse))
+    card_view = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % pulse,
+                          "pulse card internals")
+    t.js("panels['%s'].setOpen(true)" % pulse)
+    time.sleep(1.5)  # rows stream in
+
+    row_member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"
+                      " && aliasAtoms[k].targetProp==='Interval') || false)" % card_view)
+    pos = t.js("(()=>{const p=panels['%s'];if(!p)return null;"
+               "const rows=[...p.el.querySelectorAll('.prop-row')];"
+               "const r=rows.find(x=>{const l=x.querySelector('label');return l&&l.textContent==='Interval';});"
+               "if(!r)return null;r.scrollIntoView({block:'center'});"
+               "const b=r.getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2};})()" % pulse)
+    t.click(pos["x"], pos["y"])
+    row_panel = t.wait_js(
+        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % row_member,
+        "the row member's own internals")
+    row_shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (row_panel, row_panel))
+    r.expect("panel-control options: a card ROW is the member, not chrome",
+             "Options-clicking the Interval row on a Pulse card opens the Interval "
+             "member's own panel, same as its atom form would",
+             "row member %s -> panel %s shown=%s" % (row_member, row_panel, row_shown),
+             row_member and row_panel and row_shown)
+
+
+def test_gesture_checkbox_counts(t, r):
+    """The whole flow by hand gestures, no dots anywhere: a Checkbox
+    Connect-clicked onto the ScriptBox ICON (landing a wire on an icon
+    means its first in port - the same one-click gesture as any control,
+    panel never opened), the icon clicked again to start a wire (its
+    first out port) landing on a Textbox, then Operate-mode clicks on
+    the checkbox drive the script, which counts rising edges; the count
+    lands in the Textbox."""
+    view = make_test_view(t, 'GestureCount')
+    # roomy enough that the ScriptBox icon's edge dots sit INSIDE the
+    # view (a clipped dot is unclickable - found the hard way)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'W',value:'460'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'H',value:'320'})" % view)
+    time.sleep(0.4)
+    cb, box, sink = view + '/C', view + '/B', view + '/T'
+    t.js("send({cmd:'create-instance',class:'Checkbox',as:'%s',container:'%s',x:'30',y:'20'})" % (cb, view))
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'120',y:'100'})" % (box, view))
+    t.js("send({cmd:'create-instance',class:'Textbox',as:'%s',container:'%s',x:'30',y:'210'})" % (sink, view))
+    t.wait_js("!!(instances['%s']&&instances['%s']&&instances['%s'])" % (cb, box, sink), "the three parts")
     time.sleep(0.5)
 
-    # Clone the Textbox using a dynamic case-insensitive match
-    palette_key_js = "Object.keys(instances).find(k => k.toLowerCase().startsWith('/root/palette/textbox'))"
-    src = t.center_of("instances[%s]" % palette_key_js)
-    tgt = inner_center(t, view, -30, 20)
-    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
-    textbox = t.wait_js(
-        "(Object.keys(instances).find(k => k.startsWith('%s/') && /text(box)?_/i.test(k)) || false)" % view, 
-        "textbox clone"
-    )
+    # program the script widget over the protocol - typing is the textbox
+    # test's business; this test is about the wires and the clicks
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Language',value:'JSScript'})" % box)
+    time.sleep(0.3)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(
+        "var c = 0;\n"
+        "oninput(function(v, k) {\n"
+        "  if (v === '1') {\n"
+        "    c = c + 1;\n"
+        "    send(String(c));\n"
+        "  }\n"
+        "});\n")))
+    t.js("send({cmd:'activate',instance:'%s'})" % box)
+    time.sleep(0.5)
 
-    # Connect the Out of the script to the In of the textbox
-    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (script, textbox))
+    t.set_mode('Connect')
+    src = t.center_of("instances['%s']" % cb)
+    t.click(src["x"], src["y"])                      # arms Checkbox.Value
+    ic = t.center_of("instances['%s']" % box)
+    t.click(ic["x"], ic["y"])                        # icon completes as sink -> In
+    t.wait_js("wires.length>=1", "checkbox->scriptbox wire")
+    t.click(ic["x"], ic["y"])                        # icon starts as source -> Out
+    snk = t.center_of("instances['%s']" % sink)
+    t.click(snk["x"], snk["y"])                      # -> connect to Textbox
+    t.wait_js("wires.length>=2", "scriptbox->textbox wire")
 
-    time.sleep(3.5)
-    counts = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='message-flowed' && m.instance==='%s').map(m=>m.value))" % script)
-    r.expect("lua: a script counts pulses and speaks",
-             "the Script's Lua oninput callback fires per pulse edge; counts 1,2,3 emerge from its Out port",
-             "script output: %s" % counts,
-             counts and json.loads(counts) == ["1", "2", "3"])
+    # count: 5 toggles = on,off,on,off,on = three rising edges
+    t.set_mode('Operate')
+    cbc = t.center_of("instances['%s']" % cb)
+    for _ in range(5):
+        t.click(cbc["x"], cbc["y"])
+        time.sleep(0.35)
+    time.sleep(1.0)
+
+    val = t.js("propertyValues['%s.Value']" % sink)
+    r.expect("gesture count: clicking the checkbox counts pulses",
+             "five checkbox clicks are three rising edges; the wired Textbox shows 3",
+             "Textbox shows: %s" % val, val == "3")
 
 
 def test_connect_wires(t, r):
@@ -706,11 +915,15 @@ def main():
     guarded("open-close", lambda: test_open_close(t, r))
     guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
-    guarded("lua-script", lambda: test_lua_script(t, r))
+    guarded("lua-pulse", lambda: test_lua_pulse(t, r))
+    guarded("js-pulse", lambda: test_js_pulse(t, r))
     # keep this one LAST of the view-staging tests: its view takes a grid
     # slot, and inserting a slot ahead of lua-script shifted that test's
     # panel onto the palette icons it clicks
     guarded("connect-wires", lambda: test_connect_wires(t, r))
+    guarded("textbox-any-size", lambda: test_textbox_any_size(t, r))
+    guarded("options-on-panel-control", lambda: test_options_on_panel_control(t, r))
+    guarded("gesture-checkbox-count", lambda: test_gesture_checkbox_counts(t, r))
 
     # last step, every time, pass or fail: put the shared session back in
     # Operate mode so whoever opens a browser next gets a usable canvas

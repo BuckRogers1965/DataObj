@@ -253,7 +253,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	local->onin_ref = LUA_NOREF;
 
 	instance = NewNode(INTEGER);
-	SetName(instance, "Script");
+	SetName(instance, "Lua");
 	local->instance = instance;
 
 	SetPropStr(instance, "Source", "");
@@ -273,7 +273,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long) Script_OnEnable);
 
-	InitPosition(instance);
+	/* a pure object - no view: no InitPosition/PublishPosition, so it has  */
+	/* no X/Y and never shows in the palette. It is used INSIDE a ScriptBox  */
+	/* widget, never dragged out on its own.                                 */
 
 	RegisterInstance(class, instance);
 
@@ -298,13 +300,15 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
 
-	SetName(class, "Script");
+	SetName(class, "Lua");
 	SetPropLong(class, "InstanceStart", (long) InstanceStart);
 	SetPropLong(class, "InstanceEnd", (long) InstanceEnd);
 
-	ClassSelf = RegisterClass(library, class);
+	/* runtime-discovery marker so this Lua host shows up in the ScriptBox  */
+	/* language dropdown alongside JSScript - a tag only, no behavior change */
+	SetPropInt(class, "ScriptHost", 1);
 
-	PublishPosition(ClassSelf);
+	ClassSelf = RegisterClass(library, class);
 
 	PublishProp(ClassSelf, "Source", "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
@@ -327,7 +331,7 @@ void _init()
 {
 	NodeObj temp = NewNode(INTEGER);
 
-	SetName(temp, "Script");
+	SetName(temp, "Lua");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "b3a4f0e2-6c1d-4b8e-9f27-51d0aa4c9e63");
 	SetPropStr(temp, "Version", "1.0");

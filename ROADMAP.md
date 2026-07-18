@@ -416,8 +416,21 @@ shouldn't have been recreated in the first place.)
 1. **Container ports**: a container publishes named In/Out ports that
    alias ports of inner instances; SndMsg to a container port routes
    inward. One new subscription-record type.
-   *Concretely: View's settings-based In/Out aliasing (Phase 2.4) — a
-   composed View is already this, once that lands.*
+   *Done (July 2026): NOT a new record type - the existing link/alias
+   mechanism IS container ports. `bind-port` (bridge command ->
+   LinkPropertyAs, object.c) makes a container's OWN port a transparent
+   link to a child's port, so wiring to/from the container port resolves
+   through to the child (ResolvePort). A View.In bound to an inner input
+   control's In, a View.Out bound to an inner output control's Value, and
+   the View is a black-box widget the outside wires to without knowing
+   its insides. Combined with a script inside puppeting the controls
+   (the language-host-as-bridge-client, addressing siblings by path),
+   this is a SCRIPTED COMPOSITE WIDGET - a View that behaves like a
+   compiled widget but whose logic is editable script.
+   testharness/widgettest.py builds and proves one over the protocol
+   (input -> container port -> inner control -> script -> output control
+   -> container port -> outside). This is the concrete Phase 5 + Phase 7
+   convergence.*
 2. **Composite classes**: register a saved flow file in the registry
    as a class — its InstanceStart loads and wires the inner flow.
    Composites appear on the palette beside the C classes,
@@ -498,6 +511,23 @@ interpreter.
    Instances load a script; script functions become handlers via
    trampolines (the Callback long property points at the trampoline,
    a sibling property carries the script reference).
+   *Done (July 2026): TWO hosts — Lua (`objects/script`) and QuickJS/
+   JavaScript (`objects/jsscript`, QuickJS vendored with libbf) — built
+   on the "language host is a BRIDGE CLIENT" shape (the user's framing:
+   the web bridge is the pattern). Each has In/Out/Print ports plus
+   Cmd/Evt: wire Cmd→Bridge.In and Bridge.Out→Evt and a script speaks
+   the full JSON protocol, a peer of the browser, no diminished API.
+   ScriptHost=1 marks a class as a language for runtime discovery; a
+   mandatory runaway guard (QuickJS interrupt budget) keeps a script
+   from freezing the single-threaded fabric (Lua's guard is still TODO).
+   The ScriptBox shell (`objects/scriptbox`) is the script WIDGET —
+   a Language dropdown (discovered hosts), a Source box and an Output
+   box (PROP_TEXTAREA, `objects/textarea`), Run=Activate; it contains
+   and drives an inner host, swapping language by CreateObject+Connect
+   (Lua works as an inner language with ZERO changes to script.c). Next:
+   formalize the verb table (7.1) so every host binds ONE language-
+   neutral surface, and Python via an out-of-process Exec object rather
+   than embedding its weight.*
 3. **Script-defined classes**: scripts register real classes on the
    palette — indistinguishable from C classes, same as composites
    (Phase 5) and federated tools (Phase 6). Third form of the same
