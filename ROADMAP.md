@@ -379,6 +379,24 @@ shouldn't have been recreated in the first place.)
    is ever exposed as its own action, is a different, more destructive
    operation and should look different in the UI, not share Delete's
    button.
+7. **Dynamic per-control styling: the bridge translates properties
+   into CSS.** A control's look is engine state, not stylesheet code:
+   an object (or an alias — presentation is the alias's own) declares
+   its appearance as ordinary properties, and the BRIDGE dynamically
+   generates each control's custom CSS by translating those properties
+   — the client applies what it's handed and decides nothing (the same
+   law as engine-stamped `Widget`). The Rows/Cols annotations on
+   ScriptBox's published Source/Output entries (July 2026) are the
+   seed of this, currently translated client-side; the general
+   mechanism moves that translation into the bridge and opens it to
+   every styling fact — size, color, font, geometry, background
+   image. Because properties are nodes, any control can carry any
+   styling property without new record types, a styling write restyles
+   the control live through the ordinary property-changed fan-out, and
+   skins ride flows: save/clone/alias a panel and its looks travel
+   with it, because they were never anywhere but on the objects. The
+   hand-maintained per-widget stylesheet shrinks to a base theme;
+   custom looks stop being client code entirely.
 
 ### Worked example: wiring a slider to a VU meter, live
 
