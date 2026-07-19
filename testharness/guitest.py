@@ -800,6 +800,76 @@ def test_gesture_checkbox_counts(t, r):
              "Textbox shows: %s" % val, val == "3")
 
 
+def test_markdown_renders(t, r):
+    """The Markdown widget RENDERS its text (roadmap Phase 2.7):
+    headings, emphasis, code and lists become real elements, not raw
+    characters - the display half of the coming Help system, and a
+    general rich-text panel control. Engine-side it is a plain display
+    sink; this proves the presentation (and that content is escaped -
+    a '<' in flow data must not become markup)."""
+    view = make_test_view(t, 'MarkdownTest')
+    md = view + '/Doc'
+    t.js("send({cmd:'create-instance',class:'Markdown',as:'%s',container:'%s',x:'20',y:'20'})" % (md, view))
+    t.wait_js("!!instances['%s']" % md, "markdown widget")
+
+    text = ("# Title\n"
+            "Some **bold** and `code`.\n"
+            "- one\n"
+            "- two\n"
+            "```\n"
+            "raw < block >\n"
+            "```")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (md, json.dumps(text)))
+    time.sleep(0.8)
+
+    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
+               "const el=l[l.length-1].el;"
+               "return {h1:(el.querySelector('h1')||{}).textContent,"
+               "bold:(el.querySelector('strong')||{}).textContent,"
+               "lis:el.querySelectorAll('li').length,"
+               "pre:((el.querySelector('pre code')||{}).textContent||'').trim(),"
+               "leaked:el.textContent.includes('**')};})()" % md)
+    r.expect("markdown: text renders as structure, safely",
+             "h1 'Title', bold 'bold', two list items, the fenced block verbatim "
+             "(angle brackets escaped, not parsed), no raw ** anywhere",
+             "%s" % got,
+             got and got["h1"] == "Title" and got["bold"] == "bold"
+             and got["lis"] == 2 and got["pre"] == "raw < block >" and not got["leaked"])
+
+
+def test_html_renders_sandboxed(t, r):
+    """The HTML widget renders real markup - and NEVER executes it
+    (roadmap Phase 2.7): the value lands in a sandboxed frame, so a
+    flow can push tables and layout at a panel but a <script> riding
+    along is inert. Both halves asserted: the table renders, the
+    script's side effect does not happen."""
+    view = make_test_view(t, 'HtmlTest')
+    hv = view + '/Page'
+    t.js("send({cmd:'create-instance',class:'HTML',as:'%s',container:'%s',x:'20',y:'20'})" % (hv, view))
+    t.wait_js("!!instances['%s']" % hv, "html widget")
+
+    payload = ("<h2 id=\"hdr\">Report</h2>"
+               "<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table>"
+               "<script>document.getElementById('hdr').textContent='PWNED';window.__ran=1;</script>")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (hv, json.dumps(payload)))
+    time.sleep(1.2)  # srcdoc load is asynchronous
+
+    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
+               "const f=l[l.length-1].el;"
+               "if(f.tagName!=='IFRAME')return {tag:f.tagName};"
+               "const d=f.contentDocument;if(!d)return 'no doc';"
+               "return {tag:f.tagName,sandbox:f.getAttribute('sandbox'),"
+               "hdr:(d.querySelector('h2')||{}).textContent,"
+               "cells:d.querySelectorAll('td').length,"
+               "ran:!!(f.contentWindow&&f.contentWindow.__ran)};})()" % hv)
+    r.expect("html: markup renders, script does not run",
+             "an IFRAME sandboxed without allow-scripts shows h2 'Report' and 4 table "
+             "cells; the embedded script neither rewrote the h2 nor set its flag",
+             "%s" % got,
+             got and got.get("tag") == "IFRAME" and got.get("sandbox") == "allow-same-origin"
+             and got.get("hdr") == "Report" and got.get("cells") == 4 and not got.get("ran"))
+
+
 def test_connect_wires(t, r):
     """Presentation of connections (raw twin: connectiontest.py). The
     gesture sends ONE connect verb and draws nothing itself - the wire
@@ -924,6 +994,8 @@ def main():
     guarded("textbox-any-size", lambda: test_textbox_any_size(t, r))
     guarded("options-on-panel-control", lambda: test_options_on_panel_control(t, r))
     guarded("gesture-checkbox-count", lambda: test_gesture_checkbox_counts(t, r))
+    guarded("markdown-renders", lambda: test_markdown_renders(t, r))
+    guarded("html-sandboxed", lambda: test_html_renders_sandboxed(t, r))
 
     # last step, every time, pass or fail: put the shared session back in
     # Operate mode so whoever opens a browser next gets a usable canvas

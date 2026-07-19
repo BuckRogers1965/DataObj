@@ -227,6 +227,45 @@ per-property or per-object opt-in.
    longer-run version is Phase 6/7's federation idea turned inward — a
    widget class eventually ships (or points to) its own rendering, the
    same way it will eventually ship its own script-defined behavior.
+7. **Every object ships its README, and Help renders it.** Each
+   object module directory carries a README.md — what the object is,
+   its ports and properties, how to wire it — loaded at class
+   registration onto the class node (documentation is engine state
+   riding the class, exactly like UUID/Company provenance, and it
+   travels wherever the class does). Alongside it, a **Markdown
+   presentation control**: one more widget class that renders markdown
+   handed to its In/Value — useful for any rich text in a panel, not
+   just help. Then a **Help button on every widget panel** is just
+   composition: the button opens a View holding a Markdown control fed
+   the class's README — no dedicated help subsystem, no client-side
+   help text, same one-panel mechanism as everything else.
+   **Dual use: the same help feeds tooltips.** The per-property lines
+   of that documentation land as annotations on the published
+   Interface entries (the same annotation mechanism Rows/Cols already
+   uses), and every panel row and control renders its entry's line as
+   its tooltip — hover any control and its one-line doc is right
+   there, click Help and the full README opens. One source on the
+   class, two presentations; the tooltip text is never written a
+   second time, and a class whose README documents its properties has
+   tooltips everywhere its controls appear — rows, atoms, aliases —
+   with zero extra authoring.
+8. **A Widget base class — subclassing starts where the sameness
+   is.** Every widget panel now carries the same growing set of things
+   — Enable, the State LED, Activate, position/PanelX/PanelY, and now
+   Help — and each class re-declares them by hand in its own
+   ClassStart/InstanceStart. That repetition is the signal to mechanize
+   object subclassing (the `DefaultMessage(superclass, …)` chaining
+   TCPObject models, long promised): a Widget base class publishes and
+   handles the common face once, individual widget classes subclass it
+   and add only what makes them themselves, and every widget panel
+   gets the common controls in consistent places for free — consistent
+   because they are literally the same inherited declarations, not
+   because each author copied them carefully. Function pointers live
+   in node properties, so a subclass is a class node whose unhandled
+   messages and unpublished properties resolve through its parent
+   class — and dependency-ordered class loading (Phase 8's note, and
+   main.c's original two-phase intent) is what lets a subclass load
+   after the base it names.
 
 ## Phase 3 — The wire: protocol and server
 

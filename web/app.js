@@ -37,15 +37,18 @@ const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
 
 const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_SLIDER = 5,
       PROP_VUMETER = 6, PROP_TEXTOUT = 7, PROP_KNOB = 8, PROP_LABEL = 9, PROP_NULL = 10, PROP_MENU = 11,
-      PROP_ICON = 12;   /* a doorway: renders as the target's icon, opens its one panel */
+      PROP_ICON = 12,   /* a doorway: renders as the target's icon, opens its one panel */
+      PROP_MARKDOWN = 13,  /* rendered markdown - the Markdown widget's display */
+      PROP_HTML = 14;      /* rendered HTML, sandboxed - the HTML widget's display */
 
 /* palette classes that ARE widgets - the base case of the recursion */
-const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton', 'Dropdown']);
+const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton', 'Dropdown', 'Markdown', 'HTML']);
 
 /* which widget class backs which property widget-type, split by whether  */
 /* the widget is something the user edits or something that only displays */
 const INPUT_WIDGET_CLASS   = { [PROP_TEXTBOX]: 'Textbox', [PROP_CHECKBOX]: 'Checkbox', [PROP_SLIDER]: 'Slider', [PROP_KNOB]: 'Knob' };
-const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PROP_VUMETER]: 'VUMeter', [PROP_LABEL]: 'Label' };
+const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PROP_VUMETER]: 'VUMeter', [PROP_LABEL]: 'Label', [PROP_MARKDOWN]: 'Markdown', [PROP_HTML]: 'HTML' };
+const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
 
 let ws = null;
 let classes = {};          // className -> [{Name,Direction,Widget,Default}, ...]
@@ -356,6 +359,16 @@ function parseInterface(interfaceNode) {
 /* as - used both for a widget instance's own Value (base case) and for  */
 /* the sub-widget instances wrapping some other object's property        */
 function buildValueControl(widgetClass, defaultValue, onCommit) {
+  /* a DISPLAY class renders as its readout wherever it appears - the      */
+  /* stamped Widget decides, whatever surface asked (atom, member row,      */
+  /* dissection table): a Markdown property IS rendered markdown, an LED    */
+  /* property IS a dot. Writing into one is composition's job (wire a       */
+  /* source at it), not a raw text slot's.                                   */
+  if (READOUT_WIDGET_CLASSES.has(widgetClass)) {
+    const ro = makeReadoutEl(widgetClass);
+    if (defaultValue) updateReadout(ro, widgetClass, defaultValue);
+    return ro;
+  }
   let el;
   switch (widgetClass) {
     case 'Checkbox':
@@ -399,9 +412,68 @@ function buildValueControl(widgetClass, defaultValue, onCommit) {
 }
 
 function makeReadoutEl(widgetClass) {
+  if (widgetClass === 'Markdown') {
+    const el = document.createElement('div');
+    el.className = 'markdown-view';
+    return el;
+  }
+  if (widgetClass === 'HTML') {
+    /* a SANDBOXED frame: display is display, never execution. The         */
+    /* sandbox blocks all script (browser-enforced, not a sanitizer to     */
+    /* maintain); allow-same-origin alone is safe without allow-scripts    */
+    /* and is what lets this page (and the harness) read the rendering.    */
+    const el = document.createElement('iframe');
+    el.className = 'html-view';
+    el.setAttribute('sandbox', 'allow-same-origin');
+    return el;
+  }
   const el = document.createElement('span');
   el.className = widgetClass === 'LED' ? 'node-led state-0' : 'widget-readout';
   return el;
+}
+
+/* the frame's own base look, injected ahead of the value - the panel      */
+/* theme carried inside the sandbox, since outside styles can't reach in   */
+const HTML_VIEW_BASE = '<style>body{margin:6px 10px;background:#1a1b20;' +
+  'color:#cfd4dc;font:12px/1.5 system-ui,sans-serif}</style>';
+
+/* a small, dependency-free markdown renderer (the framework's own "no      */
+/* external dependencies" discipline): headings, bold/italic, inline code,  */
+/* fenced code blocks, bullet lists, paragraphs. Input is escaped before    */
+/* any markup is applied, so arbitrary flow data can be displayed safely.   */
+function renderMarkdown(md) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  let html = '', inCode = false, inList = false;
+  for (const line of String(md || '').split('\n')) {
+    if (line.trim().startsWith('```')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += inCode ? '</code></pre>' : '<pre><code>';
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { html += esc(line) + '\n'; continue; }
+    const li = line.match(/^\s*[-*]\s+(.*)/);
+    if (inList && !li) { html += '</ul>'; inList = false; }
+    if (li) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += '<li>' + inline(li[1]) + '</li>';
+      continue;
+    }
+    /* a heading is hashes then the text: the space after them is optional  */
+    /* ("#Title" is a heading), leading indentation is tolerated (a pasted   */
+    /* block carries the indent it was copied from), and all six levels      */
+    /* exist. Nothing here requires column zero or a perfectly typed space.  */
+    const h = line.match(/^\s*(#{1,6})\s*(.*)/);
+    if (h) { html += '<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'; continue; }
+    if (line.trim()) html += '<p>' + inline(line) + '</p>';
+  }
+  if (inList) html += '</ul>';
+  if (inCode) html += '</code></pre>';
+  return html;
 }
 
 /* a MenuButton, wherever it appears - the topbar's File/Mode chrome and a  */
@@ -612,6 +684,7 @@ function wireSlot(alias, propName, controlEl) {
 }
 
 function updateLiveControl(entry, value) {
+  if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
   if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
   if (entry.widgetClass === 'MenuItems') {
     /* rebuild the <option>s, preserving the current selection */
@@ -1256,6 +1329,8 @@ function registerCard(alias, className, props, pos, isCopy, container) {
 
 function updateReadout(el, widgetClass, value) {
   if (widgetClass === 'LED') el.className = 'node-led state-' + value;
+  else if (widgetClass === 'Markdown') el.innerHTML = renderMarkdown(value);
+  else if (widgetClass === 'HTML') el.srcdoc = HTML_VIEW_BASE + (value || '');
   else el.textContent = value;
 }
 
