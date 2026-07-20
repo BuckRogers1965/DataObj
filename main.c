@@ -593,6 +593,17 @@ int main ( int argc, char* argv[] ){
 
 	NodeObj Main = NewNode(INTEGER);
 
+	/* Main is a real place, not a null. The app's plumbing - the TCP,
+	   Router, Http, WebSocket and Bridge the web flow is made of - is
+	   created IN it, which is why it needs a name and a path like
+	   anything else. It is not a view: nothing on a canvas lives here,
+	   which is exactly the point - plumbing is somewhere, just not
+	   somewhere anyone looks at. */
+	SetName(Main, "Main");
+	SetPropStr(Main, "Name", "Main");
+	SetPropStr(Main, "Container", "");
+	RegisterPath("/Main", Main);
+
 	SetPropInt(Main, "State", Starting);
 
 	TimeUpdate();

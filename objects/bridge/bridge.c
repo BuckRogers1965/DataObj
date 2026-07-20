@@ -423,7 +423,26 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	inst = CreateObject(local->container, classname);
+	{
+		/* create it where the command said, not in "nowhere" - the old
+		   local->container was NULL and documented as decorative.
+		   NO container means the ROOT VIEW, and it means that the whole
+		   way down: the instance is placed there and its creation event
+		   is scoped there. Placing it in "" instead left the event
+		   addressed to a container nobody is viewing, so the client that
+		   asked for it never heard back. */
+		NodeObj home;
+
+		if (!container || !container[0])
+			container = "/Root";
+
+		home = ResolvePath(container);
+		if (!home) {
+			Bridge_Error(instance, "create-instance", "unknown container");
+			return;
+		}
+		inst = CreateObject(home, classname);
+	}
 	if (!inst)
 	{
 		Bridge_Error(instance, "create-instance", "class not found");
@@ -490,7 +509,14 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	inst = CreateObject(local->container, "Alias");
+	{
+		NodeObj home = (container && container[0]) ? ResolvePath(container) : ResolvePath("/Root");
+		if (!home) {
+			Bridge_Error(instance, "create-alias", "unknown container");
+			return;
+		}
+		inst = CreateObject(home, "Alias");
+	}
 	if (!inst)
 	{
 		Bridge_Error(instance, "create-alias", "Alias class not found");
@@ -644,7 +670,8 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 	existing = GetPropStr(inst, "_Internals");
 	if (!(existing && existing[0] && ResolvePath(existing)))
 	{
-		view = CreateObject(local->container, "View");
+		/* the panel belongs to the thing it dissects - created IN it */
+		view = CreateObject(inst, "View");
 		if (!view)
 		{
 			Bridge_Error(instance, "internals", "View class not loaded");
@@ -654,20 +681,32 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		/* named after the thing it belongs to */
 		slash = strrchr(curAlias, '/');
 		snprintf(base, sizeof(base), "%sPanel", slash ? slash + 1 : curAlias);
-		Bridge_FreshAlias(local, "/Root", base, viewAlias, sizeof(viewAlias));
+		Bridge_FreshAlias(local, curAlias, base, viewAlias, sizeof(viewAlias));
 
 		/* a plumbing view: no icon of its own on anyone's canvas - the   */
 		/* OBJECT's icon is its presence; this is the panel behind it     */
+		{
+			char dbg[400];
+			snprintf(dbg, sizeof(dbg), "INTERNALS: panel view '%s' created in '%s'",
+					 viewAlias, curAlias);
+			DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+		}
 		SetPropInt(view, "_Hidden", 1);
 		SetPropStr(view, "_InternalsOf", curAlias);
-		SetOrDeliverProp(view, "Container", "");
 		SetPropInt(view, "PanelX", 320);
 		SetPropInt(view, "PanelY", 120);
 		SetPropInt(view, "W", 300);
 
 		RegisterPath(viewAlias, view);
 		Bridge_SetNameFromAlias(view, viewAlias);
-		Bridge_InstanceEvent(instance, local, viewAlias, "View", GetParent(view), "Root", "", 1, 0);
+		/* Tell the ASKER the panel exists, and say where it really lives.
+		   It is nested in the object now, so nobody stumbles across it in
+		   a root listing any more - without this the client gets the panel's
+		   members with a container it has never heard of and drops all of
+		   them on the canvas. connId 0 was "whoever happens to be viewing
+		   its container", and nobody is viewing the inside of an object. */
+		Bridge_InstanceEvent(instance, local, viewAlias, "View", GetParent(view),
+							 curAlias, curAlias, 1, local->replyConn);
 
 		/* one Alias member per published property, every direction, no   */
 		/* exceptions - each one a live link into the object itself. No   */
@@ -681,7 +720,8 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			if (!name || !name[0])
 				continue;
 
-			member = CreateObject(local->container, "Alias");
+			/* and each control is created IN the panel it appears on */
+			member = CreateObject(view, "Alias");
 			if (!member)
 				continue;
 			if (!LinkPropertyAs(member, "Value", inst, name))
@@ -701,6 +741,11 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			SetPropStr(member, "Direction", GetPropStr(prop, "Direction"));
 
 			SetPropStr(member, "Container", viewAlias);
+			{
+				char dbg[400];
+				snprintf(dbg, sizeof(dbg), "INTERNALS:   member for '%s' -> container '%s'", name, viewAlias);
+				DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+			}
 			SetPropInt(member, "X", 14);
 			SetPropInt(member, "Y", 12 + row * 44);
 			row++;
@@ -715,6 +760,18 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 
 		SetPropStr(inst, "_Internals", viewAlias);
 		existing = GetPropStr(inst, "_Internals");
+	}
+
+	/* ALWAYS tell the asker the panel VIEW exists, not just the time it
+	   gets built. It is nested inside the object now, so nobody finds it
+	   in a root listing - and a client that has never been told about the
+	   view cannot place a single one of its members. That is what left an
+	   already-built panel completely empty for every later window. */
+	{
+		NodeObj pv = ResolvePath(existing);
+		if (pv)
+			Bridge_InstanceEvent(instance, local, existing, "View", GetParent(pv),
+								 curAlias, curAlias, 1, local->replyConn);
 	}
 
 	/* tell just the asker which view is this thing's panel */
@@ -1947,32 +2004,22 @@ void Bridge_Login(NodeObj instance, InstanceData *local, NodeObj command)
  */
 void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command)
 {
-	NodeObj entry, inst, class, chunk;
+	NodeObj inst, class, chunk;
 	char *container, *cont;
 
 	container = command ? GetPropStr(command, "container") : NULL;
-	if (!container)
-		container = "";
+	if (!container || !container[0])
+		container = "/Root";	/* the canvas IS the root view */
 
 	/* asking to list a container IS looking at it - from here on this   */
 	/* connection receives live events about it, and only about places    */
 	/* it has looked                                                       */
 	Bridge_MarkViewing(local, local->replyConn, container);
 
-	if (!container[0])
-	{
-		entry = GetNextProp(GetChrome());
-		while (entry)
-		{
-			inst = (NodeObj) GetValueLong(entry);
-			class = inst ? GetParent(inst) : NULL;
-
-			if (inst && class)
-				Bridge_InstanceEvent(instance, local, GetNameStr(entry), GetNameStr(class), class, "Chrome", GetPropStr(inst, "Container"), 0, local->replyConn);
-
-			entry = GetNextSibling(entry);
-		}
-	}
+	/* NO CATEGORIES. There is no chrome, no palette, no root, no special
+	   anything - just what is in the view being asked about. The menus and
+	   the palette are instances in the root view, so the ordinary walk
+	   below finds them exactly like it finds a slider a user dragged out. */
 
 	{
 		NodeObj lib;

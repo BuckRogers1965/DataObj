@@ -163,6 +163,11 @@ SB_RC=$?
 python3 testharness/widgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
 WIDGET_RC=$?
 
+# the TCP instrument panel (ported from VNOS): a front end driving a
+# contained TCP engine, proven over a real socket
+python3 testharness/tcpporttest.py --host 127.0.0.1 --port 8091 $VERBOSE
+TCPP_RC=$?
+
 # and the browser, proving presentation: gestures emit the right verb,
 # events paint the right pixels
 python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
@@ -177,4 +182,5 @@ echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localho
 [ "$JS_RC" != 0 ] && exit "$JS_RC"
 [ "$SB_RC" != 0 ] && exit "$SB_RC"
 [ "$WIDGET_RC" != 0 ] && exit "$WIDGET_RC"
+[ "$TCPP_RC" != 0 ] && exit "$TCPP_RC"
 exit $RC

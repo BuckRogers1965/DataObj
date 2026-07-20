@@ -21,8 +21,12 @@ $(GOAL): $(OBJECTS)
 clean:
 	rm $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
+# makedepend understands neither -iquote nor gcc's own header dir,
+# so depend uses a plain -I and is told where stddef.h lives
+DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+
 depend:
-	makedepend $(INCLUDES) $(SOURCE) > /dev/null 2>&1
+	makedepend $(DEPINC) $(SOURCE)
 # DO NOT DELETE
 
 bridge.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
@@ -30,6 +34,8 @@ bridge.o: /usr/include/features.h /usr/include/features-time64.h
 bridge.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 bridge.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 bridge.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+bridge.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+bridge.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 bridge.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 bridge.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 bridge.o: /usr/include/bits/types/__mbstate_t.h
@@ -58,5 +64,12 @@ bridge.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 bridge.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 bridge.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 bridge.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
+bridge.o: /usr/include/dirent.h /usr/include/bits/dirent.h
+bridge.o: /usr/include/bits/posix1_lim.h /usr/include/bits/local_lim.h
+bridge.o: /usr/include/linux/limits.h
+bridge.o: /usr/include/bits/pthread_stack_min-dynamic.h
+bridge.o: /usr/include/bits/pthread_stack_min.h
+bridge.o: /usr/include/bits/dirent_ext.h /usr/include/sys/stat.h
+bridge.o: /usr/include/bits/stat.h /usr/include/bits/struct_stat.h
 bridge.o: ../../node.h ../../data.h ../../object.h ../../sched.h
 bridge.o: ../../callback.h ../../DebugPrint.h

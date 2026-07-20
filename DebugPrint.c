@@ -45,6 +45,9 @@ GetTypeStr(int type){
 	case WIRE:
 		return "Wire";
 
+	case PLACE:
+		return "Place";
+
 	default:
 		return "Needs Finished";
 	}
@@ -89,6 +92,11 @@ TypeThreshold(int type){
 
 	/* wire tracing: every Connect/Disconnect/scrub, on at -v 3 */
 	case WIRE:
+		return 3;
+
+	/* placement tracing: every instance made, and WHERE it landed - the
+	   question "why is that in the root?" answered directly. -v 3 */
+	case PLACE:
 		return 3;
 
 	default:

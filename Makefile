@@ -14,7 +14,12 @@ GOAL=framework
 
 # Compiler options
 # OPT=-w -falign-loops -falign-jumps=2 -falign-functions=2 -fstrength-reduce -fomit-frame-pointer -O6 -Idyn 
-OPT=-O3 -march=native -flto -Idyn -Wall -Wextra
+# -flto=auto, not plain -flto: with more than one LTRANS job gcc warns
+# ("using serial compilation of N LTRANS jobs") unless it is told how to
+# parallelize. =auto picks a sensible job count and links the same code.
+# The tree builds warning-free and run.sh enforces that, so a build-time
+# warning is a failure like any other.
+OPT=-O3 -march=native -flto=auto -Idyn -Wall -Wextra
 
 # Rule to compile .c files to .o files
 %.o : %.c
@@ -22,20 +27,26 @@ OPT=-O3 -march=native -flto -Idyn -Wall -Wextra
 
 # Build all targets
 all: $(OBJECTS) libframework.so $(GOAL) subdirs
+	@echo "build complete: $(GOAL) + $(words $(wildcard objects/*/*.object)) objects"
 
 # Rule to handle subdirectories
+# NOT -s: silent mode hid every compile, so a real rebuild and a no-op
+# looked exactly the same ("Making object: <dir>" printed either way) and
+# the only way to trust a build was make clean. Now the work shows and
+# only the work shows - a quiet run genuinely did nothing.
 subdirs:
 	@for dir in $(SUBDIRS); do \
 		if [ -f $$dir/Makefile ]; then \
-			echo "Making object: $$dir"; \
-			$(MAKE) -s -C $$dir; \
-		else \
-			echo "No Makefile in $$dir. Skipping..."; \
+			$(MAKE) --no-print-directory -C $$dir 2>&1 \
+				| grep -v "Nothing to be done" || true; \
 		fi \
 	done
 
 # Goal executable build rule
-$(GOAL): $(OBJECTS)
+# It compiles main.c and links libframework.so, so it depends on BOTH -
+# listing only $(OBJECTS) meant touching main.c rebuilt nothing (make saw
+# every prerequisite up to date) and a library change never relinked.
+$(GOAL): main.c libframework.so
 	$(CC) $(OPT) -L. main.c -o $(GOAL) -lframework
 
 # Shared library build rule
@@ -55,8 +66,12 @@ clean:
 	done
 
 # Handle dependencies
+# makedepend does not know where gcc keeps its OWN headers (stddef.h,
+# stdarg.h), so it warns on every file unless told - this is that.
+DEPINC=-Idyn -I$(shell $(CC) -print-file-name=include)
+
 depend:
-	makedepend $(SOURCE) main.c  
+	makedepend $(DEPINC) $(SOURCE) main.c  
 	@for dir in $(SUBDIRS); do \
 		if [ -f $$dir/Makefile ]; then \
 			echo "Depend for object: $$dir"; \
@@ -75,6 +90,7 @@ data.o: /usr/include/features.h /usr/include/features-time64.h
 data.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 data.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 data.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+data.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
 data.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
 data.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
 data.o: /usr/include/sys/types.h /usr/include/bits/types.h
@@ -97,13 +113,15 @@ data.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 data.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 data.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 data.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-data.o: /usr/include/stdio.h /usr/include/bits/types/__fpos_t.h
+data.o: /usr/include/stdio.h
+data.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
+data.o: /usr/include/bits/types/__fpos_t.h
 data.o: /usr/include/bits/types/__mbstate_t.h
 data.o: /usr/include/bits/types/__fpos64_t.h /usr/include/bits/types/__FILE.h
 data.o: /usr/include/bits/types/FILE.h /usr/include/bits/types/struct_FILE.h
 data.o: /usr/include/bits/stdio_lim.h /usr/include/ctype.h
-data.o: /usr/include/stdint.h /usr/include/bits/wchar.h
-data.o: /usr/include/bits/stdint-uintn.h
+data.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint.h
+data.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint-gcc.h
 deamon.o: /usr/include/arpa/inet.h /usr/include/features.h
 deamon.o: /usr/include/features-time64.h /usr/include/bits/wordsize.h
 deamon.o: /usr/include/bits/timesize.h /usr/include/stdc-predef.h
@@ -112,6 +130,7 @@ deamon.o: /usr/include/gnu/stubs.h /usr/include/netinet/in.h
 deamon.o: /usr/include/bits/stdint-uintn.h /usr/include/bits/types.h
 deamon.o: /usr/include/bits/typesizes.h /usr/include/bits/time64.h
 deamon.o: /usr/include/sys/socket.h /usr/include/bits/types/struct_iovec.h
+deamon.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
 deamon.o: /usr/include/bits/socket.h /usr/include/sys/types.h
 deamon.o: /usr/include/bits/types/clock_t.h
 deamon.o: /usr/include/bits/types/clockid_t.h
@@ -158,6 +177,7 @@ deamon.o: /usr/include/bits/sigstksz.h /usr/include/bits/ss_flags.h
 deamon.o: /usr/include/bits/types/struct_sigstack.h
 deamon.o: /usr/include/bits/sigthread.h /usr/include/bits/signal_ext.h
 deamon.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
+deamon.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 deamon.o: /usr/include/bits/types/__fpos_t.h
 deamon.o: /usr/include/bits/types/__mbstate_t.h
 deamon.o: /usr/include/bits/types/__fpos64_t.h
@@ -176,9 +196,11 @@ deamon.o: /usr/include/bits/ioctls.h /usr/include/asm/ioctls.h
 deamon.o: /usr/include/asm-generic/ioctls.h /usr/include/linux/ioctl.h
 deamon.o: /usr/include/asm/ioctl.h /usr/include/asm-generic/ioctl.h
 deamon.o: /usr/include/bits/ioctl-types.h /usr/include/sys/ttydefaults.h
-deamon.o: /usr/include/sys/param.h /usr/include/limits.h
-deamon.o: /usr/include/bits/posix1_lim.h /usr/include/bits/local_lim.h
-deamon.o: /usr/include/linux/limits.h
+deamon.o: /usr/include/sys/param.h
+deamon.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/limits.h
+deamon.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/syslimits.h
+deamon.o: /usr/include/limits.h /usr/include/bits/posix1_lim.h
+deamon.o: /usr/include/bits/local_lim.h /usr/include/linux/limits.h
 deamon.o: /usr/include/bits/pthread_stack_min-dynamic.h
 deamon.o: /usr/include/bits/pthread_stack_min.h
 deamon.o: /usr/include/bits/posix2_lim.h /usr/include/bits/param.h
@@ -195,6 +217,8 @@ DebugPrint.o: /usr/include/features.h /usr/include/features-time64.h
 DebugPrint.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 DebugPrint.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 DebugPrint.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+DebugPrint.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+DebugPrint.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 DebugPrint.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 DebugPrint.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 DebugPrint.o: /usr/include/bits/types/__mbstate_t.h
@@ -239,8 +263,10 @@ dirscan.o: /usr/include/bits/dirent.h /usr/include/bits/posix1_lim.h
 dirscan.o: /usr/include/bits/local_lim.h /usr/include/linux/limits.h
 dirscan.o: /usr/include/bits/pthread_stack_min-dynamic.h
 dirscan.o: /usr/include/bits/pthread_stack_min.h
+dirscan.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
 dirscan.o: /usr/include/bits/dirent_ext.h /usr/include/stdio.h
 dirscan.o: /usr/include/bits/libc-header-start.h
+dirscan.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 dirscan.o: /usr/include/bits/types/__fpos_t.h
 dirscan.o: /usr/include/bits/types/__mbstate_t.h
 dirscan.o: /usr/include/bits/types/__fpos64_t.h
@@ -279,6 +305,8 @@ libload.o: /usr/include/features.h /usr/include/features-time64.h
 libload.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 libload.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 libload.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+libload.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+libload.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 libload.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 libload.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 libload.o: /usr/include/bits/types/__mbstate_t.h
@@ -325,6 +353,7 @@ namespace.o: /usr/include/features.h /usr/include/features-time64.h
 namespace.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 namespace.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 namespace.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+namespace.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
 namespace.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
 namespace.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
 namespace.o: /usr/include/sys/types.h /usr/include/bits/types.h
@@ -348,6 +377,7 @@ namespace.o: /usr/include/bits/atomic_wide_counter.h
 namespace.o: /usr/include/bits/struct_mutex.h
 namespace.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 namespace.o: /usr/include/bits/stdlib-float.h /usr/include/stdio.h
+namespace.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 namespace.o: /usr/include/bits/types/__fpos_t.h
 namespace.o: /usr/include/bits/types/__mbstate_t.h
 namespace.o: /usr/include/bits/types/__fpos64_t.h
@@ -363,6 +393,7 @@ node.o: /usr/include/features.h /usr/include/features-time64.h
 node.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 node.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 node.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+node.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
 node.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
 node.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
 node.o: /usr/include/sys/types.h /usr/include/bits/types.h
@@ -383,7 +414,9 @@ node.o: /usr/include/bits/pthreadtypes-arch.h
 node.o: /usr/include/bits/atomic_wide_counter.h
 node.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 node.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
-node.o: /usr/include/stdio.h /usr/include/bits/types/__fpos_t.h
+node.o: /usr/include/stdio.h
+node.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
+node.o: /usr/include/bits/types/__fpos_t.h
 node.o: /usr/include/bits/types/__mbstate_t.h
 node.o: /usr/include/bits/types/__fpos64_t.h /usr/include/bits/types/__FILE.h
 node.o: /usr/include/bits/types/FILE.h /usr/include/bits/types/struct_FILE.h
@@ -396,6 +429,8 @@ object.o: /usr/include/features.h /usr/include/features-time64.h
 object.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 object.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 object.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+object.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+object.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 object.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 object.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 object.o: /usr/include/bits/types/__mbstate_t.h
@@ -424,12 +459,14 @@ object.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 object.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 object.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 object.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h node.h
-object.o: data.h object.h DebugPrint.h callback.h
+object.o: data.h object.h DebugPrint.h callback.h sched.h namespace.h
 sched.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
 sched.o: /usr/include/features.h /usr/include/features-time64.h
 sched.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 sched.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 sched.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+sched.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+sched.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 sched.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 sched.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 sched.o: /usr/include/bits/types/__mbstate_t.h
@@ -468,10 +505,12 @@ timer.o: /usr/include/time.h /usr/include/features.h
 timer.o: /usr/include/features-time64.h /usr/include/bits/wordsize.h
 timer.o: /usr/include/bits/timesize.h /usr/include/stdc-predef.h
 timer.o: /usr/include/sys/cdefs.h /usr/include/bits/long-double.h
-timer.o: /usr/include/gnu/stubs.h /usr/include/bits/time.h
-timer.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
-timer.o: /usr/include/bits/time64.h /usr/include/bits/types/clock_t.h
-timer.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/struct_tm.h
+timer.o: /usr/include/gnu/stubs.h
+timer.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+timer.o: /usr/include/bits/time.h /usr/include/bits/types.h
+timer.o: /usr/include/bits/typesizes.h /usr/include/bits/time64.h
+timer.o: /usr/include/bits/types/clock_t.h /usr/include/bits/types/time_t.h
+timer.o: /usr/include/bits/types/struct_tm.h
 timer.o: /usr/include/bits/types/struct_timespec.h /usr/include/bits/endian.h
 timer.o: /usr/include/bits/endianness.h /usr/include/bits/types/clockid_t.h
 timer.o: /usr/include/bits/types/timer_t.h
@@ -482,6 +521,7 @@ timer.o: /usr/include/bits/types/struct_timeval.h /usr/include/sys/select.h
 timer.o: /usr/include/bits/select.h /usr/include/bits/types/sigset_t.h
 timer.o: /usr/include/bits/types/__sigset_t.h /usr/include/stdio.h
 timer.o: /usr/include/bits/libc-header-start.h
+timer.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 timer.o: /usr/include/bits/types/__fpos_t.h
 timer.o: /usr/include/bits/types/__mbstate_t.h
 timer.o: /usr/include/bits/types/__fpos64_t.h
@@ -498,12 +538,14 @@ timer.o: /usr/include/bits/pthreadtypes-arch.h
 timer.o: /usr/include/bits/atomic_wide_counter.h
 timer.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 timer.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
-timer.o: /usr/include/string.h /usr/include/strings.h
+timer.o: /usr/include/string.h /usr/include/strings.h timer.h
 dyn/buff.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
 dyn/buff.o: /usr/include/features.h /usr/include/features-time64.h
 dyn/buff.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 dyn/buff.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 dyn/buff.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+dyn/buff.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+dyn/buff.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 dyn/buff.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 dyn/buff.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 dyn/buff.o: /usr/include/bits/types/__mbstate_t.h
@@ -539,6 +581,8 @@ dyn/queue.o: /usr/include/features.h /usr/include/features-time64.h
 dyn/queue.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 dyn/queue.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 dyn/queue.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+dyn/queue.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+dyn/queue.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 dyn/queue.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 dyn/queue.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 dyn/queue.o: /usr/include/bits/types/__mbstate_t.h
@@ -575,9 +619,11 @@ dyn/bufftest.o: /usr/include/bits/libc-header-start.h /usr/include/features.h
 dyn/bufftest.o: /usr/include/features-time64.h /usr/include/bits/wordsize.h
 dyn/bufftest.o: /usr/include/bits/timesize.h /usr/include/stdc-predef.h
 dyn/bufftest.o: /usr/include/sys/cdefs.h /usr/include/bits/long-double.h
-dyn/bufftest.o: /usr/include/gnu/stubs.h /usr/include/bits/types.h
-dyn/bufftest.o: /usr/include/bits/typesizes.h /usr/include/bits/time64.h
-dyn/bufftest.o: /usr/include/bits/types/__fpos_t.h
+dyn/bufftest.o: /usr/include/gnu/stubs.h
+dyn/bufftest.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+dyn/bufftest.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
+dyn/bufftest.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
+dyn/bufftest.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 dyn/bufftest.o: /usr/include/bits/types/__mbstate_t.h
 dyn/bufftest.o: /usr/include/bits/types/__fpos64_t.h
 dyn/bufftest.o: /usr/include/bits/types/__FILE.h
@@ -612,6 +658,8 @@ main.o: /usr/include/features.h /usr/include/features-time64.h
 main.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 main.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 main.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+main.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+main.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 main.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 main.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 main.o: /usr/include/bits/types/__mbstate_t.h

@@ -4,7 +4,7 @@
 #define Debug_Print_H_
 
 
-enum {PROG_FLOW=0, ERROR, CMDLINEOPTS, REGISTER, OBJMSGHANDLING, CLONE, WIRE};
+enum {PROG_FLOW=0, ERROR, CMDLINEOPTS, REGISTER, OBJMSGHANDLING, CLONE, WIRE, PLACE};
 
 void
 DebugPrint(char * report, char * file, int line, int type);

@@ -58,6 +58,52 @@ NodeObj ResolvePath(char * path)
 /* path that resolves back to the same instance is returned - anything   */
 /* unnamed, engine-internal, or mid-rename simply has no path, the same  */
 /* answer a missing alias-table entry used to give.                       */
+/* A ROOT IS A VIEW. Nothing about it is special: it is an ordinary View
+   instance, made the ordinary way, and everything a session shows lives
+   in it exactly as anything lives in any other view. The one and only
+   difference is that it has no container - it is the top, so there is
+   nothing above it to be in. That is why it is made here rather than
+   with CreateObject, which requires a location.
+
+   There can be as many as you like - eventually one per login. Each
+   anchors its own namespace, and a Bridge is handed the root of the
+   session it serves and walks it like any other view.  */
+NodeObj FindClass(char * classname);	/* defined below */
+
+NodeObj CreateRoot(char * name)
+{
+	NodeObj class, root;
+	msgobj InstanceStart;
+	char path[160];
+
+	if (!name || !name[0])
+		return NULL;
+
+	class = FindClass("View");
+	if (!class) {
+		DebugPrint("CreateRoot needs the View class", __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
+
+	InstanceStart = (msgobj)GetPropLong(class, "InstanceStart");
+	if (!InstanceStart)
+		return NULL;
+
+	InstanceStart(class, msg_initialize, NULL);
+	root = (NodeObj)GetPropLong(class, "LastInstance");
+	if (!root)
+		return NULL;
+
+	SetPropStr(root, "Name", name);
+	SetPropStr(root, "Container", "");	/* the top: nothing above it */
+	SetPropStr(root, "Open", "1");
+
+	snprintf(path, sizeof(path), "/%s", name);
+	RegisterPath(path, root);
+
+	return root;
+}
+
 int PathOfInstance(NodeObj inst, char * out, int outlen)
 {
 	char * name, * cont;
@@ -69,8 +115,14 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 	if (!name || !name[0])
 		return 0;
 
+	/* Container + name, and nothing invented. Only a ROOT has no
+	   container (CreateRoot), and its path is just its own name - every
+	   other instance was created somewhere and says so. */
 	cont = GetPropStr(inst, "Container");
-	snprintf(out, outlen, "%s/%s", (cont && cont[0]) ? cont : "/Root", name);
+	if (cont && cont[0])
+		snprintf(out, outlen, "%s/%s", cont, name);
+	else
+		snprintf(out, outlen, "/%s", name);
 
 	return ResolvePath(out) == inst;
 }
@@ -351,6 +403,10 @@ NodeObj GetPalette(void){
 	return Palette;
 }
 
+static NodeObj RootView = NULL;
+
+NodeObj GetRootView(void){ return RootView; }
+
 NodeObj GetPaletteView(void){
 	return PaletteView;
 }
@@ -400,13 +456,24 @@ void BuildPalette(void){
 	/* anything else - a restart rebuilds it, so nothing here is precious. */
 	/* X/Y position the icon; PanelX/PanelY position its open panel        */
 	/* (independent - the icon never goes away).                            */
-	PaletteView = CreateObject(NULL, "View");
+	/* the root view first - everything below is created IN something */
+	if (!RootView)
+		RootView = CreateRoot("Root");
+
+	PaletteView = CreateObject(RootView, "View");
 	SetPropStr(PaletteView, "Name", "Palette");
+	RegisterPath("/Root/Palette", PaletteView);
 	SetPropStr(PaletteView, "Open", "1");	/* views default closed; the palette starts open */
+	/* clear of the menus, which sit on the top row of the canvas at y=6 -
+	   the palette icon used to land on top of them and swallow every click */
 	SetPropInt(PaletteView, "X", 20);
-	SetPropInt(PaletteView, "Y", 20);
+	SetPropInt(PaletteView, "Y", 60);
 	SetPropInt(PaletteView, "PanelX", 20);
 	SetPropInt(PaletteView, "PanelY", 60);
+	/* the palette is not precious in principle - a restart rebuilds it -
+	   but losing it mid-session costs you every class you can drag out,
+	   so it carries the same ordinary guard the menus do */
+	SetPropStr(PaletteView, "Deletable", "0");
 	SetPropInt(PaletteView, "W", 190);
 	SetPropInt(PaletteView, "H", 220);	/* the inner area scrolls; resize to taste */
 
@@ -429,9 +496,8 @@ void BuildPalette(void){
 		{
 			if (!IsPaletteExcluded(GetNameStr(class)))
 			{
-				inst = CreateObject(NULL, GetNameStr(class));
+				inst = CreateObject(PaletteView, GetNameStr(class));
 				if (inst && GetMainView(inst)) {
-					SetPropStr(inst, "Container", "/Root/Palette");
 					SetPropStr(inst, "Name", GetNameStr(class));
 					SetPropInt(inst, "X", 10 + (slot % 2) * 80);
 					SetPropInt(inst, "Y", 10 + (slot / 2) * 66);
@@ -478,17 +544,35 @@ void BuildChrome(void){
 	Chrome = NewNode(INTEGER);
 	SetName(Chrome, "Chrome");
 
-	fileMenu = CreateObject(NULL, "MenuButton");
+	fileMenu = CreateObject(GetRootView(), "MenuButton");
 	if (fileMenu) {
+		/* an ordinary instance in the root view, with an ordinary name -
+		   no short-name category, nothing for a walker to special-case */
+		SetPropStr(fileMenu, "Name", "FileMenu");
+		RegisterPath("/Root/FileMenu", fileMenu);
+		/* somewhere of their own: both menus defaulted to 0,0 and sat
+		   exactly on top of each other, so only the top one could ever
+		   be clicked or dragged */
+		SetPropInt(fileMenu, "X", 8);
+		SetPropInt(fileMenu, "Y", 6);
 		SetPropStr(fileMenu, "Label", "File");
 		SetPropStr(fileMenu, "Items", "Load,Save,Import");
+		/* an ordinary property, the same guard the palette carries: you
+		   cannot delete the menus you drive the session with. Nothing
+		   special about these instances - anything can be marked this way */
+		SetPropStr(fileMenu, "Deletable", "0");
 		SetPropLong(Chrome, "FileMenu", (long) fileMenu);
 	}
 
-	modeMenu = CreateObject(NULL, "MenuButton");
+	modeMenu = CreateObject(GetRootView(), "MenuButton");
 	if (modeMenu) {
+		SetPropStr(modeMenu, "Name", "ModeMenu");
+		RegisterPath("/Root/ModeMenu", modeMenu);
+		SetPropInt(modeMenu, "X", 110);
+		SetPropInt(modeMenu, "Y", 6);
 		SetPropStr(modeMenu, "Label", "Mode");
 		SetPropStr(modeMenu, "Items", "Operate,Clone,Alias,Move,Connect,Delete,Options");
+		SetPropStr(modeMenu, "Deletable", "0");
 		SetPropStr(modeMenu, "Selected", "Operate");
 		SetPropLong(Chrome, "ModeMenu", (long) modeMenu);
 	}
@@ -517,12 +601,9 @@ FindClass(char * classname){
 NodeObj
 CreateObject(NodeObj container, char * classname){
 
-	NodeObj class;
+	NodeObj class, inst;
 	msgobj InstanceStart;
-
-	/* containment is a recorded property (Container/PlaceInstance), not   */
-	/* tree parentage - the parameter stays for the API's sake             */
-	(void) container;
+	char cpath[300];
 
 	class = FindClass(classname);
 	if (!class) {
@@ -536,14 +617,51 @@ CreateObject(NodeObj container, char * classname){
 		return NULL;
 	}
 
+	/* EVERYTHING IS ATTACHED WHERE IT LIVES, AT CREATION - so the place is
+	   checked BEFORE anything is made. A missing or unaddressable container
+	   is not quietly turned into "the root": nothing is created at all, the
+	   reason is printed, and the caller gets NULL. Half-making something and
+	   dropping it somewhere convenient helps nobody - it just moves the
+	   failure to whoever finds it loose on a canvas later. */
+	{
+		char dbg[400];
+
+		if (!container) {
+			snprintf(dbg, sizeof(dbg),
+					 "CreateObject('%s') REFUSED: no container given. Every object "
+					 "is created somewhere - pass the view it belongs in.", classname);
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+			return NULL;
+		}
+
+		if (!PathOfInstance(container, cpath, sizeof(cpath))) {
+			snprintf(dbg, sizeof(dbg),
+					 "CreateObject('%s') REFUSED: the container has no path of its "
+					 "own, so it cannot hold anything yet.", classname);
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+			return NULL;
+		}
+	}
+
 	/* the class creates and registers the instance itself, */
 	/* RegisterInstance leaves it in LastInstance for us     */
 	InstanceStart(class, msg_initialize, NULL);
 
-	/* the instance lives in the registry under its class,      */
-	/* the container is not a second parent in the node tree    */
+	inst = (NodeObj)GetPropLong(class, "LastInstance");
+	if (!inst) {
+		DebugPrint("CreateObject: the class made no instance", __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
 
-	return (NodeObj)GetPropLong(class, "LastInstance");
+	SetPropStr(inst, "Container", cpath);
+
+	{
+		char dbg[400];
+		snprintf(dbg, sizeof(dbg), "CreateObject %s -> %s", classname, cpath);
+		DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+	}
+
+	return inst;
 }
 
 /*

@@ -11,7 +11,7 @@ body {
 }
 
 #topbar {
-  padding: 10px 16px;
+  padding: 4px 10px;
   background: #16171b;
   border-bottom: 1px solid #333;
   display: flex;
@@ -19,22 +19,6 @@ body {
   gap: 12px;
   flex: 0 0 auto;
 }
-
-#title {
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-}
-
-#status {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-left: auto;
-}
-#status.status-connecting { background: #4a3f1a; color: #e6c66b; }
-#status.status-ready      { background: #1a4a2a; color: #6be69a; }
-#status.status-error      { background: #4a1a1a; color: #e66b6b; }
 
 /* topbar chrome: File/Mode, real MenuButton instances (Chrome, object.c), */
 /* rendered with the exact same makeMenuButtonEl a dropped-in MenuButton   */
@@ -334,6 +318,25 @@ svg.view-wires {
   height: 16px;
   cursor: pointer;
 }
+/* the momentary button - visibly HELD while pressed, which is the whole  */
+/* difference between it and the fire-once Button next to it              */
+.mo-button {
+  background: #2c2f38;
+  border: 1px solid #4a4e5a;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 11px;
+  padding: 4px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.mo-button:hover { border-color: #6b9fe6; }
+.mo-button.pressed {
+  background: #6b9fe6;
+  border-color: #8bb8e6;
+  color: #14161a;
+}
+
 .widget-atom .activate-btn {
   width: auto;
   padding: 4px 14px;
@@ -692,4 +695,28 @@ body.mode-alias .prop-row {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+
+/* Not connected: grey the whole thing out and say so in the middle, so a
+   dead session cannot be poked at by accident. Covers everything and
+   swallows every click - it is the one moment the GUI is allowed to
+   refuse input, because there is nothing on the other end to hear it. */
+#offline {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(10, 11, 14, 0.72);
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;
+}
+body.offline #offline { display: flex; }
+#offline-msg {
+  color: #e66b6b;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.8);
 }

@@ -21,8 +21,12 @@ $(GOAL): $(OBJECTS)
 clean:
 	rm $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
+# makedepend understands neither -iquote nor gcc's own header dir,
+# so depend uses a plain -I and is told where stddef.h lives
+DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+
 depend:
-	makedepend $(INCLUDES) $(SOURCE) > /dev/null 2>&1
+	makedepend $(DEPINC) $(SOURCE)
 # DO NOT DELETE
 
 checkbox.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
@@ -30,6 +34,8 @@ checkbox.o: /usr/include/features.h /usr/include/features-time64.h
 checkbox.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
 checkbox.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
 checkbox.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+checkbox.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+checkbox.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
 checkbox.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
 checkbox.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 checkbox.o: /usr/include/bits/types/__mbstate_t.h

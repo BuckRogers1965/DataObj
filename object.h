@@ -21,9 +21,21 @@ NodeObj FindUser(NodeObj main, char * name);
 /* the user node on success, NULL on an unknown user or a token mismatch */
 NodeObj AuthenticateUser(NodeObj main, char * name, char * token);
 
-/* create an object instance of named class in the given container */
+/* Create an object instance of a named class IN A CONTAINER. The
+ * container is required: everything is created somewhere, and a missing
+ * location is an error (logged, and the instance comes back unplaced and
+ * therefore unaddressable). Only a root has no location - see CreateRoot.
+ */
 NodeObj
 CreateObject(NodeObj container, char * classname);
+
+/* A root IS A VIEW - an ordinary one. The only difference is that it has
+ * no container, because it is the top; that is why it is made here rather
+ * than with CreateObject, which requires a location. As many as you like
+ * (eventually one per login); each anchors its own namespace, and a
+ * Bridge is handed the root of the session it serves.
+ */
+NodeObj CreateRoot(char * name);
 
 /* the registry root - RegObjList -> libraries -> classes - walk every  */
 /* class (a palette) with GetChild/GetNextSibling at both levels        */
@@ -37,6 +49,9 @@ NodeObj GetRegObjList(void);
 /* GetPaletteView() is the View itself.                                     */
 NodeObj GetPalette(void);
 NodeObj GetPaletteView(void);
+
+/* the session's root view - what everything else is created in */
+NodeObj GetRootView(void);
 void BuildPalette(void);
 
 /* the app's own chrome, addressed and broadcast the exact same way the   */

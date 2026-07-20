@@ -86,13 +86,21 @@ char *Http_ContentType(char *path)
 /* browser that made this particular request.                             */
 void Http_SendResponse(NodeObj instance, char *status, char *contentType, char *body, long bodyLen, long connId)
 {
-	char header[256];
+	char header[320];
 	char *response;
 	long headerLen;
 	NodeObj chunk;
 
+	/* NOTHING IS CACHED. This serves the live tree straight off disk, so a
+	   browser holding yesterday's app.js is a debugging session spent
+	   chasing a fix that is already applied. no-store means never keep it,
+	   must-revalidate kills anything already held, and the two legacy
+	   headers cover proxies that ignore Cache-Control. */
 	snprintf(header, sizeof(header),
-			 "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %ld\r\nConnection: close\r\n\r\n",
+			 "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %ld\r\n"
+			 "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+			 "Pragma: no-cache\r\nExpires: 0\r\n"
+			 "Connection: close\r\n\r\n",
 			 status, contentType, bodyLen);
 	headerLen = strlen(header);
 

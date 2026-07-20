@@ -33,6 +33,8 @@ Widget numbers below mirror the PropertyType enum in object.h:
 /* being: only one hole needs to be open in a firewall) - so the socket   */
 /* connects back to whatever port this page itself was loaded from,       */
 /* rather than a second hardcoded one.                                    */
+const ROOT_VIEW = '/Root';   /* the canvas IS this view - see placeInContainer */
+
 const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
 
 const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_SLIDER = 5,
@@ -42,7 +44,7 @@ const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_S
       PROP_HTML = 14;      /* rendered HTML, sandboxed - the HTML widget's display */
 
 /* palette classes that ARE widgets - the base case of the recursion */
-const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MenuButton', 'Dropdown', 'Markdown', 'HTML']);
+const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MoButton', 'MenuButton', 'Dropdown', 'Markdown', 'HTML']);
 
 /* which widget class backs which property widget-type, split by whether  */
 /* the widget is something the user edits or something that only displays */
@@ -140,7 +142,9 @@ function applyMode(mode) {
 /* the queue for that second case, flushed by registerView once the real    */
 /* View shows up.                                                           */
 function placeInContainer(el, containerAlias) {
-  if (!containerAlias) {
+  /* the root view IS the canvas - it is an ordinary View like any other,
+     it just happens to be the one this window is showing */
+  if (!containerAlias || containerAlias === ROOT_VIEW) {
     $('canvas').appendChild(el);
     return;
   }
@@ -210,14 +214,46 @@ function startPanelDrag(ev, alias, panelEl) {
 /* palette is just a View, Root is just a View, and every gesture works     */
 /* the same inside all of them. Kept as a function because every gesture    */
 /* already calls it.                                                         */
+/* The mode menu is an ordinary object - moveable, clonable, deletable
+   like anything else. What keeps the session escapable is not an
+   exemption but a rule: TOUCHING the mode menu returns you to Operate
+   (makeMenuButtonEl), and its own click runs before the mode gesture
+   that is bubbling up behind it. Esc does the same from anywhere. */
+function modeMenuAlias() {
+  /* by NAME, not by a hardcoded path - the menu is an ordinary instance
+     and can live anywhere a session puts it */
+  for (const k in instances) if (baseName(k) === 'ModeMenu') return k;
+  return null;
+}
+
 function effectiveMode(el) {
+
+  /* A VIEW CAN PIN ITS MODE. Mode is an ordinary published property on
+     an ordinary View (view.c), so any view may declare that things in it
+     are always operated - or always cloned, which is what the palette
+     used it for. Nothing is special-cased here: this walks up to the
+     nearest containing view and asks it.
+
+     It is also what keeps the session escapable: the menu that CHANGES
+     the mode sits in a view pinned to Operate, so Delete mode cannot
+     eat the control you need to leave Delete mode. */
+  for (let e = el; e; e = e.parentElement) {
+    if (!e.classList || !e.classList.contains('view-inner')) continue;
+    const owner = e.dataset && e.dataset.viewAlias;
+    const pinned = owner && propertyValues[owner + '.Mode'];
+    if (pinned) return pinned;
+  }
   return currentMode;
 }
 
+/* Connection state is the whole screen, not a word in a corner: anything
+   other than a live session greys the canvas out and says why in the
+   middle of it, so a dead session cannot be fiddled with by accident. */
 function setStatus(text, cls) {
-  const el = $('status');
-  el.textContent = text;
-  el.className = 'status-' + cls;
+  const live = (cls === 'ready');
+  document.body.classList.toggle('offline', !live);
+  const msg = $('offline-msg');
+  if (msg && !live) msg.textContent = text;
 }
 
 /* the hardcoded Activity panel this used to render into has been removed - */
@@ -515,7 +551,11 @@ function makeMenuButtonEl(alias) {
         /* the dialog collects it (user input, the client's legitimate    */
         /* job) and sends save-flow/load-flow/import-flow itself. Every    */
         /* other menu selection is an ordinary property write.             */
-        if (alias === 'FileMenu' && (item === 'Save' || item === 'Load' || item === 'Import')) {
+        /* by NAME, not by a bare alias: these menus have real paths now
+           ('/Root/FileMenu'), so an equality test against the short name
+           silently stopped matching and Save fell through to a plain
+           property write with no dialog. */
+        if (baseName(alias) === 'FileMenu' && (item === 'Save' || item === 'Load' || item === 'Import')) {
           openFlowDialog(item);
           return;
         }
@@ -526,6 +566,15 @@ function makeMenuButtonEl(alias) {
   }
 
   btn.onclick = (ev) => {
+    /* the pointerdown that exited a mode already opened this - do not
+       toggle it straight back shut */
+    const self = (menuButtons[alias] || [])[0];
+    if (self && self.justOpened) {
+      self.justOpened = false;
+      ev.stopPropagation();
+      return;
+    }
+
     ev.stopPropagation();
     dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
   };
@@ -642,7 +691,12 @@ function onFlowFile(file) {
 /* clicking anywhere outside an open dropdown closes it - ordinary menu    */
 /* behavior, nothing property-related about it                            */
 document.addEventListener('click', () => {
-  for (const alias in menuButtons) for (const m of menuButtons[alias]) m.dropdown.style.display = 'none';
+  for (const alias in menuButtons) for (const m of menuButtons[alias]) {
+    /* except one just opened by the touch that exited a mode - that click
+       is the same gesture, not a click "outside" it */
+    if (m.justOpened) { m.justOpened = false; continue; }
+    m.dropdown.style.display = 'none';
+  }
 });
 
 /* a control that subscribes to its own backing property so it reflects  */
@@ -684,6 +738,7 @@ function wireSlot(alias, propName, controlEl) {
 }
 
 function updateLiveControl(entry, value) {
+  if (entry.widgetClass === 'MoLabel') { entry.el.textContent = value; return; }
   if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
   if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
   if (entry.widgetClass === 'MenuItems') {
@@ -725,6 +780,40 @@ function makeSelfDisplay(alias, propName, widget) {
   const key = alias + '.' + propName;
   (selfDisplays[key] = selfDisplays[key] || []).push({ el, widgetClass });
   return el;
+}
+
+/* the MOMENTARY button: pointerdown presses, pointerup/leave releases.
+   Both are ordinary writes to the object's Press port - the engine owns
+   what an edge MEANS (its Out, its auto-repeat); this only reports what
+   the hand did. Released outside the button counts as a release, exactly
+   as the VNOS control behaved. */
+function makeMoButtonEl(alias) {
+  const btn = document.createElement('button');
+  btn.className = 'mo-button';
+  btn.textContent = 'Press';
+
+  const press = (v) => send({ cmd: 'set-property', instance: alias, prop: 'Press', value: v });
+  let held = false;
+  btn.addEventListener('pointerdown', (ev) => {
+    if (effectiveMode(btn) !== 'Operate') return;
+    ev.stopPropagation();
+    held = true;
+    btn.classList.add('pressed');
+    press('1');
+  });
+  const release = () => {
+    if (!held) return;
+    held = false;
+    btn.classList.remove('pressed');
+    press('0');
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointerleave', release);
+
+  /* the caption is the object's Label - engine state, like any property */
+  (liveControls[alias + '.Label'] = liveControls[alias + '.Label'] || []).push({ el: btn, widgetClass: 'MoLabel' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Label' });
+  return btn;
 }
 
 function makeSelfActivateButton(alias) {
@@ -772,6 +861,9 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
     send({ cmd: 'subscribe', instance: alias, port: 'Items' });
     control = sel;
     primaryProp = 'Value';
+  } else if (className === 'MoButton') {
+    control = makeMoButtonEl(alias);
+    primaryProp = 'Out';
   } else if (className === 'Button') {
     control = makeSelfActivateButton(alias);
     primaryProp = 'Out';
@@ -806,7 +898,33 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   /* instance, Alias ghosts an Alias of its primary control - one           */
   /* mousedown, mode decides (startDrag). The control itself keeps its own  */
   /* gesture (a click, a slider drag) - only the chrome around it drags.    */
-  el.onpointerdown = (ev) => { if (ev.target !== control) startDrag(ev, el, alias, className, primaryProp); };
+  el.onpointerdown = (ev) => {
+    /* HARD RULE: touching the MODE MENU in any mode other than Operate
+       puts the session back in Operate, and that touch does nothing else
+       - no drag, no clone, no delete. It is the control you steer the GUI
+       with, so it is never itself the target of a mode. */
+    if (baseName(alias) === 'ModeMenu' && currentMode !== 'Operate') {
+      applyMode('Operate');
+      send({ cmd: 'set-property', instance: alias, prop: 'Selected', value: 'Operate' });
+      /* and open it, here, rather than hoping the click that follows does
+         it - that click also TOGGLES, so whichever way the ordering fell
+         the menu ended up shut. Opened explicitly, flagged so the click
+         behind it leaves it alone. */
+      const mm = (menuButtons[alias] || [])[0];
+      if (mm && mm.dropdown) {
+        mm.dropdown.style.display = 'block';
+        mm.justOpened = true;
+      }
+      ev.stopPropagation();
+      return;
+    }
+
+    /* Operate: the control keeps its own gesture (click a menu, drag a
+       slider). Any other mode: the whole atom is what you grabbed, even
+       if the control fills it. */
+    if (currentMode === 'Operate' && ev.target === control) return;
+    startDrag(ev, el, alias, className, primaryProp);
+  };
 
   attachDeleteGesture(el, alias);
   attachOptionsGesture(el, alias);
@@ -939,6 +1057,7 @@ function registerView(alias, props, pos, hidden, container) {
   send({ cmd: 'subscribe', instance: alias, port: 'Y' });
   send({ cmd: 'subscribe', instance: alias, port: 'W' });
   send({ cmd: 'subscribe', instance: alias, port: 'H' });
+  send({ cmd: 'subscribe', instance: alias, port: 'Mode' });	/* a view may pin its mode */
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
   send({ cmd: 'subscribe', instance: alias, port: 'Resizeable' });
 
@@ -1294,6 +1413,12 @@ function registerCard(alias, className, props, pos, isCopy, container) {
   /* aliasing a thing is aliasing its icon - the alias opens this same    */
   /* panel (Open rides the link), exactly like aliasing a view            */
   icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
+  /* and the whole card is grabbable in a mode - the icon and header alone
+     left most of a card's surface dead to Move */
+  wrap.addEventListener('pointerdown', (ev) => {
+    if (currentMode === 'Operate') return;
+    startDrag(ev, wrap, alias, className, 'Open');
+  });
   header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
@@ -1431,7 +1556,7 @@ function onPropertyChanged(alias, port, value) {
       /* the Mode menu's Selected IS the session's current mode - a real,   */
       /* synced property, not client-local state, so this is the one place  */
       /* a mode change (from any window) actually takes effect              */
-      if (alias === 'ModeMenu' && value) applyMode(value);
+      if (baseName(alias) === 'ModeMenu' && value) applyMode(value);
     }
   }
 
@@ -1995,7 +2120,7 @@ function dropTargetAt(ev, ignoreEl) {
   const canvas = $('canvas');
   const rect = canvas.getBoundingClientRect();
   return {
-    container: '',
+    container: ROOT_VIEW,	/* the canvas is the root view, not "nowhere" */
     x: Math.max(0, ev.clientX - rect.left),
     y: Math.max(0, ev.clientY - rect.top),
   };
@@ -2050,9 +2175,27 @@ function startDrag(ev, el, alias, className, primaryProp) {
   if (mode !== 'Move') return;
 
   const rect = el.getBoundingClientRect();
+
+  /* One pointerdown can reach here twice (a card's icon handler and the
+     card's own), and each pass used to leave a tag behind with only the
+     last one remembered - so the earlier ones stayed on screen for good.
+     Clear any tag still standing before making this one. */
+  if (dragState && dragState.tag) dragState.tag.remove();
+  for (const stale of document.querySelectorAll('.drag-ghost.move-tag')) stale.remove();
+
+  /* say what is being moved - the full path, so there is no guessing
+     about WHICH thing the drag has hold of */
+  const tag = document.createElement('div');
+  tag.className = 'drag-ghost move-tag';
+  tag.textContent = alias;
+  tag.style.left = (ev.clientX + 8) + 'px';
+  tag.style.top = (ev.clientY + 8) + 'px';
+  document.body.appendChild(tag);
+
   dragState = {
     el,
     alias,
+    tag,
     offsetX: ev.clientX - rect.left,
     offsetY: ev.clientY - rect.top,
   };
@@ -2082,6 +2225,10 @@ document.addEventListener('pointermove', (ev) => {
   const y = ev.clientY - rect.top + parentEl.scrollTop - dragState.offsetY;
   dragState.el.style.left = Math.max(0, x) + 'px';
   dragState.el.style.top = Math.max(0, y) + 'px';
+  if (dragState.tag) {
+    dragState.tag.style.left = (ev.clientX + 8) + 'px';
+    dragState.tag.style.top = (ev.clientY + 8) + 'px';
+  }
   if (dragState.alias) updateWiresFor(dragState.alias);
 });
 
@@ -2124,6 +2271,7 @@ document.addEventListener('pointerdown', (ev) => {
 /* swipe, a palm) must not leave a drag armed forever: drop everything    */
 /* in-flight without committing, the same outcome as Esc                  */
 document.addEventListener('pointercancel', () => {
+  if (dragState && dragState.tag) dragState.tag.remove();
   dragState = null;
   panelDrag = null;
   resizeState = null;
@@ -2133,12 +2281,38 @@ document.addEventListener('pointercancel', () => {
 /* Esc drops whatever is being carried, nothing happens anywhere - and    */
 /* closes an open file dialog the same way                                */
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && gestureDrag) {
+  if (ev.key !== 'Escape') return;
+
+  /* Esc is the way out of anything: drop what is being carried, close a
+     dialog, un-arm a half-drawn wire, and come back to Operate - so no
+     mode can ever be a place you are stuck in.
+
+     CAPTURE phase (see the true below): a control that stops keydown -
+     a focused text box, an open dropdown - would otherwise swallow this
+     before the document ever sees it, and the way out must not be
+     something any widget can eat. Focus is dropped for the same reason. */
+  if (document.activeElement && document.activeElement.blur)
+    document.activeElement.blur();
+  if (gestureDrag) {
     cancelGestureDrag();
     log('cancelled', 'event');
   }
-  if (ev.key === 'Escape' && flowDialog) closeFlowDialog();
-});
+  if (flowDialog) closeFlowDialog();
+  if (pendingPort) {
+    pendingPort.el.classList.remove('armed');
+    pendingPort = null;
+  }
+  if (currentMode !== 'Operate') {
+    const mm = modeMenuAlias();
+    /* apply locally first so the way out never depends on a round trip,
+       then tell the engine so every other window follows */
+    applyMode('Operate');
+    if (mm) send({ cmd: 'set-property', instance: mm, prop: 'Selected', value: 'Operate' });
+  }
+
+  /* and shut any menu that was hanging open */
+  for (const a in menuButtons) for (const m of menuButtons[a]) m.dropdown.style.display = 'none';
+}, true);
 
 document.addEventListener('pointerup', (ev) => {
   if (panelDrag) {
@@ -2164,7 +2338,7 @@ document.addEventListener('pointerup', (ev) => {
     const escapesItself = view && (drop.container === alias);
 
     const currentInner = dragState.el.parentElement;
-    const currentContainer = (currentInner && currentInner.dataset && currentInner.dataset.viewAlias) || '';
+    const currentContainer = (currentInner && currentInner.dataset && currentInner.dataset.viewAlias) || ROOT_VIEW;
 
     if (!escapesItself && drop.container !== currentContainer) {
       send({ cmd: 'move-instance', of: alias, container: drop.container,
@@ -2178,6 +2352,7 @@ document.addEventListener('pointerup', (ev) => {
              y: String(parseInt(dragState.el.style.top, 10) || 0) });
     }
   }
+  if (dragState && dragState.tag) dragState.tag.remove();
   dragState = null;
 });
 

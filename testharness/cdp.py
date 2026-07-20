@@ -148,7 +148,7 @@ class CDP:
 
     def set_mode(self, mode):
         """Switch the session mode through the real ModeMenu property."""
-        self.js("send({cmd:'set-property',instance:'ModeMenu',prop:'Selected',value:'%s'})" % mode)
+        self.js("send({cmd:'set-property',instance:'/Root/ModeMenu',prop:'Selected',value:'%s'})" % mode)
         self.wait_js("currentMode === '%s'" % mode, mode + " mode")
 
     def hook_events(self):

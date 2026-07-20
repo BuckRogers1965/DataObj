@@ -1,6 +1,7 @@
 ._*
 *.o
 *.so
+objects/demo/
 Makefile.bak
 *.object
 framework

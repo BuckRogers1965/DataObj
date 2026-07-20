@@ -11,6 +11,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 #include "node.h"
 #include "object.h"
@@ -87,6 +91,8 @@ typedef struct Connection
 	buff   sendbuf;
 	int    peerClosed;	/* peer half-closed (recv==0); finish draining sendbuf, don't discard it */
 	long   id;		/* never 0 and never reused - 0 is reserved to mean "every connection" */
+	SSL   *ssl;		/* the TLS session, NULL on a plain connection */
+	int    handshaking;	/* SSL_accept has not completed yet (non-blocking) */
 	struct Connection *next;
 } Connection;
 
@@ -99,6 +105,10 @@ typedef struct InstanceData
 	int        active;
 	int        enabled;
 	int        scheduled;
+	SSL_CTX   *ctx;		/* the TLS context, NULL when insecure */
+	int        secure;	/* Secure was on at activation */
+	int        clientMode;	/* RemoteAddr was set: connect out, don't listen */
+	int        connectfd;	/* the socket a client connect is in flight on */
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -109,6 +119,312 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
 	DebugPrint ( "TCP handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
 	return rtrn_handled;
+}
+
+void Tcp_SetNonBlocking(int fd);	/* defined below, used by the client path */
+
+/* ---- TLS ------------------------------------------------------------ */
+/* Ported from the VNOS reference (objects/demo/TCPObject/TCPObject.c),   */
+/* which was a SECURE cross-platform TCP object: a server context built   */
+/* from a PEM certificate and key, an SSL session per accepted peer, and  */
+/* SSL_read/SSL_write in place of recv/send. Brought up to OpenSSL 3:     */
+/* TLS_server_method for SSLv23_server_method, and the library's own      */
+/* implicit init instead of SSL_load_error_strings/SSLeay_add_*.          */
+/* The handshake is completed across poll ticks rather than in one call,  */
+/* because these sockets are non-blocking (the original's single          */
+/* SSL_accept assumed it would finish immediately).                        */
+
+/* the last OpenSSL error, as a line for the log */
+static void Tcp_SslError(char *what)
+{
+	char buf[300];
+	unsigned long e = ERR_get_error();
+
+	snprintf(buf, sizeof(buf), "TCP TLS: %s - %s", what,
+			 e ? ERR_reason_error_string(e) : "no detail");
+	DebugPrint(buf, __FILE__, __LINE__, ERROR);
+}
+
+/* build the server context from the instance's Cert/Key. Returns 0 and   */
+/* logs loudly on any failure - a secure server that quietly serves in    */
+/* the clear is the one outcome worse than not starting.                   */
+static int Tcp_SslContext(NodeObj instance, InstanceData *local)
+{
+	char *cert = GetPropStr(instance, "SslCert");
+	char *key  = GetPropStr(instance, "SslKey");
+	char *pass = GetPropStr(instance, "SslPass");
+
+	if (local->clientMode && (!cert || !cert[0]))
+	{
+		/* a client presents no certificate of its own - just make the
+		   context and let the handshake verify the server's */
+		local->ctx = SSL_CTX_new(TLS_client_method());
+		if (!local->ctx)
+		{
+			Tcp_SslError("could not create the TLS client context");
+			return 0;
+		}
+		return 1;
+	}
+
+	if (!cert || !cert[0] || !key || !key[0])
+	{
+		DebugPrint("TCP TLS: Secure is on but SslCert/SslKey are not set",
+				   __FILE__, __LINE__, ERROR);
+		return 0;
+	}
+
+	local->ctx = SSL_CTX_new(local->clientMode ? TLS_client_method()
+												: TLS_server_method());
+	if (!local->ctx)
+	{
+		Tcp_SslError("could not create the TLS context");
+		return 0;
+	}
+
+	/* a key file may be encrypted - the panel's SslPass unlocks it */
+	if (pass && pass[0])
+		SSL_CTX_set_default_passwd_cb_userdata(local->ctx, pass);
+
+	if (SSL_CTX_use_certificate_file(local->ctx, cert, SSL_FILETYPE_PEM) <= 0)
+	{
+		Tcp_SslError("certificate file rejected");
+		SSL_CTX_free(local->ctx);
+		local->ctx = NULL;
+		return 0;
+	}
+
+	if (SSL_CTX_use_PrivateKey_file(local->ctx, key, SSL_FILETYPE_PEM) <= 0)
+	{
+		Tcp_SslError("private key file rejected");
+		SSL_CTX_free(local->ctx);
+		local->ctx = NULL;
+		return 0;
+	}
+
+	if (!SSL_CTX_check_private_key(local->ctx))
+	{
+		DebugPrint("TCP TLS: the private key does not match the certificate",
+				   __FILE__, __LINE__, ERROR);
+		SSL_CTX_free(local->ctx);
+		local->ctx = NULL;
+		return 0;
+	}
+
+	return 1;
+}
+
+/* drive a non-blocking handshake forward; 1 when it has completed */
+static int Tcp_SslHandshake(Connection *conn)
+{
+	int rc, err;
+
+	rc = SSL_do_handshake(conn->ssl);	/* accept or connect - the side was set already */
+	if (rc == 1)
+	{
+		conn->handshaking = 0;
+		DebugPrint("TCP TLS: handshake complete.", __FILE__, __LINE__, OBJMSGHANDLING);
+		return 1;
+	}
+
+	err = SSL_get_error(conn->ssl, rc);
+	if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		return 0;			/* not finished; try again next tick */
+
+	Tcp_SslError("handshake failed");
+	conn->peerClosed = 1;
+	return 0;
+}
+
+/* read/write that don't care whether the connection is secure */
+static int Tcp_ConnRecv(Connection *conn, char *buffer, int len)
+{
+	if (conn->ssl)
+	{
+		int rc = SSL_read(conn->ssl, buffer, len);
+		if (rc <= 0)
+		{
+			int err = SSL_get_error(conn->ssl, rc);
+			if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+			{
+				errno = EAGAIN;
+				return -1;
+			}
+			if (err == SSL_ERROR_ZERO_RETURN)
+				return 0;		/* peer closed the TLS session cleanly */
+			errno = EIO;
+			return -1;
+		}
+		return rc;
+	}
+
+	return (int)recv(conn->fd, buffer, len, 0);
+}
+
+static int Tcp_ConnSend(Connection *conn, char *block, int len)
+{
+	if (conn->ssl)
+	{
+		int rc = SSL_write(conn->ssl, block, len);
+		if (rc <= 0)
+		{
+			int err = SSL_get_error(conn->ssl, rc);
+			if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+			{
+				errno = EAGAIN;
+				return -1;
+			}
+			errno = EIO;
+			return -1;
+		}
+		return rc;
+	}
+
+	return (int)send(conn->fd, block, len, 0);
+}
+
+/* ---- client mode ---------------------------------------------------- */
+/* The connecting state machine TCPObject.c sketched but never finished -
+   its own comment on the EINPROGRESS case reads "once we allow this to be
+   non blocking, we will need to check for this in it's own loop". This is
+   that loop: connect() returns immediately, and the poll task asks the
+   socket each tick whether it has finished, so a connect to a dead host
+   costs one getsockopt per tick instead of stalling the whole core.
+
+   Hostname resolution is the one blocking call left (getaddrinfo), so a
+   NUMERIC address never blocks at all, and a name says loudly that it is
+   about to block. That is what async-dns/ exists to retire, and it should
+   land with this. */
+
+static int Tcp_ResolveInto(char *addr, struct sockaddr_in *out)
+{
+	struct addrinfo hints, *res = NULL;
+
+	if (inet_aton(addr, &out->sin_addr))
+		return 1;			/* numeric: no lookup, no blocking */
+
+	DebugPrint("TCP client: resolving a HOSTNAME blocks the core until it "
+			   "answers - use an IP, or wire async-dns", __FILE__, __LINE__, ERROR);
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	if (getaddrinfo(addr, NULL, &hints, &res) != 0 || !res)
+		return 0;
+
+	out->sin_addr = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
+	freeaddrinfo(res);
+	return 1;
+}
+
+/* start a non-blocking connect; 1 if it is under way (or already done) */
+static int Tcp_ConnectStart(NodeObj instance, InstanceData *local)
+{
+	struct sockaddr_in addr;
+	char *host = GetPropStr(instance, "RemoteAddr");
+	int port = GetPropInt(instance, "RemotePort");
+	int fd;
+
+	if (!port)
+		port = GetPropInt(instance, "LocalPort");
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((unsigned short)port);
+
+	if (!host || !host[0] || !Tcp_ResolveInto(host, &addr))
+	{
+		DebugPrint("TCP client: RemoteAddr is empty or will not resolve",
+				   __FILE__, __LINE__, ERROR);
+		return 0;
+	}
+
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+	{
+		DebugPrint("TCP client: could not make a socket", __FILE__, __LINE__, ERROR);
+		return 0;
+	}
+
+	Tcp_SetNonBlocking(fd);
+
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0
+		&& errno != EINPROGRESS && errno != EWOULDBLOCK)
+	{
+		close(fd);
+		DebugPrint("TCP client: connect refused outright", __FILE__, __LINE__, ERROR);
+		return 0;
+	}
+
+	local->connectfd = fd;		/* EINPROGRESS is the normal path - finish in the poll */
+	DebugPrint("TCP client: connecting.", __FILE__, __LINE__, OBJMSGHANDLING);
+	return 1;
+}
+
+/* has the in-flight connect finished? adopt it as an ordinary Connection
+   when it has, so every read/write/close path below works unchanged */
+static void Tcp_ConnectPoll(NodeObj instance, InstanceData *local)
+{
+	Connection *conn;
+	socklen_t len = sizeof(int);
+	int err = 0;
+	fd_set wfds;
+	struct timeval tv;
+
+	FD_ZERO(&wfds);
+	FD_SET(local->connectfd, &wfds);
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;			/* poll, never wait - this is the shared core */
+
+	if (select(local->connectfd + 1, NULL, &wfds, NULL, &tv) <= 0)
+		return;			/* still connecting; try again next tick */
+
+	if (getsockopt(local->connectfd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err)
+	{
+		close(local->connectfd);
+		local->connectfd = -1;
+		SetPropStr(instance, "Connected", "0");
+		DebugPrint("TCP client: connect failed.", __FILE__, __LINE__, ERROR);
+		return;
+	}
+
+	conn = malloc(sizeof(Connection));
+	conn->fd = local->connectfd;
+	conn->sendbuf = buffCreate(4 * TCP_CHUNK_SIZE);
+	conn->peerClosed = 0;
+	conn->id = ++local->nextConnId;
+	conn->ssl = NULL;
+	conn->handshaking = 0;
+	conn->next = local->conns;
+	local->conns = conn;
+	local->connectfd = -1;
+
+	/* a secure client speaks TLS from its side of the wire */
+	if (local->ctx)
+	{
+		conn->ssl = SSL_new(local->ctx);
+		if (conn->ssl)
+		{
+			SSL_set_fd(conn->ssl, conn->fd);
+			SSL_set_connect_state(conn->ssl);
+			conn->handshaking = 1;
+		}
+	}
+
+	SetPropStr(instance, "Connected", "1");
+	DebugPrint("TCP client: connected.", __FILE__, __LINE__, OBJMSGHANDLING);
+}
+
+/* tear down one connection's TLS session */
+static void Tcp_SslClose(Connection *conn)
+{
+	if (!conn->ssl)
+		return;
+
+	SSL_shutdown(conn->ssl);
+	SSL_free(conn->ssl);
+	conn->ssl = NULL;
 }
 
 void Tcp_SetNonBlocking(int fd)
@@ -137,10 +453,14 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 
 	local->scheduled = 0;
 
+	/* a client connect in flight finishes here, never in a blocking wait */
+	if (local->connectfd >= 0)
+		Tcp_ConnectPoll(instance, local);
+
 	/* accept every connection currently waiting, not just one - several  */
 	/* can show up between poll ticks, and the listening socket itself    */
 	/* never stops listening to service them                              */
-	for (;;)
+	for (; local->listenfd >= 0; )
 	{
 		peerlen = sizeof(peer);
 		fd = accept(local->listenfd, (struct sockaddr *)&peer, &peerlen);
@@ -154,8 +474,30 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 		conn->sendbuf = buffCreate(4 * TCP_CHUNK_SIZE);
 		conn->peerClosed = 0;
 		conn->id = ++local->nextConnId;
+		conn->ssl = NULL;
+		conn->handshaking = 0;
 		conn->next = local->conns;
 		local->conns = conn;
+
+		/* a secure server wraps every accepted peer in a TLS session -    */
+		/* the handshake finishes across ticks, since the fd is non-       */
+		/* blocking (TCPObject.c's SSL_new/set_fd/accept, done right)      */
+		if (local->ctx)
+		{
+			conn->ssl = SSL_new(local->ctx);
+			if (!conn->ssl)
+			{
+				Tcp_SslError("could not create the TLS session");
+				conn->peerClosed = 1;
+			}
+			else
+			{
+				SSL_set_fd(conn->ssl, fd);
+				SSL_set_accept_state(conn->ssl);
+				conn->handshaking = 1;
+				Tcp_SslHandshake(conn);
+			}
+		}
 
 		DebugPrint ( "TCP accepted a connection.", __FILE__, __LINE__, OBJMSGHANDLING);
 	}
@@ -168,9 +510,21 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 
 		/* receive: each recv becomes one message out the Out port,   */
 		/* tagged with which connection it came from                  */
+		/* a session still shaking hands can carry no application data  */
+		/* yet - drive it forward and leave the rest of this tick alone */
+		if (conn->fd >= 0 && conn->handshaking)
+		{
+			Tcp_SslHandshake(conn);
+			if (conn->handshaking && !conn->peerClosed)
+			{
+				link = &conn->next;
+				continue;
+			}
+		}
+
 		if (conn->fd >= 0)
 		{
-			bytes = recv(conn->fd, buffer, TCP_CHUNK_SIZE, 0);
+			bytes = Tcp_ConnRecv(conn, buffer, TCP_CHUNK_SIZE);
 
 			if (bytes > 0)
 			{
@@ -197,6 +551,7 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 			}
 			else if (errno != EAGAIN && errno != EWOULDBLOCK)
 			{
+				Tcp_SslClose(conn);
 				close(conn->fd);
 				conn->fd = -1;
 				conn->peerClosed = 1;	/* fall through: close-and-remove below, sendbuf is moot with fd gone */
@@ -210,7 +565,7 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 			length = buffGetBlockFromTail(conn->sendbuf, &block, TCP_CHUNK_SIZE);
 			if (length)
 			{
-				sent = send(conn->fd, block, length, 0);
+				sent = Tcp_ConnSend(conn, block, length);
 
 				if (sent < 0)
 				{
@@ -218,6 +573,7 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 						buffGetUndoTail(conn->sendbuf, length);
 					else
 					{
+						Tcp_SslClose(conn);
 						close(conn->fd);
 						conn->fd = -1;
 						conn->peerClosed = 1;
@@ -237,6 +593,7 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 		/* this one connection is done, and drop it from the list          */
 		if (conn->peerClosed && (conn->fd < 0 || buffGetLength(conn->sendbuf) == 0))
 		{
+			Tcp_SslClose(conn);
 			if (conn->fd >= 0)
 				close(conn->fd);
 
@@ -338,6 +695,7 @@ int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 			for (conn = local->conns; conn; conn = next)
 			{
 				next = conn->next;
+				Tcp_SslClose(conn);
 				if (conn->fd >= 0)
 					close(conn->fd);
 				buffDestroy(conn->sendbuf);
@@ -350,6 +708,14 @@ int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 				close(local->listenfd);
 				local->listenfd = -1;
 			}
+
+			/* the TLS context dies with the server it belonged to */
+			if (local->ctx)
+			{
+				SSL_CTX_free(local->ctx);
+				local->ctx = NULL;
+			}
+			SetPropStr(instance, "Secured", "0");
 
 			local->active = 0;
 			SetPropInt(instance, "State", Stopping);
@@ -375,6 +741,39 @@ int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local || local->active)
 		return rtrn_dropped;
+
+	/* CLIENT MODE: a RemoteAddr means dial out rather than listen. The
+	   connect is non-blocking and completes in the poll task, so the two
+	   modes share every read/write/close path below - a connection is a
+	   connection however it was made. */
+	{
+		char *remote = GetPropStr(instance, "RemoteAddr");
+		local->clientMode = (remote && remote[0]) ? 1 : 0;
+	}
+
+	if (local->clientMode)
+	{
+		local->secure = GetPropInt(instance, "Secure") ? 1 : 0;
+		if (local->secure && !Tcp_SslContext(instance, local))
+		{
+			DebugPrint("TCP client: secure requested but TLS could not start",
+					   __FILE__, __LINE__, ERROR);
+			return rtrn_dropped;
+		}
+
+		if (!Tcp_ConnectStart(instance, local))
+			return rtrn_dropped;
+
+		if (!local->task)
+			local->task = CreateTask(ObjGetTaskList());
+		local->active = 1;
+		SetPropInt(instance, "State", Running);
+		SetPropStr(instance, "Secured", local->ctx ? "1" : "0");
+
+		AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
+		local->scheduled = 1;
+		return rtrn_handled;
+	}
 
 	port = GetPropInt(instance, "LocalPort");
 	if (port < 1 || port > 65535)
@@ -432,11 +831,26 @@ int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	Tcp_SetNonBlocking(local->listenfd);
 
+	/* a secure server builds its TLS context here, once, before the       */
+	/* first peer arrives. If Secure is on and the context cannot be       */
+	/* built, DO NOT fall back to serving in the clear - refuse to start.  */
+	local->secure = GetPropInt(instance, "Secure") ? 1 : 0;
+	if (local->secure && !Tcp_SslContext(instance, local))
+	{
+		close(local->listenfd);
+		local->listenfd = -1;
+		SetPropInt(instance, "State", Starting);
+		DebugPrint("TCP: secure mode requested but TLS could not start - not listening",
+				   __FILE__, __LINE__, ERROR);
+		return rtrn_dropped;
+	}
+
 	/* one task struct for the instance's whole life - see leaktest.py */
 	if (!local->task)
 		local->task = CreateTask(ObjGetTaskList());
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
+	SetPropStr(instance, "Secured", local->ctx ? "1" : "0");
 
 	AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
 	local->scheduled = 1;
@@ -458,11 +872,30 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	local->active = 0;
 	local->enabled = 1;
 	local->scheduled = 0;
+	local->ctx = NULL;
+	local->secure = 0;
+	local->clientMode = 0;
+	local->connectfd = -1;
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "TCP");
 	SetPropInt(instance, "LocalPort", 8080);
 	WatchableProp(instance, "LocalPort");
+
+	/* TLS: the VNOS reference's SecurityMode and its PEM cert/key. Off by */
+	/* default; when on, the cert and key must load or the server refuses  */
+	/* to listen at all rather than quietly serving in the clear.          */
+	/* client mode: set RemoteAddr (and RemotePort) and this object dials
+	   out instead of listening - the reference's TCP_CLIENT mode */
+	SetPropStr(instance, "RemoteAddr", "");
+	SetPropInt(instance, "RemotePort", 0);
+	SetPropStr(instance, "Connected", "0");
+
+	SetPropStr(instance, "Secure", "0");
+	SetPropStr(instance, "SslCert", "");
+	SetPropStr(instance, "SslKey", "");
+	SetPropStr(instance, "SslPass", "");
+	SetPropStr(instance, "Secured", "0");	/* readback: TLS actually running */
 	SetPropInt(instance, "State", Starting);
 	WatchableProp(instance, "State");
 	SetPropInt(instance, "Out", 0);		/* received bytes go out here */
@@ -500,6 +933,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 		for (conn = local->conns; conn; conn = next)
 		{
 			next = conn->next;
+			Tcp_SslClose(conn);
 			if (conn->fd >= 0)
 				close(conn->fd);
 			buffDestroy(conn->sendbuf);
@@ -508,6 +942,8 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 		if (local->listenfd >= 0)
 			close(local->listenfd);
+		if (local->ctx)
+			SSL_CTX_free(local->ctx);
 		free(local);
 	}
 
@@ -532,6 +968,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	ClassSelf = RegisterClass(library, class);
 
 	PublishProp(ClassSelf, "LocalPort", "data", PROP_TEXTBOX, "8080");
+	PublishProp(ClassSelf, "RemoteAddr", "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "RemotePort", "data", PROP_TEXTBOX, "0");
+	PublishProp(ClassSelf, "Connected",  "data", PROP_LED, "0");
+	PublishProp(ClassSelf, "Secure",    "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "SslCert",   "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "SslKey",    "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "SslPass",   "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Secured",   "data", PROP_LED, "0");
 	PublishProp(ClassSelf, "Enable",    "in",   PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "In",        "in",   PROP_NULL, "");
 	PublishProp(ClassSelf, "Out",       "out",  PROP_NULL, "");

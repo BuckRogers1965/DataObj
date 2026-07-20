@@ -150,7 +150,8 @@ static void ScriptBox_SwapInner(NodeObj instance, char *lang)
 		local->inner = NULL;
 	}
 
-	local->inner = CreateObject(NULL, lang);
+	/* the host belongs to this ScriptBox - created inside it */
+	local->inner = CreateObject(instance, lang);
 	if (!local->inner)
 	{
 		char buf[160];
