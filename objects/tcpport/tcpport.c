@@ -93,6 +93,7 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 /* ---- small helpers -------------------------------------------------- */
 
 static void TCPPort_Log(NodeObj instance, char *category, char *text);
+static void TCPPort_BuildPanel(NodeObj instance);
 
 static void TCPPort_SetState(NodeObj instance, char *state)
 {
@@ -756,7 +757,138 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	TCPPort_BuildPanel(instance);
+
 	return rtrn_handled;
+}
+
+/* one control put into a container view and wired to the TCPPort's own
+   property - exactly a widget dropped into a view, nothing special. The
+   kind of wire follows the control class: a MoButton/Button presses a
+   command port, a display reflects a property, an input edits it. */
+static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
+						int x, int y, int w, int h)
+{
+	NodeObj c = CreateObject(container, cls);
+	if (!c)
+		return;
+
+	SetPropInt(c, "X", x);
+	SetPropInt(c, "Y", y);
+	SetPropInt(c, "W", w);
+	SetPropInt(c, "H", h);
+	if (prop && prop[0])
+		SetPropStr(c, "Label", prop);
+
+	if (strcmp(cls, "MoButton") == 0)
+		Connect(c, "Out", target, prop);		/* a command port */
+	else if (strcmp(cls, "Button") == 0)
+		Connect(c, "Out", target, "Activate");
+	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
+			 || strcmp(cls, "Markdown") == 0 || strcmp(cls, "Label") == 0
+			 || strcmp(cls, "VUMeter") == 0)
+		Connect(target, prop, c, "In");			/* a readout */
+	else if (strcmp(cls, "Dropdown") == 0)
+	{
+		Connect(c, "Value", target, prop);		/* menu picks the value */
+		Connect(target, "StandardPortList", c, "Items");
+	}
+	else						/* Checkbox / Textbox / Slider / Knob */
+	{
+		Connect(c, "Value", target, prop);		/* edits it */
+		Connect(target, prop, c, "In");			/* and reflects it */
+	}
+}
+
+/* a sub-panel: a View put into the panel (renders as an icon that opens),
+   then populated with its own controls - a view inside a view. */
+static NodeObj TCPPort_SubPanel(NodeObj panel, NodeObj target, char *name, int x, int y)
+{
+	NodeObj v = CreateObject(panel, "View");
+	if (!v)
+		return NULL;
+	SetPropStr(v, "Name", name);
+	SetPropInt(v, "X", x);
+	SetPropInt(v, "Y", y);
+	SetPropInt(v, "W", 300);
+	SetPropInt(v, "H", 260);
+	return v;
+}
+
+/* The panel: control widgets put into the object like any widget into a
+   view, plus three sub-panel Views (Debug/SSL/Help) each populated with
+   their own controls. All ordinary CreateObject + Connect. */
+static void TCPPort_BuildPanel(NodeObj instance)
+{
+	NodeObj dbg, ssl, help;
+
+	/* --- main panel: the primary controls, straight into the object --- */
+	TCPPort_Ctl(instance, instance, "Checkbox", "Enable",       200,  10,  16, 16);
+	TCPPort_Ctl(instance, instance, "Textbox",  "HostName",      10,  36, 190, 20);
+	TCPPort_Ctl(instance, instance, "Dropdown", "StandardPort",  10,  64, 100, 20);
+	TCPPort_Ctl(instance, instance, "Textbox",  "Port",         120,  64,  60, 20);
+	TCPPort_Ctl(instance, instance, "TextOut",  "StreamState",  190,  64, 110, 20);
+	TCPPort_Ctl(instance, instance, "LED",      "Connected",    280,  36,  14, 14);
+	TCPPort_Ctl(instance, instance, "LED",      "Idling",       280,  92,  14, 14);
+	TCPPort_Ctl(instance, instance, "LED",      "Disabled",     280, 110,  14, 14);
+
+	TCPPort_Ctl(instance, instance, "Checkbox", "AutoOpen",      10, 100,  16, 16);
+	TCPPort_Ctl(instance, instance, "Checkbox", "AutoListen",    90, 100,  16, 16);
+	TCPPort_Ctl(instance, instance, "Checkbox", "AutoClose",    170, 100,  16, 16);
+	TCPPort_Ctl(instance, instance, "MoButton", "Open",          10, 124,  60, 22);
+	TCPPort_Ctl(instance, instance, "MoButton", "Listen",       100, 124,  60, 22);
+	TCPPort_Ctl(instance, instance, "MoButton", "Close",        190, 124,  60, 22);
+
+	TCPPort_Ctl(instance, instance, "Textbox",  "TxData",        10, 160, 260, 60);
+	TCPPort_Ctl(instance, instance, "LED",      "TxReady",      280, 160,  14, 14);
+	TCPPort_Ctl(instance, instance, "MoButton", "Send",         200, 224,  60, 22);
+	TCPPort_Ctl(instance, instance, "MoButton", "ClearTx",       10, 224,  60, 22);
+	TCPPort_Ctl(instance, instance, "Checkbox", "AutoSend",      90, 228,  16, 16);
+	TCPPort_Ctl(instance, instance, "Checkbox", "ClearOnSend",  140, 228,  16, 16);
+
+	TCPPort_Ctl(instance, instance, "Textbox",  "RxData",        10, 258, 260, 60);
+	TCPPort_Ctl(instance, instance, "LED",      "RxReady",      280, 258,  14, 14);
+	TCPPort_Ctl(instance, instance, "TextOut",  "BytesReady",   200, 322, 100, 20);
+	TCPPort_Ctl(instance, instance, "MoButton", "ClearRx",       10, 322,  60, 22);
+	TCPPort_Ctl(instance, instance, "Checkbox", "AccumulateRx",  90, 326,  16, 16);
+
+	/* the three sub-panel icons, each opening a view of its own controls */
+	TCPPort_Ctl(instance, instance, "LED",      "State",        280, 128,  14, 14);
+
+	/* --- Debug sub-panel --- */
+	dbg = TCPPort_SubPanel(instance, instance, "Debug", 10, 360);
+	if (dbg)
+	{
+		TCPPort_Ctl(dbg, instance, "LED",      "OpenLed",       20, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "LED",      "OpeningLed",    60, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "LED",      "ListenLed",    100, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "LED",      "ListeningLed", 140, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "LED",      "CloseLed",     180, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "LED",      "ClosingLed",   220, 10, 14, 14);
+		TCPPort_Ctl(dbg, instance, "Checkbox", "ErrorMsgs",     20, 40, 16, 16);
+		TCPPort_Ctl(dbg, instance, "Checkbox", "TraceMsgs",     80, 40, 16, 16);
+		TCPPort_Ctl(dbg, instance, "Checkbox", "DebugMsgs",    140, 40, 16, 16);
+		TCPPort_Ctl(dbg, instance, "Checkbox", "ShowTxData",    20, 64, 16, 16);
+		TCPPort_Ctl(dbg, instance, "Checkbox", "TraceRxData",  140, 64, 16, 16);
+		TCPPort_Ctl(dbg, instance, "MoButton", "ClearDebug",   210, 40, 60, 22);
+		TCPPort_Ctl(dbg, instance, "Textbox",  "DebugText",     10, 90, 280, 150);
+	}
+
+	/* --- SSL sub-panel --- */
+	ssl = TCPPort_SubPanel(instance, instance, "SSL", 90, 360);
+	if (ssl)
+	{
+		TCPPort_Ctl(ssl, instance, "Checkbox", "SslEnable",  10,  10,  16, 16);
+		TCPPort_Ctl(ssl, instance, "LED",      "SslStatus", 100,  10,  14, 14);
+		TCPPort_Ctl(ssl, instance, "Textbox",  "SslCert",    10,  40, 280, 60);
+		TCPPort_Ctl(ssl, instance, "Textbox",  "SslKey",     10, 108, 280, 60);
+		TCPPort_Ctl(ssl, instance, "Textbox",  "SslPass",    10, 176, 280, 22);
+	}
+
+	/* --- Help sub-panel --- */
+	help = TCPPort_SubPanel(instance, instance, "Help", 170, 360);
+	if (help)
+		TCPPort_Ctl(help, instance, "Markdown", "HelpText", 10, 10, 300, 220);
 }
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
