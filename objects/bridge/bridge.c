@@ -606,7 +606,7 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 /* Cloning does NOT live here anymore. The bridge translates - it does not */
 /* copy objects or walk a graph. The whole deep clone (the view, its       */
 /* members, the aliases re-pointed at the copies, the wires re-made        */
-/* between them) is one engine operation, CloneView (object.c), that runs  */
+/* between them) is one engine operation, CloneInstance (object.c), that runs  */
 /* the same whoever asked. Bridge_CloneCmd below just: resolves the name,   */
 /* mints the new one, calls the engine, then translates the resulting      */
 /* objects into html paths and instance-created events. See                */
@@ -792,7 +792,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
  * {"cmd":"clone-instance","of":"Slider1","container":"","x":"700","y":"250"}
  *
  * The bridge does NOT clone - it translates. It resolves what `of` names,
- * mints the new name, hands the whole job to the engine (CloneView,
+ * mints the new name, hands the whole job to the engine (CloneInstance,
  * object.c - which copies the view, its members, the aliases re-pointed
  * at the copies, and the wires re-made between them, identically whether
  * a script or the html asked), and then turns the resulting objects into
@@ -829,11 +829,25 @@ void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 		}
 	}
 
+	/* A thing cannot be cloned INTO itself or into something it contains -
+	   that would build clones inside clones forever. Same containment-cycle
+	   rule Move already refuses (ContainmentCycle, object.c). */
+	{
+		char srcPath[256];
+		if (container && container[0] && PathOfInstance(src, srcPath, sizeof(srcPath))
+			&& ContainmentCycle(srcPath, container))
+		{
+			Bridge_Error(instance, "clone-instance",
+						 "cannot clone a view into itself");
+			return;
+		}
+	}
+
 	/* the engine does the whole clone AND names it - the bridge just says */
 	/* what to clone and which container to put it in. map comes back as   */
 	/* src -> clone for the top and every descendant.                       */
 	map = NewNode(INTEGER);
-	top = CloneView(src, container ? container : "", map);
+	top = CloneInstance(src, container ? container : "", map);
 	if (!top)
 	{
 		DelNode(map);
@@ -1161,7 +1175,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
  * descendant carries the old container path as a prefix in two places -
  * its alias key (the translator's name for it) and its Container property
  * (the engine's fact of where it lives) - and BOTH must swap old -> new,
- * or the members are orphaned: a clone finds zero of them (CloneView walks
+ * or the members are orphaned: a clone finds zero of them (CloneInstance walks
  * by Container), and a set-property by the new path misses. Every
  * connection viewing any part of the subtree has its view-keys migrated
  * too and gets an instance-renamed per descendant so it re-keys its own
@@ -1596,29 +1610,78 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	{
-		char cont[256];
-		char *c = GetPropStr(inst, "Container");
-		snprintf(cont, sizeof(cont), "%s", c ? c : "");
+		/* Deleting a CONTAINER deletes everything it contains. Containment
+		   is a Container-property relationship, not tree parentage, so a
+		   view's members are NOT children of the view node - DeleteInstance
+		   on the view alone would leave every slider, alias and nested view
+		   still registered in the path index and the registry, orphaned.
+		   Then the next clone into the same name collides with those stale
+		   entries and comes up empty (the reported bug). So collect the
+		   whole subtree first - the container and every descendant, by path
+		   prefix, exactly the way a rename re-paths it - and delete each.
+		   Snapshot before deleting, because deleting mutates the registry
+		   this walks. */
+		NodeObj snap, entry, lib, cls, mem;
+		char prefix[300], pbuf[300], cont[300];
+		int preLen;
+		char *p, *slash;
 
-		Bridge_FreeTaps(inst);
-		UnregisterPath(alias);
-		DeleteInstance(inst);
+		snprintf(prefix, sizeof(prefix), "%s/", alias);
+		preLen = (int) strlen(prefix);
 
-		/* the flow log's own garbage collection: every recorded command  */
-		/* that referenced the dead alias is history nothing can replay    */
-		/* onto - drop it, or the log (and a saved flow) retains the       */
-		/* whole command history of everything that ever lived. The        */
-		/* delete command itself is recorded after dispatch as usual,      */
-		/* which keeps replay correct for members the log never created    */
-		/* (an internals view's engine-built rows).                        */
-		Bridge_CompactFlow(local, alias);
+		snap = NewNode(INTEGER);
+		/* the container itself, keyed by its own path */
+		SetPropLong(snap, alias, (long) inst);
+		/* then every descendant */
+		for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+		 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+		  for (mem = GetChild(cls); mem; mem = GetNextSibling(mem))
+		  {
+			if (!PathOfInstance(mem, pbuf, sizeof(pbuf)))
+				continue;
+			if (strncmp(pbuf, prefix, preLen) != 0)
+				continue;	/* not inside this container */
+			SetPropLong(snap, pbuf, (long) mem);
+		  }
 
-		escAlias = JsonEscapeStr(alias);
-		snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escAlias);
-		free(escAlias);
+		for (entry = GetNextProp(snap); entry; entry = GetNextSibling(entry))
+		{
+			p = GetNameStr(entry);			/* this instance's path */
+			mem = (NodeObj) GetValueLong(entry);
+			if (!mem)
+				continue;
 
-		/* only the connections looking at where it lived */
-		Bridge_SendEventScoped(instance, local, buf, cont);
+			/* where it lived - the parent path - for the scoped event */
+			slash = strrchr(p, '/');
+			if (slash && slash != p)
+			{
+				int cut = (int)(slash - p);
+				if (cut >= (int) sizeof(cont))
+					cut = (int) sizeof(cont) - 1;
+				memcpy(cont, p, cut);
+				cont[cut] = 0;
+			}
+			else
+				snprintf(cont, sizeof(cont), "/Root");
+			/* scope the removal to the EXACT container the client views -
+			   create scopes to the raw Container (e.g. "/Root"), and the
+			   view key for "/Root" is NOT the same as for "" (Bridge_ViewKey
+			   maps "" -> "/"). Collapsing /Root to "" here sent the top
+			   view's removal to a key nobody was viewing, so its icon and
+			   panel lingered until a reload. */
+
+			Bridge_FreeTaps(mem);
+			UnregisterPath(p);
+			DeleteInstance(mem);
+			Bridge_CompactFlow(local, p);
+
+			escAlias = JsonEscapeStr(p);
+			snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escAlias);
+			free(escAlias);
+			Bridge_SendEventScoped(instance, local, buf, cont);
+		}
+
+		DelNode(snap);
 	}
 }
 

@@ -1,3 +1,19 @@
+# Findings
+
+## FIXED: cloning a view now keeps its aliases
+
+`CloneAliasNode` (object.c) was creating the cloned alias with
+`CreateObject(NULL, "Alias")`. Today's change made CreateObject refuse a
+NULL container, so the alias silently vanished. Concrete members were
+unaffected (CloneObject instantiates directly, never via CreateObject).
+Fix: instantiate the Alias directly through its InstanceStart the same
+way CloneObject does, then set Container as a string - because during a
+clone the container is only a path STRING, not registered in the index
+yet. Verified: cloned view keeps its alias; the alias re-points to the
+clone's own slider; clone+alias harness 4/4.
+
+---
+
 # Findings — 2026-07-19 session
 
 Working the harness one case at a time. Only clone and alias have been
@@ -45,6 +61,53 @@ run, so:
 Both were artifacts. **Restart the server before drawing any conclusion
 from a harness case.** run.sh already does this; running cases by hand
 does not.
+
+### A view's members only render while its panel is OPEN
+
+Member events are scoped to containers the client is VIEWING (panel open
+/ list-instances). A load re-projects and brings views up CLOSED, so a
+member inside a view you had open before the load stops rendering - it
+looks like the member vanished when it is only un-viewed in a closed
+panel. This produced a false negative testing whether load needs a
+reload: the slider "disappeared" only because the load closed its view.
+The load was correct; the reload it used to do was pure glitch and is
+now removed (flow-loaded handler, app.js). To check load state, open the
+view's panel AFTER the load, or list its container - never trust a
+closed panel to show its members.
+
+## ROOT CAUSE of the alias-drop: CreateObject(NULL) now refused
+
+The user's intuition was right - the clone does not create an alias in the
+engine. Confirmed by reading object.c:
+
+- `CloneObject` (line 750), used for CONCRETE members like Slider, calls
+  the class's `instanceStart` DIRECTLY and takes `LastInstance`. It never
+  goes through `CreateObject`, so it is immune to the new NULL-container
+  refusal. That is why Sliders still clone.
+
+- `CloneAliasNode` (line 966), used for ALIAS members, calls
+  `CreateObject(NULL, "Alias")` and sets Container afterward. TODAY I
+  changed `CreateObject` to REFUSE a NULL container (return NULL). So
+  `CreateObject(NULL,"Alias")` now returns NULL, `CloneAliasNode` returns
+  NULL, and the alias member is dropped - silently, because the caller
+  just logs "FAILED" at the CLONE category and moves on.
+
+So the alias-drop is a REGRESSION from today's "no object is created
+nowhere" change, not an old CloneView bug.
+
+FIX (small, contained): `CloneAliasNode` must create the Alias IN the
+clone's container, not NULL - resolve `container` to its instance and pass
+that to `CreateObject`, the same way the internals builder now does. One
+call site. Then it is placed at creation like everything else and the
+NULL-refusal never trips.
+
+NOTE - a directly-created alias (create-alias verb) IS a real engine
+instance and its link works ON WRITE: writing alias.Value wrote through to
+the slider (slider became 88). But READING alias.Value returned None - the
+subscribe-through-a-link path does not push the current value. That read
+gap is separate from the clone bug and worth a look on its own: it is
+probably what makes an alias LOOK dead in the GUI (shows nothing) even
+though writing through it works.
 
 ## REPRODUCED: cloning a view drops its aliases
 
@@ -110,6 +173,22 @@ The clone's members are created inside the NEW view, so their
 viewing yet. Watching the event stream makes a clone look **completely
 empty**. Always `list-instances` the new view to see what really came
 over.
+
+## FIXED: delete a view, clone again -> now correct
+
+Deleting a view left its members' paths registered (containment is a
+Container property, not tree parentage, so DeleteInstance on the view
+touched only the view node). The next clone reusing that name collided
+with the orphaned member paths and came up empty.
+
+Fix (Bridge_Delete, bridge.c): deleting a container now walks the whole
+subtree - the container and every descendant by path prefix, the same
+way a rename re-paths it - and for each: UnregisterPath, DeleteInstance,
+Bridge_CompactFlow, Bridge_FreeTaps, and an instance-removed event.
+Verified: delete a clone, re-clone into the freed name -> full members
+every time; stale member path no longer resolves; view-clone suite 12/12.
+
+--- ORIGINAL DIAGNOSIS BELOW (now fixed) ---
 
 ## REPRODUCED: delete a view, clone again -> a garbage-named EMPTY view
 

@@ -747,7 +747,11 @@ int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname)
  * caller's business (the Bridge's clone-instance verb does all of
  * that); this is just the node operation.
  */
-NodeObj CloneObject(NodeObj source)
+/* copy ONE node's data - the private building block CloneInstance uses
+   for the top instance and for each concrete member it walks. Not a
+   public entry: you clone a THING (CloneInstance), which copies the node
+   AND whatever the node contains. */
+static NodeObj CloneObject(NodeObj source)
 {
 	NodeObj class, inst, interface, prop, valnode, owner;
 	msgobj instanceStart;
@@ -983,7 +987,22 @@ static NodeObj CloneAliasNode(NodeObj src, char *container, NodeObj map)
 	if (mapped)
 		targetInst = mapped;
 
-	inst = CreateObject(NULL, "Alias");
+	/* Instantiate the Alias the SAME way CloneObject makes a concrete
+	   member - directly through the class's InstanceStart, not through
+	   CreateObject. During a clone the target container is only a path
+	   STRING (nothing here is registered in the path index until the
+	   bridge walks the result afterwards), so CreateObject's now-mandatory
+	   "resolve the container" check cannot pass and silently dropped every
+	   cloned alias. Concrete members never hit that check; the alias must
+	   not either. Container is set as a string below, exactly like them. */
+	{
+		NodeObj aclass = FindClass("Alias");
+		msgobj astart = aclass ? (msgobj) GetPropLong(aclass, "InstanceStart") : NULL;
+		if (!astart)
+			return NULL;
+		astart(aclass, msg_initialize, NULL);
+		inst = (NodeObj) GetPropLong(aclass, "LastInstance");
+	}
 	if (!inst)
 		return NULL;
 	if (!LinkPropertyAs(inst, "Value", targetInst, propname))
@@ -1092,7 +1111,12 @@ static void CloneGroupPass(char *srcPath, char *clonePath, NodeObj map, int pass
 	DelNode(list);
 }
 
-NodeObj CloneView(NodeObj source, char *containerPath, NodeObj map)
+/* Clone a THING - any instance - into containerPath. There is no separate
+   call for a view: you clone the thing, and if the thing contains members
+   (a view, or a view inside a view) this copies them too, aliases
+   re-pointed and wires re-made, recursing to any depth. A leaf control
+   just copies its node and finds no members. One entry, whatever it is. */
+NodeObj CloneInstance(NodeObj source, char *containerPath, NodeObj map)
 {
 	NodeObj top;
 	char name[200], srcPath[256], clonePath[256];

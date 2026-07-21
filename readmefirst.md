@@ -350,3 +350,104 @@ Name + Container, verified by resolving back. Lessons paid for:
    started grabbing the raw suites' leftovers; they now snapshot
    before creating and match only the NEW name. The engine behavior
    is the correct one: one session, one truth.
+
+## Status (2026-07-21): the root is a real View, and everything lives in it
+
+A long session that started with the GUI unusable and ended with the
+containment model made honest. The through-line: there was no real
+"root" — the bridge fabricated a `/Root/` prefix for anything with no
+container, and three places compared against the literal string
+`"/Root"` to mean "nowhere". Making that real fixed a whole class of
+bugs, and broke several things on the way that had quietly depended on
+the fiction. What landed:
+
+1. **A root IS a View, created at boot.** `CreateRoot` (object.c) makes
+   an ordinary View with no container — the one thing allowed to have
+   none, because it is what locations are measured from. The app builds
+   `/Root` at startup (CreateDefaultApp, main.c) and the menus and the
+   palette are ordinary instances IN it: no chrome category, no palette
+   category, no "root" special case. The Bridge is handed the root view
+   and walks views; the client renders `/Root` as the canvas. As many
+   roots as you like, eventually one per login.
+
+2. **Everything is created in a container, at creation.** `CreateObject`
+   now REFUSES a NULL/unaddressable container — it logs the reason (the
+   `PLACE` debug category at `-v 3`, or ERROR on refusal) and returns
+   NULL rather than dropping the instance in the root. "No object is
+   created nowhere." Main is a real place (`/Main`), so the web-flow
+   plumbing (TCP/Router/Http/WebSocket/Bridge) is created in it — not a
+   view, so nothing on a canvas lives there, which is the point.
+   Objects that build private helpers (ScriptBox's language host,
+   TCPPort's TCP engine) create them inside themselves.
+
+   Known-open from this: an object cannot build its own settings
+   controls during `InstanceStart`, because it has no path yet — that
+   is what the ~44 boot-time refusals are. `BuildSettingsView` needs to
+   run after the instance is placed.
+
+3. **One clone entry, not two.** `CloneView` is renamed `CloneInstance`
+   and is the only public clone: you clone a THING, and if it holds
+   members (a view, a view nested in a view) they come too, aliases
+   re-pointed and wires re-made, recursing to any depth. `CloneObject`
+   is now a static internal node-copy. The bridge calls `CloneInstance`
+   for a slider or a whole view alike — no caller ever picks.
+
+4. **Cloning a view keeps its aliases.** `CloneAliasNode` was making the
+   cloned alias with `CreateObject(NULL, ...)`, which the new refusal
+   silently dropped. It now instantiates the Alias directly through its
+   InstanceStart (exactly how concrete members clone) and sets Container
+   as a string — because during a clone the container is only a path
+   string, nothing is registered in the index yet.
+
+5. **A view cannot be cloned into itself.** `Bridge_CloneCmd` checks
+   `ContainmentCycle` (the same guard Move uses) and refuses dropping a
+   view's icon into its own panel, which would build clones inside
+   clones forever. Raw twin: viewclonetest's clone-into-self.
+
+6. **Deleting a container deletes its whole subtree.** Containment is a
+   Container property, not tree parentage, so `DeleteInstance` on a view
+   touched only the view node and orphaned every member's registered
+   path. The next clone reusing that name collided with the stale
+   entries and came up empty (intermittent "controls no longer show").
+   `Bridge_Delete` now walks the subtree — container plus every
+   descendant by path prefix — and unregisters, deletes, compacts the
+   flow log, frees taps, and emits an instance-removed for each.
+
+7. **Two scoping bugs, same root cause: events are scoped by container
+   key, and `Bridge_ViewKey` maps "" -> "/" but "/Root" -> "/Root".**
+   - create-instance with no container placed the instance in `/Root`
+     but scoped its event to `""` — the client, viewing `/Root`, never
+     heard it and hung. Fixed: no container means the root view all the
+     way through (lookup, placement, event scope).
+   - the subtree-delete scoped a top-level view's removal to `""` (a
+     `/Root`->`""` collapse copied from the rename walk), so its icon
+     and panel lingered until a reload while its members vanished
+     correctly. Fixed: scope to the exact container, no collapse.
+
+8. **Load no longer reloads the page.** The `flow-loaded` handler did a
+   full `location.reload()` — a 3-second glitch on top of an
+   already-correct incremental render. The subscribe/rename race it
+   guarded is gone (one engine index, everything created in its real
+   container), so it is removed. If a load ever comes up wrong, re-list
+   from the engine's final state — never reload.
+
+Working-discipline notes (these cost the most time):
+
+- **Read the project, every change, not once.** The single most
+  expensive failure of the session was re-inventing mechanisms that
+  already existed — `BuildSettingsView` (the panel builder, already used
+  by reader.c/out.c), `View.Mode` (per-view mode pinning), and burning
+  hours building panel construction in the BRIDGE before remembering the
+  bridge only presents nodes. A summary tells you the philosophy; it
+  does not tell you the function two files over already does this.
+- **The user watching the live browser beats a flaky CDP test.** A test
+  that "showed" a slider vanishing after load was reading mid-reconnect;
+  the load was fine. When the user's live observation and an automated
+  check disagree, the check is the thing to doubt first.
+- **A view's members only render while its panel is OPEN** (events are
+  scoped to viewed containers). A closed panel showing no members is not
+  a missing-member bug. To check a container's contents, list it.
+
+See FINDINGS.md for the still-open items: the read-through-a-link gap
+(an alias writes through but reads back None) and the InstanceStart
+settings-control timing.

@@ -248,6 +248,42 @@ def test_save_load_view_wiring(raw, r, home):
              bool(copy) and tgt in csl and wired)
 
 
+def test_clone_into_self_refused(raw, r, home):
+    """A view cannot be cloned INTO itself (or anything it contains) - the
+    gesture of dropping a view's icon inside its own panel. Allowed, it
+    would build clones inside clones forever. The engine must refuse it,
+    say so, and leave the view exactly as it was."""
+    view, src, dst, al = build_view(raw, home, "SelfClone")
+    before = parts(raw, view)
+
+    # clone the view into its OWN container
+    raw.events = []
+    raw.send({"cmd": "clone-instance", "of": view, "container": view, "x": "20", "y": "200"})
+    err = raw.wait_event(lambda e: e.get("event") == "error"
+                         and e.get("cmd") == "clone-instance", timeout=3)
+    r.expect("clone into self: refused with an error",
+             "an error event, not a clone",
+             "error=%s" % (err.get("message") if err else None),
+             bool(err))
+
+    # nothing was created; the view is unchanged
+    after = parts(raw, view)
+    r.expect("clone into self: the view is untouched",
+             "same members as before the refused clone: %s" % (before,),
+             "%s" % (after,),
+             after == before)
+
+    # and a nested descendant is refused too
+    raw.events = []
+    raw.send({"cmd": "clone-instance", "of": view, "container": src, "x": "0", "y": "0"})
+    err2 = raw.wait_event(lambda e: e.get("event") == "error"
+                          and e.get("cmd") == "clone-instance", timeout=3)
+    r.expect("clone into a descendant: refused too",
+             "cloning a view into one of its own members is also refused",
+             "error=%s" % (err2.get("message") if err2 else None),
+             bool(err2))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
@@ -274,6 +310,7 @@ def main():
 
     guarded(test_view_clone_wiring, raw, r, home)
     guarded(test_clone_of_clone, raw, r, home)
+    guarded(test_clone_into_self_refused, raw, r, home)
     guarded(test_save_load_view_wiring, raw, r, home)
 
     raw.close()

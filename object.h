@@ -142,7 +142,7 @@ PlaceInstance(NodeObj inst, char * container, char * x, char * y);
 /* container the destination's; paths are the containment chain, so the    */
 /* rule is a prefix test, see ContainmentCycle), then PlaceInstance.        */
 /* Returns 1 moved, 0 refused. Renaming/eventing stay the translator's     */
-/* business, same split as CloneObject.                                     */
+/* business, same split as CloneInstance.                                     */
 int
 MoveInstance(NodeObj inst, char * instPath, char * container, char * x, char * y);
 int
@@ -163,13 +163,6 @@ NodeObj ResolvePort(NodeObj * instp, char * name);
 int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propname);
 int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname);
 
-/* A brand-new instance of source's class carrying a snapshot of its     */
-/* published data - the engine-level clone. Naming/containment/eventing  */
-/* are the caller's business. Wiring is too: a snapshot of an object's   */
-/* data says nothing about what it was connected to - see               */
-/* CloneConnections for cloning a whole GROUP's internal wiring.          */
-NodeObj CloneObject(NodeObj source);
-
 /* Clone the wires INSIDE a group being copied: for each of srcInst's    */
 /* outgoing subscriptions whose sink is also being cloned (map holds     */
 /* sink -> sink's clone, keyed by pointer - see GetConnState), wire      */
@@ -182,16 +175,16 @@ NodeObj CloneObject(NodeObj source);
 /* original's name.                                                       */
 void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map);
 
-/* Deep-clone a thing into containerPath - the whole clone, in the engine, */
-/* identical whoever asked (a script, or the html through the bridge). The */
-/* caller passes only the thing to clone and the container to put it in;   */
-/* the ENGINE names the clone (unique in that container) and copies        */
-/* everything inside it: members re-homed, alias members re-pointed at the */
-/* clones, wires re-made between the clones - so the copy is as             */
-/* self-contained as the original. Every instance made is recorded in      */
-/* `map` (src -> clone) for the caller to walk out and translate into      */
-/* whatever it shows. Returns the top clone.                               */
-NodeObj CloneView(NodeObj source, char * containerPath, NodeObj map);
+/* Clone a THING into containerPath - ANY instance, in the engine,        */
+/* identical whoever asked (a script, or the html through the bridge).     */
+/* There is NO separate call for a view: you clone the thing. If it holds  */
+/* members (a view, or a view nested in a view) those are copied too -     */
+/* re-homed, alias members re-pointed at the clones, wires re-made between  */
+/* them - recursing to any depth; a leaf control just copies its node.     */
+/* The ENGINE names the clone (unique in its container). Every instance    */
+/* made is recorded in `map` (src -> clone) for the caller to walk out.    */
+/* Returns the top clone.                                                  */
+NodeObj CloneInstance(NodeObj source, char * containerPath, NodeObj map);
 
 /* Retired: ConnectToProperty/ConnectToActivate and their adapter nodes  */
 /* are gone - plain Connect() reaches any property (universal default    */

@@ -349,16 +349,14 @@ function handleEvent(msg) {
     case 'flow-loaded':
       log('loaded ' + msg.file, 'event');
       closeFlowDialog();
-      /* a load renames, re-paths and deletes instances mid-replay; a
-         client that renders incrementally through that burst races its
-         own subscribes - a subscribe to /Root/View_1's X goes out, the
-         load renames View_1 to slider before it arrives, and the
-         subscribe resolves to nothing (the "unknown instance" storm in
-         the server log). Rather than chase every racy event, re-project
-         from scratch: the engine holds the final state, so reload and
-         re-list it clean - every name resolved, no subscribe outrunning
-         a rename. A load is a bulk state change; a projector re-projects. */
-      location.reload();
+      /* No reload. The incremental events of the load already project the
+         correct display - the old subscribe/rename race this used to guard
+         against no longer happens (addressing is one engine index now, and
+         everything is created in its real container). A full location.reload()
+         on top of an already-correct screen was just a 3-second glitch that
+         threw the good render away and rebuilt it. If a load ever DOES leave
+         the display wrong, re-list from the engine's final state - do not
+         reload the page. */
       break;
     case 'error':
       log('error (' + msg.cmd + '): ' + msg.message, 'error');

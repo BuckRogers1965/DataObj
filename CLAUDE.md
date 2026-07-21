@@ -325,9 +325,27 @@ Container, see Bridge_Set). The bridge keeps NO alias table — it
 registers/resolves against the engine index, and enumeration (listing,
 repath walks) is a registry walk + PathOfInstance. Consequence: all
 translators share one namespace — instances created over the raw port
-are addressable from the GUI and vice versa. Chrome's short names
-("ModeMenu") stay in the separate GetChrome table, deliberately outside
-the path index.
+are addressable from the GUI and vice versa.
+
+**The root is a real View, and there is no fabricated `/Root` prefix
+(July 2026).** The top of the containment hierarchy used to be a fiction:
+the bridge glued `/Root/` onto anything with no container and compared
+against the literal `"/Root"` to mean "nowhere". Now `CreateRoot`
+(object.c) makes an ordinary View with no container — the one thing
+allowed to have none, because it is what locations are measured from —
+and the app builds `/Root` at boot (CreateDefaultApp), with the palette
+and the menus (`ModeMenu`/`FileMenu`) as ordinary instances IN it. No
+chrome category, no palette category. A Bridge is handed the root view
+and walks views; the client renders `/Root` as its canvas. `Main` is its
+own place, `/Main` (the web-flow plumbing lives there, not on a canvas).
+Corollary now enforced in `CreateObject`: **everything is created in a
+container** — a NULL/unaddressable location is refused and logged (the
+`PLACE` debug category at `-v 3`), never silently dropped in the root.
+"No container" from a translator means the root view, all the way
+through — lookup, placement, AND the event's container scope (events are
+scoped by container key; `Bridge_ViewKey` maps `""`→`/` but `/Root`→
+`/Root`, so a create/delete scoped to the wrong one silently reaches
+nobody — the class of bug that hung create and lingered deleted views).
 
 ## Allocation accounting (July 2026)
 
