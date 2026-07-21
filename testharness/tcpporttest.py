@@ -56,20 +56,30 @@ def port_is_open(port=PANEL_PORT):
 
 
 def test_inert_until_activated(raw, r, home):
-    """ACTIVATION IS THE ARMING: an un-activated panel does not open a
-    socket however its buttons are pressed. (Reported: it listened
-    without being activated.)"""
+    """The reference sets up the widget when it is PLACED (VNOS
+    inctActivatedTask), so it comes up live and its buttons work at once -
+    gated only by Enable, never a separate "activate" step. With Auto Close
+    the default it opens NO socket on its own. (Reported both ways: it must
+    not self-listen, and Listen must work.)"""
     panel = home + "/Inert"
     make(raw, "TCPPort", panel, home, 20, 140)
     raw.send({"cmd": "set-property", "instance": panel, "prop": "Port", "value": str(PANEL_PORT + 1)})
-    time.sleep(0.3)
+    time.sleep(0.6)     # let the deferred build + auto-activate settle
 
+    # it came up live, but on its OWN it did not open a socket
+    state = fresh(raw, panel, "StreamState")
+    r.expect("tcpport: comes up live but does not self-listen",
+             "the freshly placed panel is IDLING with the port shut",
+             "state=%s port open=%s" % (state, port_is_open(PANEL_PORT + 1)),
+             state == "IDLING" and not port_is_open(PANEL_PORT + 1))
+
+    # and because it is live, pressing Listen listens - no separate Activate
     press(raw, panel, "Listen")
     state = fresh(raw, panel, "StreamState")
-    r.expect("tcpport: an un-activated panel does not listen",
-             "pressing Listen before Activate leaves it IDLING with the port shut",
+    r.expect("tcpport: a live panel listens when Listen is pressed",
+             "pressing Listen brings it to LISTEN and opens the port",
              "state=%s port open=%s" % (state, port_is_open(PANEL_PORT + 1)),
-             state != "LISTEN" and not port_is_open(PANEL_PORT + 1))
+             state == "LISTEN" and port_is_open(PANEL_PORT + 1))
 
 
 def test_auto_listen_unchecks(raw, r, home):
@@ -162,6 +172,10 @@ def test_listen_and_receive(raw, r, home):
 def test_send(raw, r, panel, sock):
     if not sock:
         return
+    # isolate the manual Send button: with Auto Send on, filling the box
+    # would itself transmit (see test_autosend_from_flow), doubling this.
+    raw.send({"cmd": "set-property", "instance": panel, "prop": "AutoSend", "value": "0"})
+    time.sleep(0.2)
     raw.send({"cmd": "set-property", "instance": panel, "prop": "TxData", "value": "from the panel"})
     time.sleep(0.3)
     press(raw, panel, "Send")
@@ -194,8 +208,9 @@ def test_send(raw, r, panel, sock):
 def test_autosend_from_flow(raw, r, panel, sock):
     if not sock:
         return
-    # "Default input connection is to Transmit Data" - and AutoSend (on by
-    # default) transmits it the moment it lands
+    # "Default input connection is to Transmit Data" - and AutoSend
+    # transmits it the moment the box changes (test_send turned it off)
+    raw.send({"cmd": "set-property", "instance": panel, "prop": "AutoSend", "value": "1"})
     raw.send({"cmd": "set-property", "instance": panel, "prop": "ClearOnSend", "value": "0"})
     time.sleep(0.2)
     raw.send({"cmd": "set-property", "instance": panel, "prop": "In", "value": "through the flow"})

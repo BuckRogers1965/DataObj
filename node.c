@@ -649,8 +649,12 @@ void SetPropLong(NodeObj node, char *name, long value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
+		/* unchanged writes do not re-fan-out - see SetPropStr */
+		long old = GetLong(propnode->value);
+		int changed = old != value;
 		SetLong(propnode->value, value);
-		FanOutSubscribers(propnode);
+		if (changed)
+			FanOutSubscribers(propnode);
 		return;
 	}
 
@@ -671,8 +675,12 @@ void SetPropInt(NodeObj node, char *name, int value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
+		/* unchanged writes do not re-fan-out - see SetPropStr */
+		int old = GetInt(propnode->value);
+		int changed = old != value;
 		SetInt(propnode->value, value);
-		FanOutSubscribers(propnode);
+		if (changed)
+			FanOutSubscribers(propnode);
 		return;
 	}
 
@@ -693,8 +701,17 @@ void SetPropStr(NodeObj node, char *name, char * value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
+		/* an unchanged data-property write is not a change and must NOT   */
+		/* re-fan-out: that is what makes a two-way binding (a control      */
+		/* both edits and reflects a property, so control.Value ->          */
+		/* prop -> control.In -> control.Value) self-terminating instead    */
+		/* of an unbounded synchronous feedback loop that overflows the     */
+		/* stack. The bridge already calls this event "property-CHANGED".   */
+		char *old = GetStr(propnode->value);
+		int changed = !old || !value || strcmp(old, value) != 0;
 		SetStr(propnode->value, value);
-		FanOutSubscribers(propnode);
+		if (changed)
+			FanOutSubscribers(propnode);
 		return;
 	}
 

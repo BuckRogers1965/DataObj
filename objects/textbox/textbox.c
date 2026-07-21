@@ -112,6 +112,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	InitPosition(instance);
 
+	/* the declared size, defaulting to a small single line; whoever creates
+	   a Textbox (a panel, the palette) overrides these to size its box */
+	SetPropInt(instance, "Rows", 1);
+	SetPropInt(instance, "Cols", 20);
+
 	RegisterInstance(class, instance);
 
 	return rtrn_handled;
@@ -143,6 +148,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
 	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+
+	/* the box's own declared size, in characters - a data property so it   */
+	/* is subscribed and PUSHED to the client on instantiation like any     */
+	/* value: the box goes and gets its size the moment it is rendered,     */
+	/* rather than every Textbox rendering at one hard-coded default         */
+	PublishProp(ClassSelf, "Rows",   "data", PROP_NULL, "1");
+	PublishProp(ClassSelf, "Cols",   "data", PROP_NULL, "20");
 
 	return rtrn_handled;
 }

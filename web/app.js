@@ -711,6 +711,14 @@ function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValu
     const pub = inst && (classes[inst.className] || []).find((p) => p.Name === subscribeProp);
     if (pub && pub.Rows) el.style.height = pub.Rows + 'lh';  /* lh = one line */
     if (pub && pub.Cols) el.style.width = pub.Cols + 'ch';
+    /* and its own per-instance declared size, subscribed like any value -    */
+    /* pushed on instantiation (Bridge_Subscribe), so a box sized by the       */
+    /* object that made it (a panel's TxData at 6x44) overrides the class      */
+    /* default the moment it renders                                            */
+    (liveControls[subscribeAlias + '.Rows'] = liveControls[subscribeAlias + '.Rows'] || []).push({ el, widgetClass: 'TextboxRows' });
+    (liveControls[subscribeAlias + '.Cols'] = liveControls[subscribeAlias + '.Cols'] || []).push({ el, widgetClass: 'TextboxCols' });
+    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'Rows' });
+    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'Cols' });
   }
   send({ cmd: 'subscribe', instance: subscribeAlias, port: subscribeProp });
   /* more than one rendering can subscribe to the same alias.prop (an       */
@@ -737,6 +745,8 @@ function wireSlot(alias, propName, controlEl) {
 
 function updateLiveControl(entry, value) {
   if (entry.widgetClass === 'MoLabel') { entry.el.textContent = value; return; }
+  if (entry.widgetClass === 'TextboxRows') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'lh'; return; }
+  if (entry.widgetClass === 'TextboxCols') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'ch'; return; }
   if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
   if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
   if (entry.widgetClass === 'MenuItems') {
@@ -1158,296 +1168,12 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
     return;
   }
 
-  registerCard(alias, className, props, pos, false, container);
-}
-
-/* a composite object is an icon that opens into a panel - the icon's own   */
-/* in/out anchors are the exact same aliases as the panel's, just a second   */
-/* place to click them (see the icon/panelRows swap in setExpanded below):   */
-/* collapsed or expanded is a display choice, not a different object or a    */
-/* different wire.                                                            */
-/*                                                                            */
-/* The panel's rows are the ENGINE's answer to "what is this object's        */
-/* panel": its internals view's member aliases (Bridge_Internals). The       */
-/* shell (header/body/footer) renders immediately; the first open asks       */
-/* `internals`, the members stream in (the same lazy-contents path the       */
-/* dissection panel uses), and each member becomes one row (addMemberRow     */
-/* below), its control chosen by the member's engine-stamped Widget/          */
-/* Direction and its edits written through the member's own Value link.       */
-/* This window shows the node-box styling; Options mode shows the same        */
-/* members as the free-form dissection table - one panel, two projections.    */
-function registerCard(alias, className, props, pos, isCopy, container) {
-  const wrap = document.createElement('div');
-  wrap.className = 'instance-wrap';
-  wrap.style.left = pos.x + 'px';
-  wrap.style.top = pos.y + 'px';
-
-  const icon = document.createElement('div');
-  icon.className = 'instance-icon';
-  const iconLabel = document.createElement('span');
-  iconLabel.className = 'instance-icon-label';
-  iconLabel.textContent = className;
-  icon.appendChild(iconLabel);
-  /* the status LED is a plain painted readout of the object's own State - */
-  /* subscribe and render, no helper instance standing in for it            */
-  icon.appendChild(wireSlot(alias, 'State', makeSelfDisplay(alias, 'State', PROP_LED)));
-  wrap.appendChild(icon);
-
-  /* the panel is the icon's control panel - a separate thing with its    */
-  /* own independent life, handled by the exact same registerPanel every   */
-  /* view uses: it opens at the ROOT (panels are all peers, never nested),  */
-  /* sits at its own shared PanelX/PanelY, and neither opening nor moving   */
-  /* it ever touches the icon                                               */
-  const panel = document.createElement('div');
-  panel.className = 'node-box';
-
-  const header = document.createElement('div');
-  header.className = 'node-header';
-  const title = document.createElement('span');
-  title.className = 'node-title';
-  title.textContent = baseName(alias);
-  title.title = alias;
-  const cls = document.createElement('span');
-  cls.className = 'node-class';
-  cls.textContent = className;
-  const collapseBtn = document.createElement('span');
-  collapseBtn.className = 'node-collapse';
-  collapseBtn.textContent = '−';
-  collapseBtn.title = 'Collapse';
-  header.appendChild(title);
-  header.appendChild(cls);
-  header.appendChild(collapseBtn);
-  panel.appendChild(header);
-
-  const body = document.createElement('div');
-  body.className = 'node-body';
-
-  const ports = {};
-  const panelRows = {};
-  const outPorts = [];
-  const builtRows = {};
-  let panelOpen = false;
-  let rowsAsked = false;
-
-  /* NO dots, no special case: the ICON is the wire target, the same        */
-  /* one-click gesture as any control (see the icon click handler below).    */
-  /* Every in/out port anchors at the icon while the panel is closed; the     */
-  /* panel's ROWS are not built here at all - they are the internals view's   */
-  /* members, streamed in on first open (addMemberRow below).                 */
-  for (const p of props) {
-    if (p.Direction !== 'in' && p.Direction !== 'out') continue;
-    if (p.Direction === 'out') outPorts.push(p.Name);
-    ports[p.Name] = icon;
-  }
-
-  /* one row per internals-view member: which control, and whether it's a   */
-  /* prop row or a port row, comes from the member's ENGINE-stamped Widget/  */
-  /* Direction. Edits write through the member's own Value - the node-level  */
-  /* link lands them on the object - and reads subscribe to the object       */
-  /* itself (events speak the original's name; one tap serves everything).   */
-  function addMemberRow(memberAlias, rec) {
-    const propName = rec.targetProp;
-    if (builtRows[propName]) return;
-    builtRows[propName] = true;
-
-    /* position/size are the card's own drag; State is the icon's LED */
-    if (propName === 'State') return;
-
-    const inputClass = INPUT_WIDGET_CLASS[rec.widget];
-    const displayClass = DISPLAY_WIDGET_CLASS[rec.widget];
-    /* the published Default seeds a control before its first live value    */
-    /* arrives - same engine-published Interface fact the old rows used     */
-    const pub = props.find((q) => q.Name === propName) || {};
-
-    if (rec.direction === 'data') {
-      /* PROP_MENU: a dropdown row - options from the companion            */
-      /* "<prop>List" property, current value from the property itself,    */
-      /* commits through the member's link like every other input row      */
-      if (Number(rec.widget) === PROP_MENU) {
-        const sel = document.createElement('select');
-        sel.className = 'widget-menu';
-        sel.onchange = () => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: sel.value });
-        const valKey = alias + '.' + propName;
-        (liveControls[valKey] = liveControls[valKey] || []).push({ el: sel, widgetClass: 'MenuValue' });
-        send({ cmd: 'subscribe', instance: alias, port: propName });
-        const listKey = alias + '.' + propName + 'List';
-        (liveControls[listKey] = liveControls[listKey] || []).push({ el: sel, widgetClass: 'MenuItems' });
-        send({ cmd: 'subscribe', instance: alias, port: propName + 'List' });
-
-        const row = document.createElement('div');
-        row.className = 'prop-row';
-        const label = document.createElement('label');
-        label.textContent = propName;
-        row.appendChild(label);
-        row.appendChild(wireSlot(alias, propName, sel));
-        /* the row IS the member instance, projected - so Options on it     */
-        /* opens the MEMBER's own panel, exactly as its atom form does      */
-        attachOptionsGesture(row, memberAlias);
-        body.insertBefore(row, body.firstChild);
-        return;
-      }
-
-      if (!inputClass && !displayClass) return; /* plumbing (PROP_NULL, PROP_ICON): no row */
-
-      let controlEl;
-      if (inputClass) {
-        controlEl = bindLiveControl(alias, propName, inputClass,
-          propertyValues[alias + '.' + propName] || pub.Default,
-          (v) => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: v }));
-      } else {
-        controlEl = makeSelfDisplay(alias, propName, rec.widget);
-      }
-
-      const row = document.createElement('div');
-      row.className = 'prop-row';
-      const label = document.createElement('label');
-      label.textContent = propName;
-      row.appendChild(label);
-      row.appendChild(wireSlot(alias, propName, controlEl));
-      /* same as the menu row: the member is clickable-through, not filtered */
-      attachOptionsGesture(row, memberAlias);
-      /* members replay newest-first (the session table prepends), so     */
-      /* prepending each row restores the class's published order - the    */
-      /* same top-to-bottom the Interface declares                          */
-      body.insertBefore(row, body.firstChild);
-
-      /* "copying out a control": in Alias mode, drag this row into any     */
-      /* view and drop it - a real Alias instance of THIS object's property  */
-      /* lands there (create-alias, bridge.c), reading and writing the one   */
-      /* true value through the link. That's how instrument panels are       */
-      /* built.                                                               */
-      row.onpointerdown = (ev) => {
-        if (effectiveMode(row) !== 'Alias') return;
-        startGestureDrag(ev, 'alias', { of: alias, prop: propName }, 'alias: ' + alias + '.' + propName);
-      };
-    } else if (rec.direction === 'in' || rec.direction === 'out') {
-      const hasControl = displayClass || inputClass;
-
-      const row = document.createElement('div');
-      row.className = 'port-row ' + rec.direction + (hasControl ? ' has-control' : '');
-      attachOptionsGesture(row, memberAlias);
-
-      const label = document.createElement('span');
-      label.textContent = propName;
-
-      if (rec.direction === 'out') {
-        row.appendChild(label);
-        /* a port can carry the same display-widget metadata a property     */
-        /* does (Pulse's Out is Widget=PROP_LED) - painted straight from     */
-        /* the port's own message-flowed traffic                             */
-        if (displayClass) {
-          const el = makeReadoutEl(displayClass);
-          const key = alias + '.' + propName;
-          (portDisplays[key] = portDisplays[key] || []).push({ el, widgetClass: displayClass });
-          row.appendChild(wireSlot(alias, propName, el));
-        }
-      } else {
-        /* likewise an in-port can carry input-widget metadata (Enable is   */
-        /* Widget=PROP_CHECKBOX) - a directly-clickable control writing      */
-        /* through the member's link, so the port's own handler runs          */
-        if (inputClass) {
-          const el = bindLiveControl(alias, propName, inputClass, pub.Default,
-            (v) => send({ cmd: 'set-property', instance: memberAlias, prop: 'Value', value: v }));
-          row.appendChild(wireSlot(alias, propName, el));
-        }
-        row.appendChild(label);
-      }
-
-      /* same published-order restoration as the prop rows above */
-      body.insertBefore(row, body.firstChild);
-
-      /* a bare port's row is itself the wire click-target while the panel   */
-      /* is open (the icon's dot when it isn't - see the swap below)          */
-      if (!hasControl) {
-        row.addEventListener('click', () => onPortClick(alias, propName, ports[propName]));
-        panelRows[propName] = row;
-        if (panelOpen) ports[propName] = row;
-      }
-    }
-  }
-  cardBodies[alias] = { addMemberRow };
-
-  panel.appendChild(body);
-
-  const footer = document.createElement('div');
-  footer.className = 'node-footer';
-  /* Activate is one verb aimed at the object itself */
-  const activateBtn = document.createElement('button');
-  activateBtn.className = 'activate-btn';
-  activateBtn.textContent = 'Activate';
-  activateBtn.onclick = () => { if (effectiveMode(activateBtn) === 'Operate') send({ cmd: 'activate', instance: aliasOfEl(wrap, alias) }); };
-  footer.appendChild(wireSlot(alias, 'Activate', activateBtn));
-  panel.appendChild(footer);
-
-  /* wires re-anchor to whichever representation shows the port best:      */
-  /* the panel's rows while it's open here, the icon's dots when not.      */
-  /* First open asks the engine for the internals view - the one answer     */
-  /* to "what is this object's panel" - and the member rows stream in.      */
-  const p = registerPanel(alias, panel, 'block', (open) => {
-    panelOpen = open;
-    for (const name in ports) ports[name] = (open && panelRows[name]) || icon;
-    if (open && !rowsAsked) {
-      rowsAsked = true;
-      const cur = aliasOfEl(wrap, alias);
-      internalsAskMode[cur] = 'card';
-      send({ cmd: 'internals', instance: cur });
-    }
-  });
-
-  icon.addEventListener('click', () => {
-    const m = effectiveMode(icon);
-    if (m === 'Operate') { p.setOpen(true); return; }
-    if (m !== 'Connect') return;
-    /* the icon is the object, clicked like any control: landing a wire on   */
-    /* it means its first published in port, starting one from it means its   */
-    /* first published out port                                                */
-    const first = (dir) => { const q = props.find((x) => x.Direction === dir); return q && q.Name; };
-    const port = (pendingPort && pendingPort.alias !== alias) ? (first('in') || first('out'))
-                                                              : (first('out') || first('in'));
-    if (port) onPortClick(alias, port, icon);
-  });
-  collapseBtn.addEventListener('click', (ev) => { ev.stopPropagation(); p.setOpen(false); });
-
-  /* aliasing a thing is aliasing its icon - the alias opens this same    */
-  /* panel (Open rides the link), exactly like aliasing a view            */
-  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, className, 'Open'); };
-  /* and the whole card is grabbable in a mode - the icon and header alone
-     left most of a card's surface dead to Move */
-  wrap.addEventListener('pointerdown', (ev) => {
-    if (currentMode === 'Operate') return;
-    startDrag(ev, wrap, alias, className, 'Open');
-  });
-  header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
-  attachDeleteGesture(wrap, alias);
-  attachOptionsGesture(wrap, alias);
-  /* the panel opens as a PEER at the root, not inside the wrap - so it     */
-  /* carries the object's Options gesture itself, or clicks on its chrome    */
-  /* (the Activate button, the header, the background) would reach nothing.   */
-  /* Member rows' own gestures stopPropagation, so they still win.            */
-  attachOptionsGesture(panel, alias);
-
-  /* an out port still needs its own subscribe wherever this rendering      */
-  /* lives - message-flowed log lines aren't state, there's nothing to       */
-  /* double up on the way a data property's live value would be              */
-  for (const portName of outPorts) send({ cmd: 'subscribe', instance: alias, port: portName });
-
-  /* instance-created carries Container inline - see registerWidgetAtom's   */
-  /* matching comment                                                       */
-  placeInContainer(wrap, container || '');
-  instances[alias] = { className, el: wrap, ports };
-
-  /* moving this card is exactly the same as editing any other property -  */
-  /* a set-property on drag-end (see the mouseup handler) and a subscribe   */
-  /* here so every window, including this one on a future reconnect, shows */
-  /* wherever it actually is, not wherever it happened to first render     */
-  if (props.some((p) => p.Name === 'X') && props.some((p) => p.Name === 'Y')) {
-    livePositions[alias] = { el: wrap };
-    send({ cmd: 'subscribe', instance: alias, port: 'X' });
-    send({ cmd: 'subscribe', instance: alias, port: 'Y' });
-  }
-  send({ cmd: 'subscribe', instance: alias, port: 'Container' });
-
-  log('created ' + alias + ' (' + className + ')', 'event');
+  /* A WIDGET IS JUST A VIEW. Any composite object renders as a view -
+     an icon that opens a panel whose members lay out by their own X/Y.
+     The object does not lay anything out; the view does, exactly as it
+     does for a hand-built View or the palette. No card, no stacked rows,
+     no special case. */
+  registerView(alias, props, pos, false, container);
 }
 
 function updateReadout(el, widgetClass, value) {
@@ -1530,7 +1256,6 @@ function onPropertyChanged(alias, port, value) {
     if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Direction' || port === 'Label') {
       aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
       renderAliasControl(alias);
-      maybeBuildCardRow(alias);
     } else if (port === 'Container') {
       aliasAtom.container = value;
     }
@@ -1570,17 +1295,6 @@ function onMessageFlowed(alias, port, value) {
   log(alias + '.' + port + ' → ' + value, 'event');
 }
 
-/* an internals-view member alias doubles as a row on its owner's card      */
-/* panel - built once its engine-stamped facts (TargetProp/Widget/           */
-/* Direction) have all arrived and its container is a view some card here    */
-/* knows as its internals view                                                */
-function maybeBuildCardRow(memberAlias) {
-  const rec = aliasAtoms[memberAlias];
-  if (!rec || !rec.targetProp || rec.widget === '' || rec.direction === '') return;
-  const owner = internalsOwner[rec.container];
-  const card = owner && cardBodies[owner];
-  if (card) card.addMemberRow(memberAlias, rec);
-}
 
 /* wiring: click any property (a row, or a whole widget atom - see
    registerWidgetAtom), then click a second one, in either order - there is

@@ -59,8 +59,8 @@ drops into a flow like any other object.
 	"  prefix (`www.hostname.com`, not `http://www.hostname.com`).\n" \
 	"- **Standard Ports** - FTP 21, Telnet 23, SMTP 25, HTTP 80, POP 110,\n" \
 	"  HTTPS 443; picking one writes the Port box.\n" \
-	"- **Listen / Open / Close** - Listen serves on Port. The panel must\n" \
-	"  be ACTIVATED first: an inert object never opens a socket.\n" \
+	"- **Listen / Open / Close** - Listen serves on Port; Open dials Host\n" \
+	"  Name; Close is a full stop. They work whenever the panel is Enabled.\n" \
 	"- **Send** - transmits the Transmit box when connected.\n" \
 	"- **Stream State** - DISABLED, IDLING, LISTEN, OPENING, CONNECTED,\n" \
 	"  CLOSING.\n"
@@ -75,8 +75,9 @@ drops into a flow like any other object.
 
 typedef struct InstanceData
 {
-	int     active;
-	int     enabled;
+	int     enabled;	/* the reference's CmdEnable - the ONLY gate on the commands */
+	int     panelBuilt;	/* the panel is built once, when the object first has a path */
+	TaskObj buildTask;	/* fires one tick after creation, to build the panel */
 	NodeObj inner;		/* the TCP engine instance we drive */
 } InstanceData;
 
@@ -94,6 +95,7 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 
 static void TCPPort_Log(NodeObj instance, char *category, char *text);
 static void TCPPort_BuildPanel(NodeObj instance);
+static int  TCPPort_BuildTask(NodeObj instance, NodeObj data, int msgid);
 
 static void TCPPort_SetState(NodeObj instance, char *state)
 {
@@ -165,13 +167,23 @@ static void TCPPort_DoListen(NodeObj instance)
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 	char *port;
 
-	/* ACTIVATION IS THE ARMING: an inert object does not open a socket,   */
-	/* however its buttons are pressed. Activate makes it live, Enable=0   */
-	/* takes it back down (TCPPort_OnEnable) - the Reader/TCP lifecycle.   */
-	if (!local || !local->enabled || !local->active)
+	/* Enable is the ONLY gate, exactly as the reference gates everything on
+	   CmdEnable - and a disabled panel says so now rather than doing nothing
+	   silently. */
+	if (!local)
 		return;
+	if (!local->enabled)
+	{
+		TCPPort_Log(instance, "ErrorMsgs", "Listen ignored - panel is not enabled");
+		return;
+	}
 	if (TCPPort_IsState(instance, ST_LISTEN) || TCPPort_IsState(instance, ST_CONNECTED))
+	{
+		TCPPort_Log(instance, "TraceMsgs", "Listen ignored - already up");
 		return;
+	}
+
+	TCPPort_Log(instance, "TraceMsgs", "listening");
 
 	if (GetPropInt(instance, "AccumulateRx"))
 		SetPropStr(instance, "RxData", "");
@@ -279,11 +291,19 @@ int TCPPort_OnOpen(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local || message == msg_eof || !GetValueInt(data))
 		return rtrn_handled;
-	if (!local->enabled || !local->active)
-		return rtrn_handled;		/* inert until Activated, as Listen is */
+	if (!local->enabled)
+	{
+		TCPPort_Log(instance, "ErrorMsgs", "Open ignored - panel is not enabled");
+		return rtrn_handled;
+	}
 
 	if (TCPPort_IsState(instance, ST_LISTEN) || TCPPort_IsState(instance, ST_CONNECTED))
+	{
+		TCPPort_Log(instance, "TraceMsgs", "Open ignored - already up");
 		return rtrn_handled;
+	}
+
+	TCPPort_Log(instance, "TraceMsgs", "opening");
 
 	if (GetPropInt(instance, "AccumulateRx"))
 		SetPropStr(instance, "RxData", "");
@@ -504,7 +524,7 @@ int TCPPort_OnInnerRx(NodeObj instance, MsgId message, NodeObj data)
 		/* A peer going away means "back to listening" - but the EOF the   */
 		/* engine emits as it SHUTS DOWN must not resurrect LISTEN over a   */
 		/* Close or a disable. Only a live server returns to listening.     */
-		if (local && local->inner && local->active && local->enabled
+		if (local && local->inner && local->enabled
 			&& !TCPPort_IsState(instance, ST_CLOSING)
 			&& !TCPPort_IsState(instance, ST_DISABLED)
 			&& !TCPPort_IsState(instance, ST_IDLING))
@@ -544,7 +564,9 @@ int TCPPort_OnInnerRx(NodeObj instance, MsgId message, NodeObj data)
 }
 
 /* our In feeds the Transmit box - "default input connection is to        */
-/* Transmit Data" - and Auto Send sends it on arrival                      */
+/* Transmit Data". It just writes the box; Auto Send is driven by the box */
+/* CHANGING (TCPPort_OnTxChanged), so In-fed and typed data auto-send the */
+/* same way, exactly as the reference sends from PropTxData_change.        */
 int TCPPort_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -557,7 +579,33 @@ int TCPPort_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	SetPropStr(instance, "TxData", value ? value : "");
 	SetPropStr(instance, "TxReady", "1");
 
-	if (GetPropInt(instance, "AutoSend"))
+	return rtrn_handled;
+}
+
+/* the Transmit box changed (typed, or written through In): the reference's
+   PropTxData_change - if we are connected and Auto Send is on, send it.
+   Wired to TxData's own change by an internal Connect in InstanceStart, so
+   ANY change to the box triggers it. An empty box (a Clear) sends nothing,
+   which is how the reference declines to auto-send a clear.               */
+int TCPPort_OnTxChanged(NodeObj instance, MsgId message, NodeObj data)
+{
+	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+	char *tx;
+
+	(void) data;
+
+	if (!local || !local->enabled || message == msg_eof)
+		return rtrn_handled;
+
+	SetPropStr(instance, "TxReady", "1");
+
+	if (!GetPropInt(instance, "AutoSend"))
+		return rtrn_handled;
+	if (!TCPPort_IsState(instance, ST_CONNECTED))
+		return rtrn_handled;
+
+	tx = GetPropStr(instance, "TxData");
+	if (tx && tx[0])
 		TCPPort_DoSend(instance);
 
 	return rtrn_handled;
@@ -577,17 +625,13 @@ int TCPPort_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local->enabled)
 	{
-		/* unenabling DEACTIVATES: the socket goes, and so does the       */
-		/* object's live state - it must be Activated again to listen      */
+		/* Enable=0 is the reference's full stop: close the socket and show
+		   DISABLED. Re-enabling returns it to IDLING, ready for Listen. */
 		TCPPort_DoClose(instance);
-		local->active = 0;
-		SetPropInt(instance, "State", Stopping);
 		TCPPort_SetState(instance, ST_DISABLED);
 		return rtrn_handled;
 	}
 
-	/* re-enabling does NOT bring the socket back by itself: activation is */
-	/* the arming, and unenabling deactivated. Activate it again to listen. */
 	TCPPort_SetState(instance, ST_IDLING);
 
 	return rtrn_handled;
@@ -614,8 +658,11 @@ static char *TCPPort_AutoChoice(NodeObj instance)
 	return "";
 }
 
-/* Activate: normalize the host box and honor the Auto option - the same  */
-/* thing the original did when its panel came up enabled                   */
+/* Placement setup - the reference's inctActivatedTask, run when the widget
+   is placed (not a user "activate" step, which the reference has no notion
+   of): normalize the host box, settle the Auto radios, show the resting
+   state, and honor Auto Listen. Registered as the framework's Activate hook
+   too, so an explicit activate just re-runs this harmlessly.               */
 int TCPPort_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -623,8 +670,13 @@ int TCPPort_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	local->active = 1;
-	SetPropInt(instance, "State", Running);
+	/* build the panel once, now that the object has a real location and
+	   CreateObject(itself/subview, control) will resolve */
+	if (!local->panelBuilt)
+	{
+		local->panelBuilt = 1;
+		TCPPort_BuildPanel(instance);
+	}
 
 	TCPPort_NormalizeHost(instance);
 
@@ -662,8 +714,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
 
-	local->active = 0;
 	local->enabled = 1;
+	local->panelBuilt = 0;
+	local->buildTask = NULL;
 	local->inner = NULL;
 
 	instance = NewNode(INTEGER);
@@ -753,13 +806,50 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	TCPPort_Port(instance, "InnerUp",      "",  (void *)TCPPort_OnInnerUp);
 	TCPPort_Port(instance, "Enable",       "1", (void *)TCPPort_OnEnable);
 
+	/* Auto Send is driven by the Transmit box CHANGING: an internal port
+	   wired to TxData's own change (the reference's PropTxData_change), so
+	   typing in the box and writing it through In both auto-send the same
+	   way. Not published - plumbing, not a control. */
+	TCPPort_Port(instance, "TxChanged", "", (void *)TCPPort_OnTxChanged);
+	Connect(instance, "TxData", instance, "TxChanged");
+
 	InitPosition(instance);
+
+	/* the view's OWN size, set here as a resting value BEFORE any client can
+	   subscribe - a size set later in the deferred build would shadow the W/H
+	   node the client's tap is already on and never reach it, leaving the
+	   panel at its default. This is the reference main panel (457x511), grown
+	   to hold the character-sized text boxes. */
+	SetPropInt(instance, "W", 480);
+	SetPropInt(instance, "H", 640);
 
 	RegisterInstance(class, instance);
 
-	TCPPort_BuildPanel(instance);
+	/* arm the deferred build: the panel is populated one tick from now,
+	   after the bridge has given this instance its path. Nothing here yet
+	   has a location, so building now would refuse - waiting one tick is
+	   the "created in a location" half of CreateObject's contract. */
+	local->buildTask = CreateTask(ObjGetTaskList());
+	AddTaskMilli(local->buildTask, 1, (FuncPtr)TCPPort_BuildTask, msg_send, instance);
 
 	return rtrn_handled;
+}
+
+/* wire a reflect (a property -> a control's input) AND seed it: hand the
+   control the property's CURRENT value right now, so the GUI shows the
+   underlying value the moment the control is created. A plain Connect'd
+   reflect only fires on the NEXT change, so without this seed a fresh box
+   reads blank (Port empty instead of 80) until something moves. The client
+   subscribes to the control's own Value and is handed this seeded value on
+   subscribe. */
+static void TCPPort_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
+{
+	char *cur;
+
+	Connect(src, sp, dst, dp);
+	cur = GetPropStr(src, sp);
+	if (cur)
+		SetOrDeliverProp(dst, dp, cur);
 }
 
 /* one control put into a container view and wired to the TCPPort's own
@@ -767,11 +857,22 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
    kind of wire follows the control class: a MoButton/Button presses a
    command port, a display reflects a property, an input edits it. */
 static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-						int x, int y, int w, int h)
+						int x, int y, int w, int h, int rows, int cols)
 {
+	char cpath[256], path[300];
 	NodeObj c = CreateObject(container, cls);
 	if (!c)
 		return;
+
+	/* name it after its property and register its path, so it is an
+	   addressable member of the panel - the "has a path" half of "created
+	   in a location" that CreateObject leaves to whoever creates */
+	if (PathOfInstance(container, cpath, sizeof(cpath)))
+	{
+		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
+		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
+		RegisterPath(path, c);
+	}
 
 	SetPropInt(c, "X", x);
 	SetPropInt(c, "Y", y);
@@ -780,6 +881,15 @@ static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop
 	if (prop && prop[0])
 		SetPropStr(c, "Label", prop);
 
+	/* a Textbox carries its declared size as its own Rows/Cols - the box
+	   fetches these on instantiation (they are data properties) and sizes
+	   itself, so each panel box is the size the reference gave it */
+	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
+	{
+		SetPropInt(c, "Rows", rows);
+		SetPropInt(c, "Cols", cols);
+	}
+
 	if (strcmp(cls, "MoButton") == 0)
 		Connect(c, "Out", target, prop);		/* a command port */
 	else if (strcmp(cls, "Button") == 0)
@@ -787,108 +897,171 @@ static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop
 	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
 			 || strcmp(cls, "Markdown") == 0 || strcmp(cls, "Label") == 0
 			 || strcmp(cls, "VUMeter") == 0)
-		Connect(target, prop, c, "In");			/* a readout */
+		TCPPort_Reflect(target, prop, c, "In");	/* a readout, seeded now */
 	else if (strcmp(cls, "Dropdown") == 0)
 	{
 		Connect(c, "Value", target, prop);		/* menu picks the value */
-		Connect(target, "StandardPortList", c, "Items");
+		TCPPort_Reflect(target, "StandardPortList", c, "Items");
+		SetOrDeliverProp(c, "Value", GetPropStr(target, prop)); /* show the pick */
 	}
 	else						/* Checkbox / Textbox / Slider / Knob */
 	{
 		Connect(c, "Value", target, prop);		/* edits it */
-		Connect(target, prop, c, "In");			/* and reflects it */
+		TCPPort_Reflect(target, prop, c, "In");	/* and reflects it, seeded now */
 	}
 }
 
 /* a sub-panel: a View put into the panel (renders as an icon that opens),
    then populated with its own controls - a view inside a view. */
-static NodeObj TCPPort_SubPanel(NodeObj panel, NodeObj target, char *name, int x, int y)
+static NodeObj TCPPort_SubPanel(NodeObj panel, NodeObj target, char *name,
+								int x, int y, int w, int h)
 {
+	char ppath[256], path[300];
 	NodeObj v = CreateObject(panel, "View");
+	(void) target;
 	if (!v)
 		return NULL;
 	SetPropStr(v, "Name", name);
+	/* register the sub-view's path FIRST, so controls can be created in it */
+	if (PathOfInstance(panel, ppath, sizeof(ppath)))
+	{
+		snprintf(path, sizeof(path), "%s/%s", ppath, name);
+		RegisterPath(path, v);
+	}
 	SetPropInt(v, "X", x);
 	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", 300);
-	SetPropInt(v, "H", 260);
+	SetPropInt(v, "W", w);
+	SetPropInt(v, "H", h);
 	return v;
 }
 
-/* The panel: control widgets put into the object like any widget into a
-   view, plus three sub-panel Views (Debug/SSL/Help) each populated with
-   their own controls. All ordinary CreateObject + Connect. */
+/* The panel, straight off the reference's ControlInfo[] table
+   (objects/demo/tcpport/tcpportpb.c): one flat table, every control
+   tagged with the panel it lives on - 0 = the main panel (the object
+   itself), 1 = Debug, 2 = SSL, 3 = Help. Same shape, same coordinates. */
+/* rows/cols are the declared size for a Textbox (characters), 0 for every
+   other control - a Textbox sizes itself by its Rows/Cols property, so the
+   panel gives each box the size the reference published for it */
+typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } TCtl;
+
+static TCtl TCPPortPanel[] = {
+	/* --- panel 0: TCP Port (the object's own view) --- */
+	{ "Checkbox", "Enable",        390,  14,  8,  8, 0,  0,  0 },
+	{ "Textbox",  "HostName",       15,  44, 419, 15, 0,  1, 50 },
+	{ "Dropdown", "StandardPort",   13,  84,  85, 15, 0,  0,  0 },
+	{ "Textbox",  "Port",          131,  84,  63, 15, 0,  1,  8 },
+	{ "TextOut",  "StreamState",   226,  84, 108, 15, 0,  0,  0 },
+	{ "LED",      "Disabled",      368,  69,  10, 10, 0,  0,  0 },
+	{ "LED",      "Idling",        368,  86,  10, 10, 0,  0,  0 },
+	{ "LED",      "Connected",     368, 103,  10, 10, 0,  0,  0 },
+	{ "LED",      "Listening",     185,  63,  10, 10, 0,  0,  0 },
+	{ "LED",      "State",         368, 120,  10, 10, 0,  0,  0 },
+	{ "Checkbox", "AutoOpen",       26, 128,  16, 17, 0,  0,  0 },
+	{ "Checkbox", "AutoListen",    128, 128,  16, 17, 0,  0,  0 },
+	{ "Checkbox", "AutoClose",     249, 128,  16, 17, 0,  0,  0 },
+	{ "MoButton", "Open",           23, 149,  60, 20, 0,  0,  0 },
+	{ "MoButton", "Listen",        128, 149,  60, 20, 0,  0,  0 },
+	{ "MoButton", "Close",         248, 149,  60, 20, 0,  0,  0 },
+	{ "Textbox",  "TxData",         14, 226, 323, 94, 0,  6, 44 },
+	{ "LED",      "TxReady",       389, 228,  10, 10, 0,  0,  0 },
+	{ "MoButton", "Send",          365, 272,  60, 20, 0,  0,  0 },
+	{ "MoButton", "ClearTx",       365, 304,  60, 20, 0,  0,  0 },
+	{ "Checkbox", "BinaryTx",       27, 332,   8,  8, 0,  0,  0 },
+	{ "Checkbox", "TxFixLineEnds",  87, 332,   8,  8, 0,  0,  0 },
+	{ "Checkbox", "ClearOnSend",   188, 332,   8,  8, 0,  0,  0 },
+	{ "Checkbox", "AutoSend",      259, 332,   8,  8, 0,  0,  0 },
+	{ "Textbox",  "RxData",         14, 380, 323, 94, 0,  6, 44 },
+	{ "LED",      "RxReady",       389, 383,  10, 10, 0,  0,  0 },
+	{ "TextOut",  "BytesReady",    358, 422,  71, 15, 0,  0,  0 },
+	{ "MoButton", "ClearRx",       365, 468,  60, 20, 0,  0,  0 },
+	{ "Checkbox", "BinaryRx",       27, 485,   8,  8, 0,  0,  0 },
+	{ "Checkbox", "RxFixLineEnds",  87, 485,   8,  8, 0,  0,  0 },
+	{ "Checkbox", "AccumulateRx",  188, 485,   8,  8, 0,  0,  0 },
+
+	/* --- panel 1: TCP Debug --- */
+	{ "LED",      "OpenLed",        32,  63,  10, 10, 1,  0,  0 },
+	{ "LED",      "OpeningLed",     80,  63,  10, 10, 1,  0,  0 },
+	{ "LED",      "ListenLed",     134,  63,  10, 10, 1,  0,  0 },
+	{ "LED",      "ListeningLed",  185,  63,  10, 10, 1,  0,  0 },
+	{ "LED",      "CloseLed",      239,  63,  10, 10, 1,  0,  0 },
+	{ "LED",      "ClosingLed",    286,  63,  10, 10, 1,  0,  0 },
+	{ "Checkbox", "ErrorMsgs",      34, 127,   8,  8, 1,  0,  0 },
+	{ "Checkbox", "TraceMsgs",      81, 127,   8,  8, 1,  0,  0 },
+	{ "Checkbox", "ShowTxData",    135, 127,   8,  8, 1,  0,  0 },
+	{ "Checkbox", "TraceRxData",   186, 127,   8,  8, 1,  0,  0 },
+	{ "Checkbox", "DebugMsgs",     241, 127,   8,  8, 1,  0,  0 },
+	{ "MoButton", "ClearDebug",    315, 125,  60, 20, 1,  0,  0 },
+	{ "Textbox",  "DebugText",      13, 175, 365, 275, 1, 16, 46 },
+
+	/* --- panel 2: TCP SSL --- */
+	{ "Checkbox", "SslEnable",      12,  14,   8,  8, 2,  0,  0 },
+	{ "LED",      "SslStatus",      12,  40,  10, 10, 2,  0,  0 },
+	{ "Textbox",  "SslCert",        12,  59, 349, 87, 2,  5, 42 },
+	{ "Textbox",  "SslKey",         12, 177, 349, 87, 2,  5, 42 },
+	{ "Textbox",  "SslPass",        13, 295, 348, 32, 2,  1, 42 },
+
+	/* --- panel 3: Help --- */
+	{ "Markdown", "HelpText",       19,  37, 474, 273, 3,  0,  0 },
+
+	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+};
+
+/* build the panel: panel 0 goes straight into the object (its own view),
+   panels 1-3 are sub-views (Debug/SSL/Help) that render as openable
+   icons - a view inside a view, exactly like the reference's sub-panels.
+   Their icons sit where the reference's Debug/Secure/Help buttons did. */
 static void TCPPort_BuildPanel(NodeObj instance)
 {
-	NodeObj dbg, ssl, help;
+	NodeObj sub[4];
+	int i;
 
-	/* --- main panel: the primary controls, straight into the object --- */
-	TCPPort_Ctl(instance, instance, "Checkbox", "Enable",       200,  10,  16, 16);
-	TCPPort_Ctl(instance, instance, "Textbox",  "HostName",      10,  36, 190, 20);
-	TCPPort_Ctl(instance, instance, "Dropdown", "StandardPort",  10,  64, 100, 20);
-	TCPPort_Ctl(instance, instance, "Textbox",  "Port",         120,  64,  60, 20);
-	TCPPort_Ctl(instance, instance, "TextOut",  "StreamState",  190,  64, 110, 20);
-	TCPPort_Ctl(instance, instance, "LED",      "Connected",    280,  36,  14, 14);
-	TCPPort_Ctl(instance, instance, "LED",      "Idling",       280,  92,  14, 14);
-	TCPPort_Ctl(instance, instance, "LED",      "Disabled",     280, 110,  14, 14);
+	/* the widget IS the view - its controls go straight into it and it
+	   lays them out by their X/Y (its own size was set in InstanceStart,
+	   before any subscribe). The three sub-panels are views inside it, each
+	   sized to hold its character-sized boxes, rendering as openable icons
+	   where the reference's Debug/Secure/Help buttons sat. A sub-view's size
+	   is set at creation, before the client ever sees it, so it applies. */
+	sub[0] = instance;
+	sub[1] = TCPPort_SubPanel(instance, instance, "Debug", 380, 176, 460, 540);
+	sub[2] = TCPPort_SubPanel(instance, instance, "SSL",   380, 149, 440, 460);
+	sub[3] = TCPPort_SubPanel(instance, instance, "Help",   14, 560, 560, 380);
 
-	TCPPort_Ctl(instance, instance, "Checkbox", "AutoOpen",      10, 100,  16, 16);
-	TCPPort_Ctl(instance, instance, "Checkbox", "AutoListen",    90, 100,  16, 16);
-	TCPPort_Ctl(instance, instance, "Checkbox", "AutoClose",    170, 100,  16, 16);
-	TCPPort_Ctl(instance, instance, "MoButton", "Open",          10, 124,  60, 22);
-	TCPPort_Ctl(instance, instance, "MoButton", "Listen",       100, 124,  60, 22);
-	TCPPort_Ctl(instance, instance, "MoButton", "Close",        190, 124,  60, 22);
-
-	TCPPort_Ctl(instance, instance, "Textbox",  "TxData",        10, 160, 260, 60);
-	TCPPort_Ctl(instance, instance, "LED",      "TxReady",      280, 160,  14, 14);
-	TCPPort_Ctl(instance, instance, "MoButton", "Send",         200, 224,  60, 22);
-	TCPPort_Ctl(instance, instance, "MoButton", "ClearTx",       10, 224,  60, 22);
-	TCPPort_Ctl(instance, instance, "Checkbox", "AutoSend",      90, 228,  16, 16);
-	TCPPort_Ctl(instance, instance, "Checkbox", "ClearOnSend",  140, 228,  16, 16);
-
-	TCPPort_Ctl(instance, instance, "Textbox",  "RxData",        10, 258, 260, 60);
-	TCPPort_Ctl(instance, instance, "LED",      "RxReady",      280, 258,  14, 14);
-	TCPPort_Ctl(instance, instance, "TextOut",  "BytesReady",   200, 322, 100, 20);
-	TCPPort_Ctl(instance, instance, "MoButton", "ClearRx",       10, 322,  60, 22);
-	TCPPort_Ctl(instance, instance, "Checkbox", "AccumulateRx",  90, 326,  16, 16);
-
-	/* the three sub-panel icons, each opening a view of its own controls */
-	TCPPort_Ctl(instance, instance, "LED",      "State",        280, 128,  14, 14);
-
-	/* --- Debug sub-panel --- */
-	dbg = TCPPort_SubPanel(instance, instance, "Debug", 10, 360);
-	if (dbg)
+	for (i = 0; TCPPortPanel[i].cls; i++)
 	{
-		TCPPort_Ctl(dbg, instance, "LED",      "OpenLed",       20, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "LED",      "OpeningLed",    60, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "LED",      "ListenLed",    100, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "LED",      "ListeningLed", 140, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "LED",      "CloseLed",     180, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "LED",      "ClosingLed",   220, 10, 14, 14);
-		TCPPort_Ctl(dbg, instance, "Checkbox", "ErrorMsgs",     20, 40, 16, 16);
-		TCPPort_Ctl(dbg, instance, "Checkbox", "TraceMsgs",     80, 40, 16, 16);
-		TCPPort_Ctl(dbg, instance, "Checkbox", "DebugMsgs",    140, 40, 16, 16);
-		TCPPort_Ctl(dbg, instance, "Checkbox", "ShowTxData",    20, 64, 16, 16);
-		TCPPort_Ctl(dbg, instance, "Checkbox", "TraceRxData",  140, 64, 16, 16);
-		TCPPort_Ctl(dbg, instance, "MoButton", "ClearDebug",   210, 40, 60, 22);
-		TCPPort_Ctl(dbg, instance, "Textbox",  "DebugText",     10, 90, 280, 150);
+		TCtl *t = &TCPPortPanel[i];
+		NodeObj container = (t->panel >= 0 && t->panel < 4) ? sub[t->panel] : instance;
+		if (container)
+			TCPPort_Ctl(container, instance, t->cls, t->prop,
+						t->x, t->y, t->w, t->h, t->rows, t->cols);
+	}
+}
+
+/* build the panel one tick after creation - by then the bridge has placed
+   this instance and registered its path, so the controls and sub-views
+   created inside it resolve. This is the object populating its OWN controls
+   the moment it has a location. */
+static int TCPPort_BuildTask(NodeObj instance, NodeObj data, int msgid)
+{
+	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+
+	(void) data;
+	(void) msgid;
+
+	if (local && !local->panelBuilt)
+	{
+		local->panelBuilt = 1;
+		TCPPort_BuildPanel(instance);
+
+		/* run the placement setup, the reference's inctActivatedTask on
+		   placement: settle the display and honor Auto Listen. Enable is
+		   the only gate on the commands, and it defaults on, so the panel
+		   is live - it just opens no socket until Open/Listen is pressed
+		   (Auto Close is the default). The panelBuilt guard is already
+		   set, so this does not rebuild. */
+		TCPPort_Activate(instance, msg_initialize, NULL);
 	}
 
-	/* --- SSL sub-panel --- */
-	ssl = TCPPort_SubPanel(instance, instance, "SSL", 90, 360);
-	if (ssl)
-	{
-		TCPPort_Ctl(ssl, instance, "Checkbox", "SslEnable",  10,  10,  16, 16);
-		TCPPort_Ctl(ssl, instance, "LED",      "SslStatus", 100,  10,  14, 14);
-		TCPPort_Ctl(ssl, instance, "Textbox",  "SslCert",    10,  40, 280, 60);
-		TCPPort_Ctl(ssl, instance, "Textbox",  "SslKey",     10, 108, 280, 60);
-		TCPPort_Ctl(ssl, instance, "Textbox",  "SslPass",    10, 176, 280, 22);
-	}
-
-	/* --- Help sub-panel --- */
-	help = TCPPort_SubPanel(instance, instance, "Help", 170, 360);
-	if (help)
-		TCPPort_Ctl(help, instance, "Markdown", "HelpText", 10, 10, 300, 220);
+	return rtrn_handled;
 }
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
@@ -897,6 +1070,8 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	if (local)
 	{
+		if (local->buildTask)
+			RemoveTask(local->buildTask);
 		if (local->inner)
 			DeleteInstance(local->inner);
 		free(local);
@@ -938,14 +1113,18 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropInt(entry, "Cols", 44);
 	PublishProp(ClassSelf, "Send",         "in",   PROP_NULL, "");
 	PublishProp(ClassSelf, "ClearTx",      "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "AutoSend",     "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "ClearOnSend",  "in",   PROP_CHECKBOX, "0");
+	/* these checkboxes are plain data the code READS (GetPropInt), not      */
+	/* ports it reacts to - so they must be published "data", or the bridge  */
+	/* classifies them message-flowed, never pushes their value, and the box */
+	/* on screen disagrees with the state the object is actually in.         */
+	PublishProp(ClassSelf, "AutoSend",     "data", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "ClearOnSend",  "data", PROP_CHECKBOX, "0");
 
 	entry = PublishProp(ClassSelf, "RxData", "data", PROP_TEXTBOX, "");
 	SetPropInt(entry, "Rows", 6);
 	SetPropInt(entry, "Cols", 44);
 	PublishProp(ClassSelf, "ClearRx",      "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "AccumulateRx", "in",   PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "AccumulateRx", "data", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "BytesReady",   "data", PROP_TEXTOUT, "0");
 
 	PublishProp(ClassSelf, "StreamState",  "data", PROP_TEXTOUT, "IDLING");
@@ -962,19 +1141,19 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "State",        "data", PROP_LED, "1");
 
 	/* the line-end / binary options and the three sub-panels' controls */
-	PublishProp(ClassSelf, "TxFixLineEnds", "in", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "RxFixLineEnds", "in", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "BinaryTx",      "in", PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "BinaryRx",      "in", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "TxFixLineEnds", "data", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "RxFixLineEnds", "data", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "BinaryTx",      "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "BinaryRx",      "data", PROP_CHECKBOX, "0");
 
 	entry = PublishProp(ClassSelf, "DebugText", "data", PROP_TEXTBOX, "");
 	SetPropInt(entry, "Rows", 16);
 	SetPropInt(entry, "Cols", 46);
-	PublishProp(ClassSelf, "ErrorMsgs",    "in",   PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "TraceMsgs",    "in",   PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "DebugMsgs",    "in",   PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "ShowTxData",   "in",   PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "TraceRxData",  "in",   PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "ErrorMsgs",    "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "TraceMsgs",    "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "DebugMsgs",    "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "ShowTxData",   "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "TraceRxData",  "data", PROP_CHECKBOX, "0");
 	PublishProp(ClassSelf, "ClearDebug",   "in",   PROP_NULL, "");
 	PublishProp(ClassSelf, "OpenLed",      "data", PROP_LED, "0");
 	PublishProp(ClassSelf, "OpeningLed",   "data", PROP_LED, "0");
