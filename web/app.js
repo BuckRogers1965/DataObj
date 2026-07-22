@@ -188,15 +188,19 @@ function registerPanel(alias, panelEl, display, onToggle) {
       /* arriving initial Open value must never override it               */
       rec.openApplied = true;
       panelEl.style.display = open ? display : 'none';
+      /* tell the engine the panel opened/closed - an object may react to  */
+      /* its own panel opening (e.g. load help on open). The engine        */
+      /* DELIVERS this to any Open handler; it does not persist the state. */
+      send({ cmd: 'set-property', instance: alias, prop: 'ReservedViewOpen', value: open ? '1' : '0' });
       if (onToggle) onToggle(open);
       updateWiresFor(alias);
     },
   };
   panels[alias] = rec;
 
-  send({ cmd: 'subscribe', instance: alias, port: 'Open' });
-  send({ cmd: 'subscribe', instance: alias, port: 'PanelX' });
-  send({ cmd: 'subscribe', instance: alias, port: 'PanelY' });
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewOpen' });
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewPanelX' });
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewPanelY' });
   return rec;
 }
 
@@ -240,7 +244,7 @@ function effectiveMode(el) {
   for (let e = el; e; e = e.parentElement) {
     if (!e.classList || !e.classList.contains('view-inner')) continue;
     const owner = e.dataset && e.dataset.viewAlias;
-    const pinned = owner && propertyValues[owner + '.Mode'];
+    const pinned = owner && propertyValues[owner + '.ReservedViewMode'];
     if (pinned) return pinned;
   }
   return currentMode;
@@ -747,6 +751,8 @@ function updateLiveControl(entry, value) {
   if (entry.widgetClass === 'MoLabel') { entry.el.textContent = value; return; }
   if (entry.widgetClass === 'TextboxRows') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'lh'; return; }
   if (entry.widgetClass === 'TextboxCols') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'ch'; return; }
+  if (entry.widgetClass === 'AtomW') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'px'; return; }
+  if (entry.widgetClass === 'AtomH') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'px'; return; }
   if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
   if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
   if (entry.widgetClass === 'MenuItems') {
@@ -885,6 +891,17 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   }
   control.classList.add('widget-atom-control');
   el.appendChild(control);
+
+  /* a Markdown/HTML box takes the size its OBJECT declares (W/H), the same */
+  /* way a Textbox takes Rows/Cols - the panel that placed it sets its size, */
+  /* so it fits whatever container it was built into. Subscribed like any    */
+  /* value and pushed on subscribe.                                          */
+  if (className === 'Markdown' || className === 'HTML') {
+    (liveControls[alias + '.W'] = liveControls[alias + '.W'] || []).push({ el: control, widgetClass: 'AtomW' });
+    (liveControls[alias + '.H'] = liveControls[alias + '.H'] || []).push({ el: control, widgetClass: 'AtomH' });
+    send({ cmd: 'subscribe', instance: alias, port: 'W' });
+    send({ cmd: 'subscribe', instance: alias, port: 'H' });
+  }
 
   /* a MenuButton's own button text already says what it is (Label,        */
   /* plus Selected once something's been picked) - a second "alias" label  */
@@ -1043,7 +1060,7 @@ function registerView(alias, props, pos, hidden, container) {
 
   /* aliasing a view aliases its Open - the alias renders as another icon */
   /* that opens this same panel (see renderAliasControl)                   */
-  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'Open'); };
+  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'ReservedViewOpen'); };
   header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
@@ -1065,9 +1082,9 @@ function registerView(alias, props, pos, hidden, container) {
   send({ cmd: 'subscribe', instance: alias, port: 'Y' });
   send({ cmd: 'subscribe', instance: alias, port: 'W' });
   send({ cmd: 'subscribe', instance: alias, port: 'H' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Mode' });	/* a view may pin its mode */
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewMode' });	/* a view may pin its mode */
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Resizeable' });
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewResizeable' });
 
   log('created ' + alias + ' (View)', 'event');
 }
@@ -1220,15 +1237,15 @@ function onPropertyChanged(alias, port, value) {
   if (pnl) {
     /* Open's stored value is the initial presentation only - after       */
     /* first paint, open/closed is this window's own business              */
-    if (port === 'Open' && !pnl.openApplied) {
+    if (port === 'ReservedViewOpen' && !pnl.openApplied) {
       pnl.openApplied = true;
       pnl.setOpen(value === '1');
     }
     /* same "our own in-flight gesture wins" reasoning as X/Y above */
-    else if (port === 'PanelX' && (!panelDrag || panelDrag.alias !== alias)) {
+    else if (port === 'ReservedViewPanelX' && (!panelDrag || panelDrag.alias !== alias)) {
       pnl.el.style.left = (parseInt(value, 10) || 0) + 'px';
       updateWiresFor(alias);
-    } else if (port === 'PanelY' && (!panelDrag || panelDrag.alias !== alias)) {
+    } else if (port === 'ReservedViewPanelY' && (!panelDrag || panelDrag.alias !== alias)) {
       pnl.el.style.top = (parseInt(value, 10) || 0) + 'px';
       updateWiresFor(alias);
     }
@@ -1236,7 +1253,7 @@ function onPropertyChanged(alias, port, value) {
 
   const view = views[alias];
   if (view) {
-    if (port === 'Resizeable') view.resizeHandle.style.display = value === '0' ? 'none' : 'block';
+    if (port === 'ReservedViewResizeable') view.resizeHandle.style.display = value === '0' ? 'none' : 'block';
     else if (port === 'W' && (!resizeState || resizeState.alias !== alias)) {
       view.panel.style.width = (parseInt(value, 10) || 190) + 'px';
       updateWiresFor(alias);
@@ -2030,8 +2047,8 @@ document.addEventListener('pointerup', (ev) => {
   if (panelDrag) {
     /* commit the panel's place - the panel's own shared properties, the  */
     /* icon's X/Y untouched                                                */
-    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'PanelX', value: String(parseInt(panelDrag.el.style.left, 10) || 0) });
-    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'PanelY', value: String(parseInt(panelDrag.el.style.top, 10) || 0) });
+    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'ReservedViewPanelX', value: String(parseInt(panelDrag.el.style.left, 10) || 0) });
+    send({ cmd: 'set-property', instance: panelDrag.alias, prop: 'ReservedViewPanelY', value: String(parseInt(panelDrag.el.style.top, 10) || 0) });
     panelDrag = null;
     return;
   }

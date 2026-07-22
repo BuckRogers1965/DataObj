@@ -43,27 +43,8 @@ drops into a flow like any other object.
 
 */
 
-/* the Help panel's text, rendered by the Markdown widget */
-#define TCPPORT_HELP \
-	"# TCP Port\n" \
-	"A TCP object for transmitting and receiving data on a configured\n" \
-	"port, including those used by HTTP, FTP, SMTP, Telnet, POP and HTTPS.\n" \
-	"\n" \
-	"Default input connection is to **Transmit Data**.\n" \
-	"Default output connection is to **Receive Data**.\n" \
-	"\n" \
-	"## Controls\n" \
-	"- **Enable** - prepares the port to send and receive. Unchecking is a\n" \
-	"  full stop: it closes the socket and DEACTIVATES the object.\n" \
-	"- **Host Name** - the URL or IP of the server, with no protocol\n" \
-	"  prefix (`www.hostname.com`, not `http://www.hostname.com`).\n" \
-	"- **Standard Ports** - FTP 21, Telnet 23, SMTP 25, HTTP 80, POP 110,\n" \
-	"  HTTPS 443; picking one writes the Port box.\n" \
-	"- **Listen / Open / Close** - Listen serves on Port; Open dials Host\n" \
-	"  Name; Close is a full stop. They work whenever the panel is Enabled.\n" \
-	"- **Send** - transmits the Transmit box when connected.\n" \
-	"- **Stream State** - DISABLED, IDLING, LISTEN, OPENING, CONNECTED,\n" \
-	"  CLOSING.\n"
+/* NO hardcoded help: the help lives in objects/tcpport/README.md and is read
+   from disk into the Help box when the panel is opened. */
 
 /* Stream State, the DspStateNames of the original panel */
 #define ST_DISABLED   "DISABLED"
@@ -772,9 +753,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "SslKey", "");
 	SetPropStr(instance, "SslPass", "");
 
-	/* the Help panel - the object's own documentation, rendered */
-	SetPropStr(instance, "HelpText", TCPPORT_HELP);
-
 	/* status */
 	SetPropStr(instance, "StreamState", ST_IDLING);
 	SetPropStr(instance, "Listening", "0");
@@ -894,10 +872,14 @@ static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop
 		Connect(c, "Out", target, prop);		/* a command port */
 	else if (strcmp(cls, "Button") == 0)
 		Connect(c, "Out", target, "Activate");
+	else if (strcmp(cls, "Markdown") == 0)
+	{
+		/* the Help box starts EMPTY; its README.md is read from disk into its
+		   Value only when the Help panel is OPENED (TCPPort_OnHelpOpen). */
+	}
 	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Markdown") == 0 || strcmp(cls, "Label") == 0
-			 || strcmp(cls, "VUMeter") == 0)
-		TCPPort_Reflect(target, prop, c, "In");	/* a readout, seeded now */
+			 || strcmp(cls, "Label") == 0 || strcmp(cls, "VUMeter") == 0)
+		TCPPort_Reflect(target, prop, c, "Value");	/* set its display property */
 	else if (strcmp(cls, "Dropdown") == 0)
 	{
 		Connect(c, "Value", target, prop);		/* menu picks the value */
@@ -909,6 +891,61 @@ static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop
 		Connect(c, "Value", target, prop);		/* edits it */
 		TCPPort_Reflect(target, prop, c, "In");	/* and reflects it, seeded now */
 	}
+}
+
+/* read a whole file into a malloc'd, NUL-terminated string (caller frees) */
+static char *TCPPort_ReadFile(char *path)
+{
+	FILE *f = fopen(path, "rb");
+	long  n;
+	char *buf;
+
+	if (!f)
+		return NULL;
+	fseek(f, 0, SEEK_END);
+	n = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (n < 0)
+	{
+		fclose(f);
+		return NULL;
+	}
+	buf = malloc(n + 1);
+	if (!buf)
+	{
+		fclose(f);
+		return NULL;
+	}
+	n = (long)fread(buf, 1, n, f);
+	buf[n] = '\0';
+	fclose(f);
+	return buf;
+}
+
+/* the Help panel was OPENED: read the widget's README.md from disk and set
+   it into the Help box's Value with an update. No hardcoded help. */
+int TCPPort_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
+{
+	char vpath[256], mpath[320];
+	NodeObj box;
+	char *md;
+
+	if (message == msg_eof || !GetValueInt(data))
+		return rtrn_handled;			/* only on OPEN */
+
+	if (!PathOfInstance(view, vpath, sizeof(vpath)))
+		return rtrn_handled;
+	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
+	box = ResolvePath(mpath);
+	if (!box)
+		return rtrn_handled;
+
+	md = TCPPort_ReadFile("objects/tcpport/README.md");
+	SetPropStr(box, "Value", md ? md : "");
+	if (md)
+		free(md);
+
+	return rtrn_handled;
 }
 
 /* a sub-panel: a View put into the panel (renders as an icon that opens),
@@ -1001,7 +1038,8 @@ static TCtl TCPPortPanel[] = {
 	{ "Textbox",  "SslPass",        13, 295, 348, 32, 2,  1, 42 },
 
 	/* --- panel 3: Help --- */
-	{ "Markdown", "HelpText",       19,  37, 474, 273, 3,  0,  0 },
+	/* the standard help box: fills the Help panel with a 10px margin */
+	{ "Markdown", "HelpText",       10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 3,  0,  0 },
 
 	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
 };
@@ -1024,7 +1062,15 @@ static void TCPPort_BuildPanel(NodeObj instance)
 	sub[0] = instance;
 	sub[1] = TCPPort_SubPanel(instance, instance, "Debug", 380, 176, 460, 540);
 	sub[2] = TCPPort_SubPanel(instance, instance, "SSL",   380, 149, 440, 460);
-	sub[3] = TCPPort_SubPanel(instance, instance, "Help",   14, 560, 560, 380);
+	sub[3] = TCPPort_SubPanel(instance, instance, "Help",   14, 560, HELP_W, HELP_H);
+
+	/* load the README into the Help box when the Help panel is OPENED */
+	if (sub[3])
+	{
+		NodeObj openPort = GetPropNode(sub[3], "ReservedViewOpen");
+		if (openPort)
+			SetPropLong(openPort, "OnMsg", (long)TCPPort_OnHelpOpen);
+	}
 
 	for (i = 0; TCPPortPanel[i].cls; i++)
 	{
@@ -1174,7 +1220,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropInt(entry, "Rows", 1);
 	SetPropInt(entry, "Cols", 42);
 
-	PublishProp(ClassSelf, "HelpText",     "data", PROP_MARKDOWN, "");
+	/* no HelpText property: the Help box loads README.md from disk on open */
 
 	/* ---------------------------------------------------------------- */
 	/* The layout, control for control, from the original panel          */

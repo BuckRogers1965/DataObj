@@ -80,8 +80,8 @@ def make_test_view(t, label):
     t.js("send({cmd:'create-instance',class:'View',as:'%s'})" % alias)
     t.js("send({cmd:'set-property',instance:'%s',prop:'X',value:'%d'})" % (alias, 250 + i * 115))
     t.js("send({cmd:'set-property',instance:'%s',prop:'Y',value:'8'})" % alias)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (alias, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (alias, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (alias, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (alias, py))
     t.wait_js("!!views['%s']" % alias, label + " view")
     t.js("panels['%s'].setOpen(true)" % alias)
     time.sleep(0.6)
@@ -280,8 +280,8 @@ def test_options_internals(t, r):
         "internals panel")
     # the dissection table is TALL (one row per published property) -
     # park it in its own column on the far right, clear of the grid
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'1080'})" % panel_view)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'60'})" % panel_view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1080'})" % panel_view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'60'})" % panel_view)
     time.sleep(1.5)  # members stream in on open
 
     raw = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
@@ -390,8 +390,8 @@ def test_open_close(t, r):
     view = "/Root/OpenCloseTest"
     t.wait_js("!!views['%s']" % view, "renamed view")
     px, py = next_slot()
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (view, py))
     time.sleep(0.6)
 
     closed = t.js("panels['%s'].el.style.display === 'none'" % view)
@@ -414,7 +414,7 @@ def test_open_close(t, r):
              st and st.get("open") and st.get("parent") == "canvas"
              and st.get("iconShown") and st.get("iconLeft") == icon_before)
 
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px + 40))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px + 40))
     time.sleep(0.8)
     st = t.js("(()=>{const i=instances['%s'];const p=panels['%s'];"
               "return {panelLeft:p.el.style.left, iconLeft:i.el.getBoundingClientRect().left};})()" % (view, view))
@@ -447,8 +447,8 @@ def test_rename_then_manipulate(t, r):
     view = '/Root/RenameTest'
     t.js("send({cmd:'create-instance',class:'View',as:'%s',container:'',x:'660',y:'8'})" % view)
     t.wait_js("!!views['%s']" % view, "rename test view")
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'1130'})" % view)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'300'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1130'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'300'})" % view)
     t.js("panels['%s'].setOpen(true)" % view)
     time.sleep(0.8)
 
@@ -509,8 +509,8 @@ def test_lazy_contents(t, r):
     view = "/Root/LazyTest"
     t.wait_js("!!views['%s']" % view, "renamed lazy view")
     px, py = next_slot()
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (view, py))
     t.js("panels['%s'].setOpen(true)" % view)
     time.sleep(0.8)
 
@@ -680,8 +680,8 @@ def test_options_on_panel_control(t, r):
     t.js("send({cmd:'internals',instance:'%s'})" % thing)
     panel = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % thing,
                       "slider internals")
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'880'})" % panel)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'430'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'880'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'430'})" % panel)
     time.sleep(1.5)  # members stream in
 
     member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"

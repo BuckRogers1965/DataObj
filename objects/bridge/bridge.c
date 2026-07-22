@@ -693,8 +693,8 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		}
 		SetPropInt(view, "_Hidden", 1);
 		SetPropStr(view, "_InternalsOf", curAlias);
-		SetPropInt(view, "PanelX", 320);
-		SetPropInt(view, "PanelY", 120);
+		SetPropInt(view, "ReservedViewPanelX", 320);
+		SetPropInt(view, "ReservedViewPanelY", 120);
 		SetPropInt(view, "W", 300);
 
 		RegisterPath(viewAlias, view);
@@ -860,10 +860,10 @@ void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 	PlaceInstance(top, container, x, y);
 	if (strcmp(GetNameStr(GetParent(top)), "View") == 0)
 	{
-		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "PanelX") + 24);
-		SetOrDeliverProp(top, "PanelX", panelPos);
-		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "PanelY") + 24);
-		SetOrDeliverProp(top, "PanelY", panelPos);
+		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "ReservedViewPanelX") + 24);
+		SetOrDeliverProp(top, "ReservedViewPanelX", panelPos);
+		snprintf(panelPos, sizeof(panelPos), "%d", GetPropInt(src, "ReservedViewPanelY") + 24);
+		SetOrDeliverProp(top, "ReservedViewPanelY", panelPos);
 	}
 
 	/* translate the clones into the session - register every path FIRST,  */
@@ -1442,7 +1442,7 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 		char dbg[1024];
 		snprintf(dbg, sizeof(dbg), "RENAME: '%s' -> '%s'  (position unchanged: X=%s Y=%s PanelX=%s PanelY=%s)",
 				 oldAlias, newAlias, GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
-				 GetPropStr(inst, "PanelX"), GetPropStr(inst, "PanelY"));
+				 GetPropStr(inst, "ReservedViewPanelX"), GetPropStr(inst, "ReservedViewPanelY"));
 		DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 	}
 
@@ -1488,7 +1488,7 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 		/* the log); shows the panel-position writes landing on load        */
 		if (strcmp(prop, "X") == 0 || strcmp(prop, "Y") == 0
 			|| strcmp(prop, "W") == 0 || strcmp(prop, "H") == 0
-			|| strcmp(prop, "PanelX") == 0 || strcmp(prop, "PanelY") == 0)
+			|| strcmp(prop, "ReservedViewPanelX") == 0 || strcmp(prop, "ReservedViewPanelY") == 0)
 		{
 			char dbg[300];
 			snprintf(dbg, sizeof(dbg), "SET-POS: %s.%s = %s", alias, prop, value);
@@ -1788,7 +1788,8 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 	InstanceData *ownerLocal;
 	char *alias, *port, *eventType, *value;
 	char *escAlias, *escPort, *escValue;
-	char buf[900];
+	char *buf;
+	int   bufLen;
 
 	owner = (NodeObj) GetPropLong(instance, "Owner");
 	if (!owner)
@@ -1812,7 +1813,14 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 	escPort  = JsonEscapeStr(port ? port : "");
 	escValue = JsonEscapeStr(value ? value : "");
 
-	snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"instance\":%s,\"port\":%s,\"value\":%s}",
+	/* size the buffer to the actual value - a fixed buffer silently dropped
+	   any large property (a README's worth of help Markdown is ~2.5KB, well
+	   past a small fixed size). Same malloc pattern as instance-created. */
+	bufLen = (int)(strlen(escAlias) + strlen(escPort) + strlen(escValue)
+			 + strlen(eventType ? eventType : "message-flowed") + 64);
+	buf = malloc(bufLen);
+
+	snprintf(buf, bufLen, "{\"event\":\"%s\",\"instance\":%s,\"port\":%s,\"value\":%s}",
 			 eventType ? eventType : "message-flowed", escAlias, escPort, escValue);
 
 	free(escAlias);
@@ -1852,6 +1860,7 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 		}
 	}
 
+	free(buf);
 	return rtrn_propagate;
 }
 

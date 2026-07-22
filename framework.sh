@@ -8,4 +8,5 @@ pkill -x framework 2>/dev/null && sleep 1
 # of every clone prints; pass your own -v after to override, e.g.
 # ./framework.sh -v 1
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.
-./framework -v 3 $@
+#./framework -v 3 $@
+./framework $@

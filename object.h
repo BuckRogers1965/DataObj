@@ -394,4 +394,11 @@ NodeObj GetClassSkin (NodeObj class);
 int     SaveSkin(NodeObj class, char * filename);
 NodeObj LoadSkin(NodeObj class, char * filename);
 
+
+/* the standard Help panel size; the help text box */
+#define HELP_W 530
+#define HELP_H 376
+#define HELP_W_OFF 50
+#define HELP_H_OFF 80
+
 #endif

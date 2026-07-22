@@ -272,15 +272,15 @@ def test_widget_stamp(raw, r, home, source):
              "Widget=%s Direction=%s" % (w, d),
              w == "5" and d == "data")
 
-    raw.send({"cmd": "create-alias", "of": source, "prop": "Open",
+    raw.send({"cmd": "create-alias", "of": source, "prop": "ReservedViewOpen",
               "container": home, "x": "600", "y": "90"})
     ev2 = raw.wait_event(lambda e: e.get("event") == "instance-created"
                          and e.get("class") == "Alias"
                          and e.get("instance") != name)
     name2 = ev2.get("instance") if ev2 else None
     w2 = raw.value_of(name2, "Widget") if name2 else None
-    r.expect("widget stamp: an alias of Open is a doorway",
-             "Widget=12 (PROP_ICON - Open's published type)",
+    r.expect("widget stamp: an alias of ReservedViewOpen is a doorway",
+             "Widget=12 (PROP_ICON - ReservedViewOpen's published type)",
              "Widget=%s" % w2,
              w2 == "12")
 

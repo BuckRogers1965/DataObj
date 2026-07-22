@@ -628,6 +628,38 @@ interpreter.
   core" actually safe at scale: an object that needs another object's
   class to exist first (subclassing, a composite depending on its parts)
   declares it instead of relying on scan-order luck.
+- **Source enumeration — a sink reading all its inputs (`wgv->Sources`).**
+  Today `Connect` records the subscription on the **source** port (a
+  `Subscriber` sub-node naming `{Instance, Port, Callback}`): a forward,
+  source→sink index that answers "who do I feed?" but not the reverse.
+  A sink handler is delivered one value at a time and cannot ask "who is
+  wired into my In, and what does each hold right now?" VNOS gave every
+  input exactly that — `wgv->numSources` / `wgv->Sources[i]` — and objects
+  walked it to *combine* their inputs. Without it a whole family of objects
+  can't be built honestly: **any N-input combinational object** — LogicGate
+  (OR/AND/XOR over N wires), Comparator, Summer/adder, Mux, averager,
+  majority-voter. Each only ever sees a single arriving value with no way
+  to hold the combined picture, so it either tries to track sources itself
+  (impossible — a delivery doesn't identify which source it came from) or
+  degrades to single-input. `objects/logicgate` degrades exactly this way
+  on purpose today, and its header comment is the placeholder for this
+  entry: as a single-input OR+Invert it is a working NOT gate (it inverts a
+  Pulse for the duty-cycle bench — a PulseGenerator feeding two Stopwatches,
+  one through the gate, reads the on and off phases at once), but true
+  multi-input OR/AND/XOR waits on this primitive.
+  **The machinery is already half-present.** `ScrubRegistrySubscriptions`
+  (object.c) already walks every `Subscriber` record registry-wide,
+  recursively through sub-properties, looking for ones that point at a
+  given dying instance — source enumeration is that *same traversal*,
+  collecting instead of deleting and keyed on a target `{instance, port}`
+  rather than a whole instance. So the primitive is a `SourcesOf(instance,
+  port)` enumerator in object.c that yields the wired source `{instance,
+  port}` list (read each source's current value with `GetProp*`), backed
+  either by that on-demand registry walk or, if it gets hot, a live reverse
+  index maintained by `Connect`/`Disconnect` alongside the forward one.
+  This closes the last gap between "a wire is a subscription" and "an object
+  can reason about all its wires," and it is what turns the combinational
+  objects from single-input stand-ins into the real thing.
 - TCP client mode and multi-connection (the ring pattern and
   connecting state machine in the VNOS TCPObject.c reference).
   Client mode brings `async-dns/` into the build: hostname resolution

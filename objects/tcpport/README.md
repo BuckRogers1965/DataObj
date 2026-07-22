@@ -1,62 +1,179 @@
-# TCPPort
+# TCP Port
 
-The TCP instrument panel, ported from the VNOS control of the same name
-(`objects/demo/tcpport`). It is a **front end, not a networking
-object**: it holds no socket, it contains a TCP engine instance and
-drives it — the same shell/engine split ScriptBox uses for language
-hosts.
+The TCP Port is a standard TCP (Transmission Control Protocol) object for
+transmitting and receiving TCP data. It enables communication on the
+configured port, including those associated with HTTP, FTP, SMTP, Telnet,
+POP, and HTTPS.
 
-Default input connection is to Transmit Data; default output connection
-is to Receive Data. So it drops into a flow like any other object, and
-what it *is* underneath stays invisible from outside.
+**Default input connection** is to **Transmit Data**.
+**Default output connection** is from **Receive Data**.
 
-## Connection
+## Options
 
-- **HostName** — the host, normalized on Activate exactly as the
-  original did: leading whitespace stripped, cut at the first
-  whitespace, lower-cased. No protocol prefix (`www.host.com`, not
-  `http://www.host.com`).
-- **StandardPort** — the six-service menu (FTP, TELNET, SMTP, HTTP,
-  POP, HTTPS); picking one writes **Port** (21/23/25/80/110/443).
-- **Port** — the numeric port.
+**Enable**
+- *Checked:* prepares the TCP Port to send and receive data. This is the
+  default.
+- *Unchecked:* performs no operation and does not transmit or receive,
+  even if Auto Open / Auto Listen / Auto Send is set or Open / Listen /
+  Send is pressed.
 
-## Commands
+**Host Name**
+The URL (e.g. `www.hostname.com`) or IP address (e.g. `101.102.103.104`)
+of a server. A URL should not contain the protocol prefix — use
+`www.hostname.com`, not `http://www.hostname.com`.
 
-`Open`, `Listen`, `Close`, `Send`, `ClearTx`, `ClearRx` are ordinary
-**in ports** that act on a `1`. That means the panel's MoButtons press
-them, and so can a Pulse, a script, or another object — a command is
-not a privileged kind of thing here.
+**Standard Ports**
+Selects the port to transmit and receive on. Picking a protocol writes the
+Port box with that protocol's default number:
 
-- **Listen** — brings the engine up as a server on `Port`.
-- **Close** — a full stop: sockets close and the engine shuts down.
-- **Send** — sends `TxData`, only when connected and only if there is
-  something to send; clears the box afterwards if **ClearOnSend**.
-- **Open** — client connect. The engine's connecting state machine is
-  still to come (see ROADMAP, TCP client mode); until it lands, Open
-  reports the gap through the debug log rather than failing silently.
+- **FTP** — 21
+- **Telnet** — 23
+- **SMTP** — 25
+- **HTTP** — 80
+- **POP** — 110
+- **HTTPS** — 443
 
-## Data
+**Port**
+The numeric value for the port. Selecting a protocol from Standard Ports
+changes this to that protocol's default.
 
-- **TxData** / **RxData** — the Transmit and Receive boxes.
-- **AutoSend** — send as soon as something arrives on `In`.
-- **AccumulateRx** — append received data rather than replacing it.
-- **BytesReady** — how much is sitting in `RxData`.
+**Stream State**
+Reports the current state of the connection: Disabled, Idling, Listen,
+Opening, Connected, or Closing.
 
-## Options and status
+**Auto Open / Auto Listen / Auto Close**
+- *Auto Open, checked:* opens a connection to Host Name when the flow
+  loads; unchecked requires the Open button (the default).
+- *Auto Listen, checked:* listens on Port when the flow loads; unchecked
+  requires the Listen button (the default).
+- *Auto Close, checked:* closes the port when the flow opens, regardless of
+  saved state (the default); unchecked requires the Close button.
 
-- **AutoOpen / AutoListen / AutoClose** — mutually exclusive, as in the
-  original: setting one clears the other two. Honored on Activate and
-  whenever Enable goes high.
-- **StreamState** — `DISABLED`, `IDLING`, `LISTEN`, `OPENING`,
-  `CONNECTED`, `CLOSING`.
-- **Listening / Connected / Idling / Disabled / RxReady / TxReady** —
-  status LEDs, set together with StreamState so a readout and its
-  lights can never disagree.
-- **Enable** — the standard enable line; dropping it is a full stop.
+These three are mutually exclusive.
 
-## Notes
+**Open / Listen / Close** (buttons)
+Open opens the connection to Host Name; Listen serves on Port; Close closes
+the connection.
 
-The TCP engine's activation is one-shot (`Enable=0` is a shutdown, not
-a pause), so listening again after a close means a fresh inner
-instance. The widget hides that lifecycle — which is what a front end
-is for.
+**Status LEDs**
+Disabled, Idling, Connected, and Listening report the port's state. The
+finer-grained Opening / Open / Listening / Listen / Closing / Closed LEDs
+appear on the **TCP Debug** panel.
+
+**Secure**
+Opens the **TCP SSL** panel (below).
+
+**Debug**
+Opens the **TCP Debug** panel (below).
+
+### Transmit
+
+**Transmit Data**
+The commands and data to transmit to the connection.
+
+**Tx Ready**
+Lights when the port is ready to accept data into Transmit Data; unlights
+when it is ready to send the box's contents.
+
+**Send** — sends the contents of Transmit Data.
+**Clear Tx** — clears Transmit Data.
+
+**Binary (Transmit Data)**
+- *Checked:* transmits in binary format.
+- *Unchecked:* transmits as ASCII text (the default).
+
+**Fix Line Ends (Transmit Data)**
+- *Checked:* converts line ends to the platform standard when sending.
+- *Unchecked:* sends content unchanged.
+
+**Clear On Send**
+- *Checked:* clears Transmit Data once its contents are copied to the send
+  buffer.
+- *Unchecked:* leaves the contents after transmission (the default).
+
+**Auto Send**
+- *Checked:* transmits the Transmit box whenever it changes while
+  connected (the default).
+- *Unchecked:* requires a press of Send.
+
+### Receive
+
+**Receive Data**
+Commands and data received from the connection.
+
+**Rx Ready**
+Lights when Receive Data has received content; unlights when empty.
+
+**Rx Bytes Ready**
+The number of bytes received in Receive Data ready to be read.
+
+**Clear Rx** — clears Receive Data.
+
+**Binary (Receive Data)**
+- *Checked:* receives in binary format.
+- *Unchecked:* receives as ASCII text (the default).
+
+**Fix Line Ends (Receive Data)**
+- *Checked:* converts received line ends to the platform standard.
+- *Unchecked:* receives content unchanged.
+
+**Accumulate**
+- *Checked:* adds newly received content to what is already in Receive Data
+  (the default).
+- *Unchecked:* replaces Receive Data with each new set of data received —
+  useful when feeding a text box that should only see each chunk once.
+
+---
+
+## TCP SSL
+
+Configures SSL (Secure Sockets Layer) for the TCP Port, reached by the
+**Secure** button. Configuring security is required only when using a TCP
+Port as a server.
+
+**Enable**
+- *Checked:* enables the security configuration.
+- *Unchecked:* no security (the default).
+
+**Status**
+Black when idle, green when functioning, yellow when enabled but no secure
+connection is established, and red when a problem is present.
+
+**Certificate**
+The certificate for the associated key. A certificate must be paired with a
+key for security to function.
+
+**Key**
+The key associated with the certificate. A key must be paired with a
+certificate for security to function.
+
+**Pass Phrase**
+The pass phrase for the certificate/key pair.
+
+---
+
+## TCP Debug
+
+Views errors, state messages, and traffic during operation, reached by the
+**Debug** button. There is no Enable checkbox: with no message-type boxes
+checked, Debug is off; with one or more checked, it is on.
+
+**Status lights**
+Open, Opening, Listen, Listening, Close, and Closing each light for the
+matching connection state. On this panel the LEDs show all four states
+(black, green, yellow, red); on the main panel they show two (black,
+green).
+
+**Debug Messages**
+The log, filtered by the message-type checkboxes below.
+
+**Message Types**
+- **Errors** — errors during transmission or receipt, prefixed `Err:`.
+- **Progress** — progress messages, prefixed `Prog:`.
+- **Tx Data** — content sent from Transmit Data, prefixed `Tx:`.
+- **Rx Data** — content received in Receive Data, prefixed `Rx:`.
+- **Messages** — general debug messages, prefixed `Dbg:`.
+
+All default to off.
+
+**Clear** — clears Debug Messages.

@@ -96,7 +96,7 @@ NodeObj CreateRoot(char * name)
 
 	SetPropStr(root, "Name", name);
 	SetPropStr(root, "Container", "");	/* the top: nothing above it */
-	SetPropStr(root, "Open", "1");
+	SetPropStr(root, "ReservedViewOpen", "1");
 
 	snprintf(path, sizeof(path), "/%s", name);
 	RegisterPath(path, root);
@@ -463,13 +463,13 @@ void BuildPalette(void){
 	PaletteView = CreateObject(RootView, "View");
 	SetPropStr(PaletteView, "Name", "Palette");
 	RegisterPath("/Root/Palette", PaletteView);
-	SetPropStr(PaletteView, "Open", "1");	/* views default closed; the palette starts open */
+	SetPropStr(PaletteView, "ReservedViewOpen", "1");	/* views default closed; the palette starts open */
 	/* clear of the menus, which sit on the top row of the canvas at y=6 -
 	   the palette icon used to land on top of them and swallow every click */
 	SetPropInt(PaletteView, "X", 20);
 	SetPropInt(PaletteView, "Y", 60);
-	SetPropInt(PaletteView, "PanelX", 20);
-	SetPropInt(PaletteView, "PanelY", 60);
+	SetPropInt(PaletteView, "ReservedViewPanelX", 20);
+	SetPropInt(PaletteView, "ReservedViewPanelY", 60);
 	/* the palette is not precious in principle - a restart rebuilds it -
 	   but losing it mid-session costs you every class you can drag out,
 	   so it carries the same ordinary guard the menus do */
@@ -1513,7 +1513,7 @@ void PlaceInstance(NodeObj inst, char *container, char *x, char *y)
 	snprintf(dbg, sizeof(dbg), "PLACE: '%s' in '%s' at X=%s Y=%s (PanelX=%s PanelY=%s)",
 			 GetPropStr(inst, "Name"), GetPropStr(inst, "Container"),
 			 GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
-			 GetPropStr(inst, "PanelX"), GetPropStr(inst, "PanelY"));
+			 GetPropStr(inst, "ReservedViewPanelX"), GetPropStr(inst, "ReservedViewPanelY"));
 	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 }
 
@@ -1691,9 +1691,9 @@ void PublishPosition(NodeObj class)
 	/* like: another icon for the same thing, a doorway to its one panel -   */
 	/* the client renders the stamped Widget instead of special-casing the   */
 	/* property name.                                                         */
-	PublishProp(class, "Open",   "data", PROP_ICON, "0");
-	PublishProp(class, "PanelX", "data", PROP_NULL, "240");
-	PublishProp(class, "PanelY", "data", PROP_NULL, "60");
+	PublishProp(class, "ReservedViewOpen",   "data", PROP_ICON, "0");
+	PublishProp(class, "ReservedViewPanelX", "data", PROP_NULL, "240");
+	PublishProp(class, "ReservedViewPanelY", "data", PROP_NULL, "60");
 
 	/* generic, not View-specific - anything CAN be marked undeletable      */
 	/* this way, the Palette's own bootstrap instances are just the first    */
@@ -1711,9 +1711,9 @@ void InitPosition(NodeObj instance)
 	SetPropStr(instance, "Container", "");
 	SetPropStr(instance, "Deletable", "1");
 	SetPropStr(instance, "Name", "");
-	SetPropStr(instance, "Open", "0");
-	SetPropInt(instance, "PanelX", 240);
-	SetPropInt(instance, "PanelY", 60);
+	SetPropStr(instance, "ReservedViewOpen", "0");
+	SetPropInt(instance, "ReservedViewPanelX", 240);
+	SetPropInt(instance, "ReservedViewPanelY", 60);
 }
 
 /* call the Activate function pointer an instance carries on itself */
