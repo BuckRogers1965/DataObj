@@ -11,31 +11,21 @@
 
 /*
 
-Stopwatch object: the stop-watch instrument panel, ported from the VNOS
-control of the same name (objects/demo/stopwatch - stopwatch.c and its
-panel definition stopwatchpb.c). It measures and reports the time between
-a start event and a stop event.
+Stopwatch object: a stop-watch instrument panel. It measures and reports the
+time between a start event and a stop event.
 
 Wire a PulseGenerator's Out to this Run and it TIMES THE PULSES: with Run
-Edge = Positive and Stop Edge = Run Ends, timing starts on the rising
-edge and stops on the falling edge, so Duration reads the pulse's high
-width. (Point Stop Edge at a separate Stop line to time between two
-different events instead.)
-
-	VNOS                          here
-	----                          ----
-	stopwatchpb.c ControlInfo[]   the flat control table (SWCtl)
-	Run_change / Stop_change      Stopwatch_OnRun / Stopwatch_OnStop
-	vGet64bMilliSecTime           GetCurrentTime (timer.h, cached us clock)
-	Run/Stop Edge menus           Dropdowns over RunEdge/StopEdge
-	Duration static text          the Duration property (a readout)
+Edge = Positive and Stop Edge = Run Ends, timing starts on the rising edge
+and stops on the falling edge, so Duration reads the pulse's high width.
+(Point Stop Edge at a separate Stop line to time between two different events
+instead.)
 
 Everything here is a property. Run/Stop/Enable carry a handler so a write
-acts; there is no "in"/"out" port. A view exposes its external
-inputs/outputs as aliases onto these properties.
+acts; there is no "in"/"out" port. A view exposes its external inputs/outputs
+as aliases onto these properties.
 
-Dataflow, as the reference help states it: "Default input connection is
-to Run. Default output connection is from Duration."
+Dataflow: the default input connection is to Run, the default output
+connection is from Duration.
 
 */
 
@@ -73,8 +63,8 @@ static int Stopwatch_Is(NodeObj instance, char *prop, char *val)
 	return cur && strcmp(cur, val) == 0;
 }
 
-/* render the last measurement into Duration, in the chosen Time Scale -
-   the reference's stpwShowDuration. Duration is just a property, so the
+/* render the last measurement into Duration, in the chosen Time Scale.
+   Duration is just a property, so the
    readout wired to it updates when it changes. */
 static void Stopwatch_ShowDuration(NodeObj instance)
 {
@@ -108,7 +98,7 @@ static void Stopwatch_Start(NodeObj instance)
 	SetPropStr(instance, "OffEvent", "0");
 }
 
-/* the reference's stpwStopTimer: close the interval and publish it */
+/* close the interval and publish it */
 static void Stopwatch_StopTimer(NodeObj instance)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -133,7 +123,7 @@ static void Stopwatch_StopTimer(NodeObj instance)
 
 /* Run: a write of 1 (press) or 0 (release). The Run Edge decides which of
    those STARTS timing; the other edge, when Stop Edge is "Run Ends",
-   stops it - the reference's Run_change. */
+   stops it. */
 int Stopwatch_OnRun(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -160,7 +150,7 @@ int Stopwatch_OnRun(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Stop: Positive stops on 1, Negative on 0 - the reference's Stop_change */
+/* Stop: Positive stops on 1, Negative on 0 */
 int Stopwatch_OnStop(NodeObj instance, MsgId message, NodeObj data)
 {
 	int v;
@@ -194,8 +184,7 @@ int Stopwatch_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Time Scale changed: re-display the same measurement in the new unit -
-   the reference's TimeUnits_change. */
+/* Time Scale changed: re-display the same measurement in the new unit. */
 int Stopwatch_OnTimeUnits(NodeObj instance, MsgId message, NodeObj data)
 {
 	char *pick;
@@ -211,7 +200,7 @@ int Stopwatch_OnTimeUnits(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Placement setup - the reference's ACTIVATE handler: settle the LEDs
+/* Placement setup: settle the LEDs
    (Off lit, On dark) and clear any in-progress state. */
 int Stopwatch_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
@@ -436,8 +425,7 @@ static NodeObj Stopwatch_SubPanel(NodeObj panel, char *name, int x, int y, int w
 	return v;
 }
 
-/* the panel, straight off the reference's ControlInfo[] table
-   (objects/demo/stopwatch/stopwatchpb.c): 0 = main panel, 1 = Help */
+/* the panel: 0 = main panel, 1 = Help */
 typedef struct { char *cls, *prop; int x, y, w, h, panel; } SWCtl;
 
 static SWCtl StopwatchPanel[] = {

@@ -459,6 +459,83 @@ int WS_OnWire(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* length of the well-formed UTF-8 sequence starting at s (1..4), or 0 if the
+   byte at s does not begin a valid one that fits in `avail` bytes. RFC 3629:
+   rejects stray continuation bytes, overlong forms, UTF-16 surrogates and
+   anything past U+10FFFF. */
+static int WS_Utf8Len(const unsigned char *s, int avail)
+{
+	unsigned char c = s[0];
+
+	if (c < 0x80)
+		return 1;
+	if (c < 0xC2)
+		return 0;					/* 0x80..0xBF stray; 0xC0/0xC1 overlong */
+	if (c < 0xE0)					/* 2-byte: C2..DF */
+	{
+		if (avail < 2) return 0;
+		return (s[1] >= 0x80 && s[1] <= 0xBF) ? 2 : 0;
+	}
+	if (c < 0xF0)					/* 3-byte: E0..EF */
+	{
+		unsigned char lo = (c == 0xE0) ? 0xA0 : 0x80;	/* E0: no overlong */
+		unsigned char hi = (c == 0xED) ? 0x9F : 0xBF;	/* ED: no surrogates */
+		if (avail < 3) return 0;
+		if (s[1] < lo || s[1] > hi) return 0;
+		if (s[2] < 0x80 || s[2] > 0xBF) return 0;
+		return 3;
+	}
+	if (c <= 0xF4)					/* 4-byte: F0..F4 */
+	{
+		unsigned char lo = (c == 0xF0) ? 0x90 : 0x80;	/* F0: no overlong */
+		unsigned char hi = (c == 0xF4) ? 0x8F : 0xBF;	/* F4: <= U+10FFFF */
+		if (avail < 4) return 0;
+		if (s[1] < lo || s[1] > hi) return 0;
+		if (s[2] < 0x80 || s[2] > 0xBF) return 0;
+		if (s[3] < 0x80 || s[3] > 0xBF) return 0;
+		return 4;
+	}
+	return 0;						/* F5..FF */
+}
+
+/* Build a DISPLAY copy of a frame payload guaranteed to be valid UTF-8. A
+   WebSocket text frame carrying an invalid byte MUST close the connection
+   (RFC 6455), so a raw byte in a property value - e.g. the binary a Base64
+   decode legitimately produces - would drop the whole GUI. Any invalid byte
+   becomes U+FFFD here. This copies FOR THE WIRE ONLY: the data model,
+   downstream wires, and saved flows keep the exact original bytes - only what
+   the browser DISPLAYS is made safe. Caller frees. Worst case is 3x (each bad
+   byte -> a 3-byte replacement char). */
+static char *WS_Utf8Display(const char *in, int inlen, int *outlen)
+{
+	const unsigned char *s = (const unsigned char *)in;
+	char *out = malloc((size_t)inlen * 3 + 1);
+	int i = 0, o = 0, n;
+
+	if (!out)
+	{
+		*outlen = 0;
+		return NULL;
+	}
+	while (i < inlen)
+	{
+		n = WS_Utf8Len(s + i, inlen - i);
+		if (n > 0)
+			while (n--)
+				out[o++] = (char)s[i++];
+		else
+		{
+			out[o++] = (char)0xEF;		/* U+FFFD replacement character */
+			out[o++] = (char)0xBF;
+			out[o++] = (char)0xBD;
+			i++;
+		}
+	}
+	out[o] = 0;
+	*outlen = o;
+	return out;
+}
+
 /* subscription callback: plain text from the app - frame it, send it.   */
 /* A Conn property on data targets one peer (a request-scoped reply -    */
 /* an error, a login ack, the palette dump); absent/0 broadcasts to      */
@@ -466,7 +543,7 @@ int WS_OnWire(NodeObj instance, MsgId message, NodeObj data)
 /* view event (instance-created, property-changed, ...) wants.           */
 int WS_OnAppIn(NodeObj instance, MsgId message, NodeObj data)
 {
-	char *str, *frame;
+	char *str, *frame, *disp;
 	int len, headerLen;
 	unsigned char header[4];
 	long connId;
@@ -490,8 +567,18 @@ int WS_OnAppIn(NodeObj instance, MsgId message, NodeObj data)
 	if (!len)
 		len = strlen(str);
 
+	/* sanitize FOR THE WIRE ONLY - the browser needs a valid-UTF-8 text frame
+	   or it drops the connection; the original bytes stay in the data model.
+	   The safe copy can be longer, so every length check below is on it. */
+	disp = WS_Utf8Display(str, len, &len);
+	if (!disp)
+		return rtrn_dropped;
+
 	if (len > 65535)
-		return rtrn_dropped;	/* 64-bit extended length not implemented, same as receive */
+	{
+		free(disp);			/* 64-bit extended length not implemented, same as receive */
+		return rtrn_dropped;
+	}
 
 	header[0] = 0x81;		/* FIN=1, opcode=1 (text) */
 
@@ -510,11 +597,12 @@ int WS_OnAppIn(NodeObj instance, MsgId message, NodeObj data)
 
 	frame = malloc(headerLen + len);
 	memcpy(frame, header, headerLen);
-	memcpy(frame + headerLen, str, len);
+	memcpy(frame + headerLen, disp, len);
 
 	WS_SendRaw(instance, "Send", frame, headerLen + len, connId);
 
 	free(frame);
+	free(disp);
 
 	return rtrn_handled;
 }

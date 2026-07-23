@@ -1,8 +1,7 @@
 # MoButton
 
-The **momentary** button, ported from the VNOS drop-in control of the
-same name. Three button-ish controls now exist and they are genuinely
-different things:
+The **momentary** button. Three button-ish controls now exist and they are
+genuinely different things:
 
 - **Button** — fires once; an Activate trigger.
 - **Checkbox** — latches; it holds the state you left it in.
@@ -21,9 +20,8 @@ hand-driven Pulse and every sink already knows what to do with it.
 - **Label** — the button's caption. Engine state, subscribed like any
   property.
 - **Value** — `1` while held, `0` otherwise; readable and subscribable.
-- **Interval** — auto-repeat in milliseconds while held (the VNOS
-  `AUTO_TRACK` variant), for jog/scroll behavior. `0` (the default)
-  means no repeat.
+- **Interval** — auto-repeat in milliseconds while held, for jog/scroll
+  behavior. `0` (the default) means no repeat.
 - **Enable** — the standard enable line. A button disabled mid-press
   releases first, so a sink is never left latched on.
 - **State** — the standard lifecycle LED.
@@ -33,4 +31,4 @@ hand-driven Pulse and every sink already knows what to do with it.
 Wire `Out` to an `Enable` to hold something on only while pressed; to a
 command port (a TCPPort's `Send`) to invoke it; to a Queue's `Clock` to
 step a flow by hand. Releasing outside the button counts as a release
-without a click, exactly as the original control behaved.
+without a click.

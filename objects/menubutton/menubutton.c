@@ -10,28 +10,26 @@
 
 /*
 
-MenuButton object: the framework's own answer to "how do we build a
-menu" - modeled on the VNOS menu-button demo (objects/demo/menubutton),
-brought inward the same way pulsepb.c's ControlInfo[] pattern became
-ControlSpec/BuildSettingsView. Not just for our own topbar - a genuinely
-standalone, reusable palette class like LED or Checkbox, so any app
-built on this framework gets menus the same way it gets an LED: drag
-one out, set Label and Items, wire Selected wherever it needs to go.
+MenuButton object: the framework's own answer to "how do we build a menu".
+Not just for our own topbar - a genuinely standalone, reusable palette class
+like LED or Checkbox, so any app built on this framework gets menus the same
+way it gets an LED: drag one out, set Label and Items, wire Selected wherever
+it needs to go.
 
-Three plain data properties, nothing else special: Label (the button's
-own static caption, e.g. "File"), Items (a comma-separated list, e.g.
-"Load,Save,Import"), Selected (whatever was last picked). Selected is
-an ordinary property - it fans out to subscribers unconditionally, the
-same as any other (node.c), so Connect(MenuButton1, "Selected", target,
-"In") or the Bridge's own subscribe both just work, no Out port needed.
+Three plain data properties, nothing else special: Label (the button's own
+static caption, e.g. "File"), Items (a comma-separated list, e.g.
+"Load,Save,Import"), Selected (whatever was last picked). Selected is an
+ordinary property - it fans out to subscribers unconditionally, the same as
+any other (node.c), so Connect(MenuButton1, "Selected", target, "In") or the
+Bridge's own subscribe both just work, no Out port needed.
 
 Presentation is client-side, same recursion as every other widget: a
-standalone MenuButton is a button showing Label (plus ": "+Selected
-once something has been picked) and a dropdown of Items - see
-PROP_MENU (object.h) and web/app.js's registerWidgetAtom/topbar
-rendering. The object itself has no idea it is being used as a topbar
-menu versus a dropped-in palette control - Chrome (object.c) is what
-marks File/Mode as chrome, not anything in this file.
+standalone MenuButton is a button showing Label (plus ": "+Selected once
+something has been picked) and a dropdown of Items - see PROP_MENU (object.h)
+and web/app.js's registerWidgetAtom/topbar rendering. The object itself has
+no idea it is being used as a topbar menu versus a dropped-in palette control
+- Chrome (object.c) is what marks File/Mode as chrome, not anything in this
+file.
 
 */
 

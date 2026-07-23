@@ -11,42 +11,29 @@
 
 /*
 
-TCPPort object: the TCP instrument panel, ported from the VNOS control
-of the same name (objects/demo/tcpport - tcpport.c and its panel
-definition tcpportpb.c). It is a FRONT END, not a networking object:
-it holds no socket of its own, it CONTAINS an instance of the TCP
-engine object and drives it - exactly the shell/engine split ScriptBox
-already uses for language hosts.
+TCPPort object: the TCP instrument panel. It is a FRONT END, not a networking
+object: it holds no socket of its own, it CONTAINS an instance of the TCP
+engine object and drives it - the same shell/engine split ScriptBox uses for
+language hosts.
 
-	VNOS                          here
-	----                          ----
-	tcpportpb.c ControlInfo[]     the published Interface (one row per
-	                              control, its widget type and default)
-	Cmd* variables                ordinary IN PORTS - so a Pulse or a
-	                              script can press Open/Listen/Send
-	                              exactly as the panel's MoButtons do
-	Dsp* LEDs                     PROP_LED properties
-	Opt* checkboxes               PROP_CHECKBOX properties
-	the socket state machine      the TCP object underneath
+The controls: Host Name, Port (with the Standard Ports menu writing it),
+Enable, Open/Listen/Close, the Transmit and Receive boxes with Send / Clear
+Tx / Clear Rx, the option checkboxes (Auto Open/Listen/Close - mutually
+exclusive, Auto Send, Clear On Send, Accumulate Data), the Stream State
+readout and the status LEDs. Cmd* controls are ordinary IN PORTS, so a Pulse
+or a script can press Open/Listen/Send exactly as the panel's MoButtons do.
 
-The controls keep their old names and behavior: Host Name, Port (with
-the Standard Ports menu writing it), Enable, Open/Listen/Close, the
-Transmit and Receive boxes with Send / Clear Tx / Clear Rx, the option
-checkboxes (Auto Open/Listen/Close - mutually exclusive as they were,
-Auto Send, Clear On Send, Accumulate Data), the Stream State readout
-and the status LEDs.
-
-Dataflow, as the original help.txt states it: "Default input connection
-is to Transmit Data. Default output connection is to Receive Data." So
-In feeds TxData and Out carries what arrives on RxData, and the widget
-drops into a flow like any other object.
+Dataflow: the default input connection is to Transmit Data, the default
+output connection is from Receive Data - so In feeds TxData and Out carries
+what arrives on RxData, and the widget drops into a flow like any other
+object.
 
 */
 
 /* NO hardcoded help: the help lives in objects/tcpport/README.md and is read
    from disk into the Help box when the panel is opened. */
 
-/* Stream State, the DspStateNames of the original panel */
+/* Stream State, the display-state names */
 #define ST_DISABLED   "DISABLED"
 #define ST_IDLING     "IDLING"
 #define ST_LISTEN     "LISTEN"
@@ -56,7 +43,7 @@ drops into a flow like any other object.
 
 typedef struct InstanceData
 {
-	int     enabled;	/* the reference's CmdEnable - the ONLY gate on the commands */
+	int     enabled;	/* the ONLY gate on the commands */
 	int     panelBuilt;	/* the panel is built once, when the object first has a path */
 	TaskObj buildTask;	/* fires one tick after creation, to build the panel */
 	NodeObj inner;		/* the TCP engine instance we drive */
@@ -107,7 +94,7 @@ static int TCPPort_IsState(NodeObj instance, char *state)
 	return cur && strcmp(cur, state) == 0;
 }
 
-/* the original's PropDomain_change, verbatim in behavior: strip leading  */
+/* normalize the host box: strip leading                                 */
 /* whitespace, cut at the first whitespace, lower-case the rest           */
 static void TCPPort_NormalizeHost(NodeObj instance)
 {
@@ -129,7 +116,7 @@ static void TCPPort_NormalizeHost(NodeObj instance)
 }
 
 /* Auto Open / Auto Listen / Auto Close are mutually exclusive - picking  */
-/* one clears the other two (the original's OptAuto*_change)              */
+/* one clears the other two                                              */
 static void TCPPort_PickAuto(NodeObj instance, char *which)
 {
 	SetPropStr(instance, "AutoOpen",   strcmp(which, "AutoOpen") == 0 ? "1" : "0");
@@ -148,8 +135,8 @@ static void TCPPort_DoListen(NodeObj instance)
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 	char *port;
 
-	/* Enable is the ONLY gate, exactly as the reference gates everything on
-	   CmdEnable - and a disabled panel says so now rather than doing nothing
+	/* Enable is the ONLY gate on the commands - a disabled panel says so
+	   now rather than doing nothing
 	   silently. */
 	if (!local)
 		return;
@@ -214,7 +201,7 @@ static void TCPPort_DoListen(NodeObj instance)
 }
 
 /* Close: Enable=0 on the engine is a full shutdown (sockets close, EOF   */
-/* goes out, the poll task stops) - the original's CmdClose               */
+/* goes out, the poll task stops)                                        */
 static void TCPPort_DoClose(NodeObj instance)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -436,8 +423,8 @@ int TCPPort_OnClearDebug(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* SSL: the engine does the TLS (the VNOS reference was a SECURE object   */
-/* and tcp.c now carries its cert/key/session handling). The panel just   */
+/* SSL: the engine does the TLS - tcp.c carries the cert/key/session      */
+/* handling. The panel just                                              */
 /* sets Secure and the PEM paths; the next Listen builds the context, and */
 /* SslStatus reports what the engine actually achieved, never what was    */
 /* merely asked for.                                                       */
@@ -466,8 +453,8 @@ int TCPPort_OnSslEnable(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the Standard Ports menu writes the Port box - the original's           */
-/* OptSockets_change, with the same six services                          */
+/* the Standard Ports menu writes the Port box, with the same six         */
+/* services                                                               */
 int TCPPort_OnStandardPort(NodeObj instance, MsgId message, NodeObj data)
 {
 	char *name = data ? GetValueStr(data) : NULL;
@@ -491,7 +478,7 @@ int TCPPort_OnStandardPort(NodeObj instance, MsgId message, NodeObj data)
 }
 
 /* what the engine received: into the Receive box (accumulating or        */
-/* replacing, the original's Accumulate Data option) and out our own Out  */
+/* replacing, per the Accumulate Data option) and out our own Out        */
 int TCPPort_OnInnerRx(NodeObj instance, MsgId message, NodeObj data)
 {
 	NodeObj copy;
@@ -547,7 +534,7 @@ int TCPPort_OnInnerRx(NodeObj instance, MsgId message, NodeObj data)
 /* our In feeds the Transmit box - "default input connection is to        */
 /* Transmit Data". It just writes the box; Auto Send is driven by the box */
 /* CHANGING (TCPPort_OnTxChanged), so In-fed and typed data auto-send the */
-/* same way, exactly as the reference sends from PropTxData_change.        */
+/* same way.                                                              */
 int TCPPort_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -563,11 +550,11 @@ int TCPPort_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the Transmit box changed (typed, or written through In): the reference's
-   PropTxData_change - if we are connected and Auto Send is on, send it.
-   Wired to TxData's own change by an internal Connect in InstanceStart, so
-   ANY change to the box triggers it. An empty box (a Clear) sends nothing,
-   which is how the reference declines to auto-send a clear.               */
+/* the Transmit box changed (typed, or written through In): if we are
+   connected and Auto Send is on, send it. Wired to TxData's own change by
+   an internal Connect in InstanceStart, so ANY change to the box triggers
+   it. An empty box (a Clear) sends nothing - it declines to auto-send a
+   clear. */
 int TCPPort_OnTxChanged(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -606,7 +593,7 @@ int TCPPort_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local->enabled)
 	{
-		/* Enable=0 is the reference's full stop: close the socket and show
+		/* Enable=0 is a full stop: close the socket and show
 		   DISABLED. Re-enabling returns it to IDLING, ready for Listen. */
 		TCPPort_DoClose(instance);
 		TCPPort_SetState(instance, ST_DISABLED);
@@ -639,8 +626,8 @@ static char *TCPPort_AutoChoice(NodeObj instance)
 	return "";
 }
 
-/* Placement setup - the reference's inctActivatedTask, run when the widget
-   is placed (not a user "activate" step, which the reference has no notion
+/* Placement setup, run when the widget is placed (not a user "activate"
+   step, which this framework has no notion
    of): normalize the host box, settle the Auto radios, show the resting
    state, and honor Auto Listen. Registered as the framework's Activate hook
    too, so an explicit activate just re-runs this harmlessly.               */
@@ -662,7 +649,7 @@ int TCPPort_Activate(NodeObj instance, MsgId message, NodeObj data)
 	TCPPort_NormalizeHost(instance);
 
 	/* settle the three Auto boxes onto the one that wins, so the panel    */
-	/* shows the radio behavior the original had */
+	/* shows the radio behavior */
 	TCPPort_PickAuto(instance, TCPPort_AutoChoice(instance));
 
 	if (!local->enabled)
@@ -713,7 +700,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "RxData", "");
 	SetPropStr(instance, "BytesReady", "0");
 
-	/* options - Auto Close is the original's default of the three. These  */
+	/* options - Auto Close is the default of the three. These             */
 	/* are plain properties (see TCPPort_AutoChoice): a checkbox must be   */
 	/* readable and must announce, and a port can do neither.              */
 	SetPropStr(instance, "AutoOpen", "0");
@@ -723,7 +710,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "ClearOnSend", "0");
 	SetPropStr(instance, "AccumulateRx", "1");
 
-	/* line-end and binary options (the original's Tx/Rx Fix Line Ends,    */
+	/* line-end and binary options (Tx/Rx Fix Line Ends,                   */
 	/* Binary Tx/Rx) - plain properties, read where they matter            */
 	SetPropStr(instance, "TxFixLineEnds", "1");
 	SetPropStr(instance, "RxFixLineEnds", "1");
@@ -785,7 +772,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	TCPPort_Port(instance, "Enable",       "1", (void *)TCPPort_OnEnable);
 
 	/* Auto Send is driven by the Transmit box CHANGING: an internal port
-	   wired to TxData's own change (the reference's PropTxData_change), so
+	   wired to TxData's own change, so
 	   typing in the box and writing it through In both auto-send the same
 	   way. Not published - plumbing, not a control. */
 	TCPPort_Port(instance, "TxChanged", "", (void *)TCPPort_OnTxChanged);
@@ -796,7 +783,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	/* the view's OWN size, set here as a resting value BEFORE any client can
 	   subscribe - a size set later in the deferred build would shadow the W/H
 	   node the client's tap is already on and never reach it, leaving the
-	   panel at its default. This is the reference main panel (457x511), grown
+	   panel at its default. This is the main panel (457x511), grown
 	   to hold the character-sized text boxes. */
 	SetPropInt(instance, "W", 480);
 	SetPropInt(instance, "H", 640);
@@ -861,7 +848,7 @@ static void TCPPort_Ctl(NodeObj container, NodeObj target, char *cls, char *prop
 
 	/* a Textbox carries its declared size as its own Rows/Cols - the box
 	   fetches these on instantiation (they are data properties) and sizes
-	   itself, so each panel box is the size the reference gave it */
+	   itself, so each panel box is the size the widget declares */
 	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
 	{
 		SetPropInt(c, "Rows", rows);
@@ -972,13 +959,12 @@ static NodeObj TCPPort_SubPanel(NodeObj panel, NodeObj target, char *name,
 	return v;
 }
 
-/* The panel, straight off the reference's ControlInfo[] table
-   (objects/demo/tcpport/tcpportpb.c): one flat table, every control
-   tagged with the panel it lives on - 0 = the main panel (the object
-   itself), 1 = Debug, 2 = SSL, 3 = Help. Same shape, same coordinates. */
+/* The panel: one flat table, every control tagged with the panel it
+   lives on - 0 = the main panel (the object itself), 1 = Debug, 2 = SSL,
+   3 = Help. */
 /* rows/cols are the declared size for a Textbox (characters), 0 for every
    other control - a Textbox sizes itself by its Rows/Cols property, so the
-   panel gives each box the size the reference published for it */
+   panel gives each box its declared size */
 typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } TCtl;
 
 static TCtl TCPPortPanel[] = {
@@ -1046,8 +1032,8 @@ static TCtl TCPPortPanel[] = {
 
 /* build the panel: panel 0 goes straight into the object (its own view),
    panels 1-3 are sub-views (Debug/SSL/Help) that render as openable
-   icons - a view inside a view, exactly like the reference's sub-panels.
-   Their icons sit where the reference's Debug/Secure/Help buttons did. */
+   icons - a view inside a view. Their icons sit where the Debug/Secure/Help
+   buttons would be. */
 static void TCPPort_BuildPanel(NodeObj instance)
 {
 	NodeObj sub[4];
@@ -1057,7 +1043,7 @@ static void TCPPort_BuildPanel(NodeObj instance)
 	   lays them out by their X/Y (its own size was set in InstanceStart,
 	   before any subscribe). The three sub-panels are views inside it, each
 	   sized to hold its character-sized boxes, rendering as openable icons
-	   where the reference's Debug/Secure/Help buttons sat. A sub-view's size
+	   where the Debug/Secure/Help buttons would be. A sub-view's size
 	   is set at creation, before the client ever sees it, so it applies. */
 	sub[0] = instance;
 	sub[1] = TCPPort_SubPanel(instance, instance, "Debug", 380, 176, 460, 540);
@@ -1098,8 +1084,8 @@ static int TCPPort_BuildTask(NodeObj instance, NodeObj data, int msgid)
 		local->panelBuilt = 1;
 		TCPPort_BuildPanel(instance);
 
-		/* run the placement setup, the reference's inctActivatedTask on
-		   placement: settle the display and honor Auto Listen. Enable is
+		/* run the placement setup on placement: settle the display and honor
+		   Auto Listen. Enable is
 		   the only gate on the commands, and it defaults on, so the panel
 		   is live - it just opens no socket until Open/Listen is pressed
 		   (Auto Close is the default). The panelBuilt guard is already
@@ -1139,7 +1125,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	/* the panel, in the original's reading order: connection settings,    */
+	/* the panel, in reading order: connection settings,                   */
 	/* the commands, the transmit box, the receive box, then status        */
 	PublishProp(ClassSelf, "HostName",     "data", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "StandardPort", "in",   PROP_MENU, "");
@@ -1223,9 +1209,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	/* no HelpText property: the Help box loads README.md from disk on open */
 
 	/* ---------------------------------------------------------------- */
-	/* The layout, control for control, from the original panel          */
-	/* (objects/demo/tcpport/tcpportpb.c ControlInfo[]): same x, y, w, h */
-	/* and the same four panels, with the original titles as labels.     */
+	/* The layout, control for control: same x, y, w, h and the same     */
+	/* four panels, with the section titles as labels.                    */
 	/* the panel is not declared here - this widget BUILDS it
 	   (TCPPort_BuildPanel): a View with controls in it, exactly what a
 	   user nesting views by hand would make. */

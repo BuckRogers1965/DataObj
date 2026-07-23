@@ -183,6 +183,8 @@ void CreateDefaultApp(NodeObj Main){
 	{
 		NodeObj WebTcp, Router, Http, Ws, WebBridge, WebProbe, FileMenu;
 
+                DebugPrint ( "Creating web gui objects.", __FILE__, __LINE__, PROG_FLOW);
+
 		WebTcp    = CreateObject(Main, "TCP");
 		Router    = CreateObject(Main, "Router");
 		Http      = CreateObject(Main, "Http");
@@ -191,6 +193,9 @@ void CreateDefaultApp(NodeObj Main){
 		WebProbe  = CreateObject(Main, "Out");
 
 		if (WebTcp && Router && Http && Ws && WebBridge && WebProbe) {
+
+                        
+                        DebugPrint ( "Initializing Default Application function.", __FILE__, __LINE__, PROG_FLOW);
 
 			SetPropStr(WebTcp, "LocalAddr", GetPropStr(Main, "ip"));
 			SetPropInt(WebTcp, "LocalPort", GetPropInt(Main, "port"));
@@ -224,13 +229,15 @@ void CreateDefaultApp(NodeObj Main){
 				Connect(FileMenu, "Selected", WebBridge, "FileCmd");
 			}
 
+                        DebugPrint ( "Activating Default Application function.", __FILE__, __LINE__, PROG_FLOW);
+
 			ActivateInstance(WebProbe);
 			ActivateInstance(WebBridge);
 			ActivateInstance(Ws);
 			ActivateInstance(Http);
 			ActivateInstance(Router);
 			ActivateInstance(WebTcp);
-		}
+		} else { DebugPrint ( "Error creating web gui objects.", __FILE__, __LINE__, ERROR); }
 	}
 
 	/* fifth flow: the Bridge control protocol, also on top of TCP - the  */

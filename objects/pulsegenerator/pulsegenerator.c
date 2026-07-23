@@ -10,35 +10,19 @@
 
 /*
 
-PulseGenerator object: the pulse-generator instrument panel, ported from
-the VNOS control of the same name (objects/demo/pulsegenerator - pulse.c
-and its panel definition pulsepb.c). It is a SELF-CONTAINED widget: it
-owns its own timing task and toggles its Out/~Out LEDs by Period and
-Duty Cycle, exactly as the reference's plsgRunClock did - the panel and
-the clock are one object, as they were in VNOS.
+PulseGenerator object: a self-contained pulse-generator instrument panel. It
+owns its own timing task and toggles its Out/~Out LEDs by Period and Duty
+Cycle - the panel and the clock are one object.
 
-This is a NEW widget; the existing task-driven `Pulse` object
-(objects/pulse, Interval/Count model) is left untouched. Where TCPPort is
-a shell driving a separate engine, the pulse generator's engine is its
-own timing loop, so it carries it directly - a widget built on the same
-panel mechanics (deferred build, sub-panel, reflect-and-seed) with the
-reference's clock inside.
+This is a NEW widget; the existing task-driven `Pulse` object (objects/pulse,
+Interval/Count model) is left untouched. Where TCPPort is a shell driving a
+separate engine, the pulse generator's engine is its own timing loop, so it
+carries it directly - a widget built on the same panel mechanics (deferred
+build, sub-panel, reflect-and-seed) with the clock inside.
 
-	VNOS                          here
-	----                          ----
-	pulsepb.c ControlInfo[]       the flat control table (PGCtl), one row
-	                              per control at the reference's x/y/w/h
-	plsgRunClock state machine    PulseGen_Tick (the toggling task)
-	Cmd Start/Stop                ordinary properties carrying a handler
-	                              (a MoButton, a Pulse, or a script writes
-	                              them the same way to act)
-	Out / ~Out / Active LEDs      PROP_LED properties
-	Period / DutyCycle            plain data, read LIVE each phase so a
-	                              running generator can be retuned
-
-Dataflow, as the reference help states it: "Default input connection is
-to the Start button. Default output connection is from the Out LED." So
-Start is the natural input and Out carries the "1"/"0" pulse downstream.
+Dataflow: the default input connection is to the Start button, the default
+output connection is from the Out LED - so Start is the natural input and Out
+carries the "1"/"0" pulse downstream.
 
 */
 
@@ -47,7 +31,7 @@ Start is the natural input and Out carries the "1"/"0" pulse downstream.
 
 typedef struct InstanceData
 {
-	int     enabled;	/* the Enable checkbox - gates everything, like the reference */
+	int     enabled;	/* the Enable checkbox - gates everything */
 	int     running;	/* is a cycle in progress? (the Active state)          */
 	int     high;		/* is Out currently high (1) or low (0)?               */
 	int     panelBuilt;	/* the panel is built once, when the object has a path  */
@@ -89,7 +73,7 @@ static void PulseGen_Widths(NodeObj instance, int *onW, int *offW)
 
 	on = period * duty / 100;
 	if (on < 1)
-		on = 1;			/* never a zero-length phase - the reference's bug 1644 */
+		on = 1;			/* never a zero-length phase */
 	*onW = on;
 	*offW = (period - on) < 1 ? 1 : (period - on);
 }
@@ -110,7 +94,7 @@ static void PulseGen_Arm(NodeObj instance, InstanceData *local, int millis)
 	AddTaskMilli(local->task, millis, (FuncPtr)PulseGen_Tick, msg_send, instance);
 }
 
-/* the reference's plsgRunClock: at the end of a phase, toggle. High for   */
+/* at the end of a phase, toggle. High for                                 */
 /* onWidth, low for offWidth, repeat - unless Single Shot, which ends the  */
 /* run after the first high pulse falls (one cycle then halt).             */
 static int PulseGen_Tick(NodeObj instance, NodeObj data, int reason)
@@ -157,8 +141,7 @@ static int PulseGen_Tick(NodeObj instance, NodeObj data, int reason)
 }
 
 /* Start: begin a cycle. If already running, restart only when            */
-/* Retriggerable; otherwise the press is ignored (the reference's         */
-/* Start_change).                                                         */
+/* Retriggerable; otherwise the press is ignored.                         */
 static void PulseGen_DoStart(NodeObj instance)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -183,7 +166,7 @@ static void PulseGen_DoStart(NodeObj instance)
 	PulseGen_Arm(instance, local, onW);
 }
 
-/* Stop: halt and leave the line low - the reference's Stop_change */
+/* Stop: halt and leave the line low */
 static void PulseGen_DoStop(NodeObj instance)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -219,8 +202,8 @@ int PulseGen_OnStop(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Enable: 1 allows operation, 0 is a full stop (the reference's
-   Enable_change - disabling presses Stop, enabling honors Run-when-Enabled) */
+/* Enable: 1 allows operation, 0 is a full stop - disabling presses Stop,
+   enabling honors Run-when-Enabled */
 int PulseGen_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -239,8 +222,8 @@ int PulseGen_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Placement setup - the reference's inctActivatedTask when the widget is
-   placed: settle the LEDs low and honor Run-when-Enabled. Registered as
+/* Placement setup, run when the widget is placed: settle the LEDs low
+   and honor Run-when-Enabled. Registered as
    the framework's Activate hook, and run once by the build task so the
    panel comes up live (gated only by Enable, which defaults on).         */
 int PulseGen_Activate(NodeObj instance, MsgId message, NodeObj data)
@@ -304,7 +287,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "NotOut", "1");
 	SetPropStr(instance, "Active", "0");
 
-	/* the options - the reference's defaults */
+	/* the options - the defaults */
 	SetPropStr(instance, "OneShot", "1");
 	SetPropStr(instance, "Retriggerable", "0");
 	SetPropStr(instance, "AutoStart", "0");
@@ -322,7 +305,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 
 	/* the view's OWN size, set here as a resting value BEFORE any client can
-	   subscribe - the reference main panel (265x216), grown for the
+	   subscribe - the main panel (265x216), grown for the
 	   character-sized TimeBase / Duty Cycle boxes and the Help icon. */
 	SetPropInt(instance, "W", 300);
 	SetPropInt(instance, "H", 250);
@@ -483,9 +466,8 @@ int PulseGen_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* The panel, straight off the reference's ControlInfo[] table
-   (objects/demo/pulsegenerator/pulsepb.c): one flat table, every control
-   tagged with the panel it lives on - 0 = the main panel (the object
+/* The panel: one flat table, every control tagged with the panel it
+   lives on - 0 = the main panel (the object
    itself), 1 = Help. Same x, y, w, h. */
 typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } PGCtl;
 

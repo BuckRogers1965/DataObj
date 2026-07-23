@@ -10,8 +10,7 @@
 
 /*
 
-LogicGate object: the logic-gate instrument panel, ported from the VNOS
-control of the same name (objects/demo/logicgate). Built on the same panel
+LogicGate object: a logic-gate instrument panel. Built on the same panel
 mechanics as PulseGenerator (deferred build, sub-panel, reflect-and-seed,
 help-on-open). It combines its In by the chosen Mode (OR / AND / XOR /
 Parity) with an optional Invert and publishes the result on Out.
@@ -26,13 +25,11 @@ acts; Mode/Invert/ChangesOnly/AutoInterpret are plain data read live; Out
 is a plain property whose write fans out to whatever is wired to it. In and
 Out are ordinary properties named In and Out - not a special "port" kind.
 
-NOTE on multiple inputs: VNOS combined every source wired to Input/Output
-by walking the port's source list (wgv->Sources). This framework delivers
-one value at a time and does not yet expose a port's sources, so OR/AND/XOR
-here operate on the single arriving value (identity for one input) and
-Parity toggles per event - faithful for the inverter/buffer use. True
-N-input combination waits on the source-enumeration primitive
-(ROADMAP.md, Phase 8).
+NOTE on multiple inputs: this framework delivers one value at a time and does
+not yet expose a port's sources, so OR/AND/XOR here operate on the single
+arriving value (identity for one input) and Parity toggles per event -
+faithful for the inverter/buffer use. True N-input combination waits on the
+source-enumeration primitive (ROADMAP.md, Phase 8).
 
 */
 
@@ -66,7 +63,7 @@ static int LogicGate_Is(NodeObj instance, char *prop, char *val)
 	return cur && strcmp(cur, val) == 0;
 }
 
-/* the reference's lgclComputeValue, single-input case: OR/AND/XOR of one
+/* single-input case: OR/AND/XOR of one
    value is that value; Parity toggles on each event; Invert flips. */
 static int LogicGate_Compute(NodeObj instance, int in)
 {
@@ -105,7 +102,7 @@ static void LogicGate_Emit(NodeObj instance)
 /* ---- action handlers ------------------------------------------------ */
 
 /* In: a value arrived from a wired source. Remember it, and (enabled and
-   Auto Interpret on) recompute and publish - the reference's Input_change. */
+   Auto Interpret on) recompute and publish. */
 int LogicGate_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -125,7 +122,7 @@ int LogicGate_OnIn(NodeObj instance, MsgId message, NodeObj data)
 }
 
 /* Interpret: recompute now from the last input (for use when Auto Interpret
-   is off) - the reference's Interpret_change */
+   is off) */
 int LogicGate_OnInterpret(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -139,7 +136,7 @@ int LogicGate_OnInterpret(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Enable: gates the gate (the reference's Enable_change) */
+/* Enable: gates the gate */
 int LogicGate_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
@@ -383,8 +380,7 @@ int LogicGate_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* The panel, off the reference's ControlInfo[]
-   (objects/demo/logicgate/logicgatepb.c): 0 = main, 1 = Help. The Out LED
+/* The panel: 0 = main, 1 = Help. The Out LED
    shows the result. */
 typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } LGCtl;
 
@@ -406,8 +402,7 @@ static LGCtl LogicGatePanel[] = {
 };
 
 /* build the panel: panel 0 goes straight into the object, the Help panel is
-   a sub-view rendering as an openable icon where the reference's Help
-   button sat. */
+   a sub-view rendering as an openable icon. */
 static void LogicGate_BuildPanel(NodeObj instance)
 {
 	NodeObj sub[2];

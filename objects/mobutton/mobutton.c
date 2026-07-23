@@ -10,30 +10,26 @@
 
 /*
 
-MoButton object: the MOMENTARY button, ported from the VNOS drop-in
-control of the same name (objects/demo/mobutton/mobutton.c - "two-state
-button"). Distinct from the two controls that already exist:
+MoButton object: the MOMENTARY button. Distinct from the two controls that
+already exist:
 
 	Button    fires once - an Activate trigger
 	Checkbox  latches - it holds the state you left it in
 	MoButton  is held: pressing sends one edge, releasing sends the other
 
 Pressing sends "1" out Out, releasing sends "0" - which is exactly the
-Pulse's rising-then-falling edge convention, so a MoButton is a
-hand-driven Pulse and every sink downstream already knows what to do
-with it. Wire it at an Enable to hold something on while pressed, at a
-command port (a TCPPort's Send, say) to invoke it, at a Queue's Clock
-to step it by hand.
+Pulse's rising-then-falling edge convention, so a MoButton is a hand-driven
+Pulse and every sink downstream already knows what to do with it. Wire it at
+an Enable to hold something on while pressed, at a command port (a TCPPort's
+Send, say) to invoke it, at a Queue's Clock to step it by hand.
 
-AutoRepeat (the VNOS AUTO_TRACK variant) re-sends the "1" every
-Interval milliseconds while the button is held, for scroll/jog
-behavior; 0 means no repeat, which is the default.
+AutoRepeat re-sends the "1" every Interval milliseconds while the button is
+held, for scroll/jog behavior; 0 means no repeat, which is the default.
 
 Value carries the current 1/0 while held, so the button's own state is
-readable and subscribable like anything else. The original's "only
-fire the release action if the mouse comes up INSIDE the control" rule
-is presentation - it belongs with the projector, which is where the
-press/release gestures live.
+readable and subscribable like anything else. The "only fire the release
+action if the mouse comes up INSIDE the control" rule is presentation - it
+belongs with the projector, which is where the press/release gestures live.
 
 */
 
