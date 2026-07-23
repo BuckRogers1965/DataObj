@@ -304,8 +304,10 @@ svg.view-wires {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.4;
-  overflow: auto;
-  white-space: pre;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   cursor: text;
   display: block;
 }
@@ -497,6 +499,17 @@ svg.view-wires {
   width: 46ch;
   max-width: 100%;
   height: 16em;
+}
+
+/* the Image display: fits the whole picture inside the object's declared  */
+/* W/H (set as px by the panel), whatever the picture's real dimensions    */
+.image-view {
+  display: block;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  object-fit: contain;
+  max-width: 100%;
 }
 
 .port-row {

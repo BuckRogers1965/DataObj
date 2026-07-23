@@ -363,7 +363,8 @@ typedef enum {
     PROP_ICON,     /* renders as the thing's icon - a doorway that opens   */
                    /* its one panel; what Open publishes (PublishPosition) */
     PROP_MARKDOWN, /* rendered markdown - the Markdown widget's display    */
-    PROP_HTML      /* rendered HTML, sandboxed - the HTML widget's display */
+    PROP_HTML,     /* rendered HTML, sandboxed - the HTML widget's display */
+    PROP_IMAGE     /* an image loaded from a URL - the Image widget's display */
 } PropertyType;
 
 /* Published interface: what a palette (or anything else outside the     */

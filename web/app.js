@@ -41,15 +41,16 @@ const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_S
       PROP_VUMETER = 6, PROP_TEXTOUT = 7, PROP_KNOB = 8, PROP_LABEL = 9, PROP_NULL = 10, PROP_MENU = 11,
       PROP_ICON = 12,   /* a doorway: renders as the target's icon, opens its one panel */
       PROP_MARKDOWN = 13,  /* rendered markdown - the Markdown widget's display */
-      PROP_HTML = 14;      /* rendered HTML, sandboxed - the HTML widget's display */
+      PROP_HTML = 14,      /* rendered HTML, sandboxed - the HTML widget's display */
+      PROP_IMAGE = 15;     /* an image loaded from a URL - the Image widget's display */
 
 /* palette classes that ARE widgets - the base case of the recursion */
-const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MoButton', 'MenuButton', 'Dropdown', 'Markdown', 'HTML']);
+const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MoButton', 'MenuButton', 'Dropdown', 'Markdown', 'HTML', 'Image']);
 
 /* which widget class backs which property widget-type, split by whether  */
 /* the widget is something the user edits or something that only displays */
 const INPUT_WIDGET_CLASS   = { [PROP_TEXTBOX]: 'Textbox', [PROP_CHECKBOX]: 'Checkbox', [PROP_SLIDER]: 'Slider', [PROP_KNOB]: 'Knob' };
-const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PROP_VUMETER]: 'VUMeter', [PROP_LABEL]: 'Label', [PROP_MARKDOWN]: 'Markdown', [PROP_HTML]: 'HTML' };
+const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PROP_VUMETER]: 'VUMeter', [PROP_LABEL]: 'Label', [PROP_MARKDOWN]: 'Markdown', [PROP_HTML]: 'HTML', [PROP_IMAGE]: 'Image' };
 const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
 
 let ws = null;
@@ -463,6 +464,13 @@ function makeReadoutEl(widgetClass) {
     const el = document.createElement('iframe');
     el.className = 'html-view';
     el.setAttribute('sandbox', 'allow-same-origin');
+    return el;
+  }
+  if (widgetClass === 'Image') {
+    /* a plain <img>: its value IS the URL, loaded straight from wherever   */
+    /* it points (e.g. a ComfyUI /view). No script, no sandbox needed.      */
+    const el = document.createElement('img');
+    el.className = 'image-view';
     return el;
   }
   const el = document.createElement('span');
@@ -896,7 +904,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   /* way a Textbox takes Rows/Cols - the panel that placed it sets its size, */
   /* so it fits whatever container it was built into. Subscribed like any    */
   /* value and pushed on subscribe.                                          */
-  if (className === 'Markdown' || className === 'HTML') {
+  if (className === 'Markdown' || className === 'HTML' || className === 'Image') {
     (liveControls[alias + '.W'] = liveControls[alias + '.W'] || []).push({ el: control, widgetClass: 'AtomW' });
     (liveControls[alias + '.H'] = liveControls[alias + '.H'] || []).push({ el: control, widgetClass: 'AtomH' });
     send({ cmd: 'subscribe', instance: alias, port: 'W' });
@@ -1197,6 +1205,7 @@ function updateReadout(el, widgetClass, value) {
   if (widgetClass === 'LED') el.className = 'node-led state-' + value;
   else if (widgetClass === 'Markdown') el.innerHTML = renderMarkdown(value);
   else if (widgetClass === 'HTML') el.srcdoc = HTML_VIEW_BASE + (value || '');
+  else if (widgetClass === 'Image') el.src = value || '';
   else el.textContent = value;
 }
 
