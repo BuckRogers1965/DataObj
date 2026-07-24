@@ -30,7 +30,7 @@ int
 AddTaskNow(TaskObj task, FuncPtr func, int mesgid, NodeObj data);
 
 int
-AddTaskMilli(TaskObj task, int delay_milliseconds, FuncPtr func, int mesgid, NodeObj data);
+AddTaskMilli(TaskObj task, unsigned long delay_milliseconds, FuncPtr func, int mesgid, NodeObj data);
 
 int
 AddTaskSec(TaskObj task, int delay_seconds, FuncPtr func, int mesgid, NodeObj data);

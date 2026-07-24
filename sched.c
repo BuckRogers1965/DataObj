@@ -460,7 +460,7 @@ AddTaskNow(TaskPtr task, FuncPtr func, int mesgid, NodeObj data){
 
 /* convenience function to make Add Task Delay easier */
 int
-AddTaskMilli(TaskPtr task, unsigned long delay_millisecs, FuncPtr func, int mesgid, NodeObj data){
+AddTaskMilli(void *task, unsigned long delay_millisecs, FuncPtr func, int mesgid, NodeObj data){
 //	printf("Add task with delay of %d milliseconds\n", (int) delay_millisecs);
 	return AddTaskDelay(task, delay_millisecs/1000, (delay_millisecs%1000)*1000, func, mesgid, data);
 }

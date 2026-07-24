@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -37,6 +38,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem PulsePanel[];
 
 /* Interval is read live, not snapshotted at Activate, so a running     */
 /* pulse can be retuned from the UI - every place that arms the next    */
@@ -148,7 +151,12 @@ int Pulse_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
+		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, PulsePanel);
+
+	if (local->active)
 		return rtrn_dropped;
 
 	local->sent = 0;
@@ -168,13 +176,22 @@ int Pulse_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Pulse looks like, built once per instance */
-static ControlSpec PulseControls[] = {
-	{ "Knob",    "Interval", 10,  10,  60, 20 },
-	{ "Textbox", "Count",    80,  10,  60, 20 },
-	{ "LED",     "State",    10,  40,  20, 20 },
-	{ "LED",     "Out",      40,  40,  20, 20 },
-	{ "Button",  NULL,       10,  70,  60, 20 },
+/* The whole panel in one table: main view, Help, and every control. Out carries
+   the "1"/"0" edge and is shown as an LED (like State), so you see it turn on
+   and off. Uses the QUIET deferred build: placing a Pulse does NOT start it
+   ticking - it stays quiet until a flow activates it. */
+static WidgetItem PulsePanel[] = {
+	/* cls        prop      def    panel   x    y    w   h  label       [handler] */
+	{ "View",     "Pulse",  "",    0,   0,   0, 300, 230, 0 },			/* 0: main */
+	{ "Help",     "objects/pulse/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
+
+	{ "Checkbox", "Enable", "1",   0, 270,  12,   9,  9, LABEL_LEFT, (void *)Pulse_OnEnable },
+	{ "Knob",     "Interval","1000",0, 15,  45,  60, 60, LABEL_NONE },
+	{ "Textbox",  "Count",  "0",   0, 100,  55,  80, 22, LABEL_NONE },
+	{ "LED",      "State",  "1",   0,  15, 135,  12, 12, LABEL_NONE },
+	{ "LED",      "Out",    "0",   0,  70, 135,  12, 12, LABEL_NONE },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
@@ -182,7 +199,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
 
-	NodeObj port;
+	(void) message; (void) data;
 
 	local->task = NULL;
 	local->sent = 0;
@@ -193,26 +210,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Pulse");
-	SetPropInt(instance, "Interval", 1000);
-	WatchableProp(instance, "Interval");
-	SetPropInt(instance, "Count", 0);
-	WatchableProp(instance, "Count");
-	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable carries a handler;
+	   Interval/Count/State/Out are plain data - Out is the edge, read on the panel) */
+	Widget_Init(instance, PulsePanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Pulse_Activate);
 
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Pulse_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, PulsePanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, PulseControls, sizeof(PulseControls) / sizeof(PulseControls[0]));
+	Widget_DeferBuildQuiet(instance, PulsePanel);	/* panel now, but do not start ticking */
 
 	return rtrn_handled;
 }
@@ -221,6 +230,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* stop the tick task before freeing local, or a still-scheduled */
@@ -245,14 +255,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Interval", "data", PROP_KNOB, "1000");
-	PublishProp(ClassSelf, "Count",    "data", PROP_TEXTBOX, "0");
-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
-	/* Widget=PROP_LED, not PROP_NULL: Out carries the same "1"/"0" edge   */
-	/* semantics as State, so the client wires a real LED to it and shows */
-	/* the pulse actually turning on and off, the same way it shows State */
-	PublishProp(ClassSelf, "Out",      "out",  PROP_LED, "");
-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+	/* every control, from the table (Out shown as an LED edge, like State) */
+	Widget_Publish(ClassSelf, PulsePanel);
 
 	return rtrn_handled;
 }

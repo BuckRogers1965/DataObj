@@ -6,6 +6,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -43,6 +44,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem ScriptBoxPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -210,17 +213,25 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 	char *src;
 
+	(void) data;
+
 	if (!local)
 		return rtrn_dropped;
 
-	local->active = 1;
-	SetPropInt(instance, "State", Running);
-
+	/* now the box has a path (deferred build / activation), build the panel and
+	   bring the inner host up - a sub-object needs the box's OWN path first, so
+	   this cannot happen in InstanceStart (the path is set after it returns) */
+	Widget_BuildOnce(instance, ScriptBoxPanel);
 	if (!local->inner)
 		ScriptBox_SwapInner(instance, GetPropStr(instance, "Language"));
-	if (!local->inner)
+
+	/* msg_initialize is placement / flow activation: come up ready, do NOT run.
+	   Run (the button) arrives as msg_send - only then hand Source to the host. */
+	if (message == msg_initialize || !local->inner)
 		return rtrn_handled;
 
+	local->active = 1;
+	SetPropInt(instance, "State", Running);
 	SetPropStr(instance, "Output", "");
 
 	src = GetPropStr(instance, "Source");
@@ -230,12 +241,34 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* The whole panel in one table: the Language menu, the Source box, Run (=
+   Activate), the visible In toggle, the Output box and the Out readout. Uses
+   the QUIET deferred build - placing a ScriptBox does NOT run the script. */
+static WidgetItem ScriptBoxPanel[] = {
+	/* cls        prop        def  panel   x    y    w    h  label        [handler] */
+	{ "View",     "ScriptBox","",  0,   0,   0, 440, 490, 0 },			/* 0: main */
+	{ "Help",     "objects/scriptbox/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable",   "1", 0, 410,  12,   9,   9, LABEL_LEFT,  (void *)ScriptBox_OnEnable },
+	{ "Dropdown", "Language", "",  0,  15,  12, 150,  20, LABEL_NONE,  (void *)ScriptBox_OnLanguage },
+	{ "Textbox",  "Source",   "",  0,  15,  45, 400, 180, LABEL_NONE },
+	{ "Button",   "Run",      "",  0,  15, 235,  70,  24, LABEL_NONE },
+	{ "Checkbox", "In",       "0", 0, 110, 240,   9,   9, LABEL_RIGHT, (void *)ScriptBox_OnIn },
+	{ "LED",      "State",    "1", 0, 165, 240,  12,  12, LABEL_NONE },
+	{ "Textbox",  "Output",   "",  0,  15, 270, 400, 120, LABEL_NONE },
+	{ "TextOut",  "Out",      "",  0,  15, 400, 400,  20, LABEL_LEFT },
+
+	{ NULL }
+};
+
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
 	char hosts[512];
 	char *first;
+
+	(void) message; (void) data;
 
 	local->active = 0;
 	local->enabled = 1;
@@ -245,51 +278,35 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "ScriptBox");
 
+	/* every control's value + handler from the table (Language/In/Enable carry
+	   a handler; Source/Output/State/Out are plain data; Run triggers Activate) */
+	Widget_Init(instance, ScriptBoxPanel);
+
+	/* the discovered hosts fill the Language menu; default to the first, set
+	   WITHOUT re-firing the port (SetPropStr on its own name would shadow it) */
 	ScriptBox_DiscoverHosts(hosts, sizeof(hosts));
-
 	SetPropStr(instance, "LanguageList", hosts);
-
-	/* default to the first discovered host */
 	first = strtok(hosts, ",");
-	SetPropStr(instance, "Language", first ? first : "");
+	SetValueStr(GetPropNode(instance, "Language"), first ? first : "");
 
-	SetPropStr(instance, "Source", "");
-	SetPropStr(instance, "Output", "");
-	SetPropInt(instance, "Out", 0);
-	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)ScriptBox_Activate);
 
-	/* Language is a port: the dropdown's Selected wires here, and the      */
-	/* handler swaps the inner host (the Enable pattern)                     */
-	port = GetPropNode(instance, "Language");
-	SetPropLong(port, "OnMsg", (long)ScriptBox_OnLanguage);
+	/* internal wiring ports for the inner host's Print and Out - not published */
+	Widget_Port(instance, "InnerPrint", "0", (void *)ScriptBox_OnInnerPrint);
+	Widget_Port(instance, "InnerOut",   "0", (void *)ScriptBox_OnInnerOut);
 
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long)ScriptBox_OnIn);
-
-	/* unpublished wiring ports for the inner host's Print and Out */
-	SetPropInt(instance, "InnerPrint", 0);
-	port = GetPropNode(instance, "InnerPrint");
-	SetPropLong(port, "OnMsg", (long)ScriptBox_OnInnerPrint);
-
-	SetPropInt(instance, "InnerOut", 0);
-	port = GetPropNode(instance, "InnerOut");
-	SetPropLong(port, "OnMsg", (long)ScriptBox_OnInnerOut);
-
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)ScriptBox_OnEnable);
+	(void) first;
 
 	InitPosition(instance);
-
+	Widget_MainSize(instance, ScriptBoxPanel);
 	RegisterInstance(class, instance);
 
-	/* the inner host exists from birth so a fresh ScriptBox is runnable    */
-	/* immediately (the dropdown just re-selects what's already there)       */
-	if (first)
-		ScriptBox_SwapInner(instance, GetPropStr(instance, "Language"));
+	/* the deferred build calls Activate(msg_initialize) once the box has a path -
+	   that is where the panel AND the inner host come up (both need the path, so
+	   NEITHER can be created here in InstanceStart). msg_initialize does not run
+	   the script; only the Run button (msg_send) does. */
+	Widget_DeferBuild(instance, ScriptBoxPanel);
 
 	return rtrn_handled;
 }
@@ -298,6 +315,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->inner)
@@ -310,7 +328,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
-	NodeObj entry;
 
 	SetName(class, "ScriptBox");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
@@ -320,33 +337,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	/* the dropdown, then the two big boxes, then the dataflow ports.       */
-	/* LanguageList is the menu's options (companion to the PROP_MENU       */
-	/* Language, the same convention the client reads for any menu prop)    */
-	/* "data" not "in": a read (subscribe) comes back as property-changed   */
-	/* so the dropdown hydrates, while the OnMsg handler on the port node    */
-	/* (InstanceStart) still fires on a write to swap the inner host - a     */
-	/* property can be both watchable data and an active port                */
-	PublishProp(ClassSelf, "Language",     "data", PROP_MENU, "");
-	PublishProp(ClassSelf, "LanguageList", "data", PROP_NULL, "");
-	/* the object declares its own box sizes: Rows/Cols annotations on the  */
-	/* published entry (properties are nodes, so an entry can be annotated  */
-	/* without any new mechanism). The declared size is FIXED - text beyond  */
-	/* it scrolls inside the box; boxes do not resize by content             */
-	entry = PublishProp(ClassSelf, "Source",       "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 12);
-	SetPropInt(entry, "Cols", 48);
-	entry = PublishProp(ClassSelf, "Output",       "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 8);
-	SetPropInt(entry, "Cols", 48);
-	/* In is a VISIBLE control (the Enable pattern): a checkbox on the      */
-	/* panel writes 1/0 straight into the script's In, so an oninput        */
-	/* script can be poked by hand - the icon's In dot and this checkbox     */
-	/* are the same port                                                      */
-	PublishProp(ClassSelf, "In",           "in",   PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "Out",          "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable",       "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",        "data", PROP_LED, "1");
+	/* every control, from the table (Language menu, Source/Output boxes, the
+	   visible In toggle, Out readout - widget type from each control's class) */
+	Widget_Publish(ClassSelf, ScriptBoxPanel);
+	PublishProp(ClassSelf, "LanguageList", "data", PROP_NULL, "");	/* menu options, no control */
 
 	return rtrn_handled;
 }

@@ -1,7 +1,7 @@
 
 CC=gcc
 
-SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c dyn/buff.c dyn/queue.c dyn/bufftest.c
+SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c widget.c dyn/buff.c dyn/queue.c dyn/bufftest.c
 
 # Directories that need to be built
 SUBDIRS := $(wildcard objects/*)
@@ -539,6 +539,42 @@ timer.o: /usr/include/bits/atomic_wide_counter.h
 timer.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 timer.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 timer.o: /usr/include/string.h /usr/include/strings.h timer.h
+widget.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
+widget.o: /usr/include/features.h /usr/include/features-time64.h
+widget.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
+widget.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
+widget.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+widget.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+widget.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
+widget.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
+widget.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
+widget.o: /usr/include/bits/types/__mbstate_t.h
+widget.o: /usr/include/bits/types/__fpos64_t.h
+widget.o: /usr/include/bits/types/__FILE.h /usr/include/bits/types/FILE.h
+widget.o: /usr/include/bits/types/struct_FILE.h /usr/include/bits/stdio_lim.h
+widget.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
+widget.o: /usr/include/stdlib.h /usr/include/bits/waitflags.h
+widget.o: /usr/include/bits/waitstatus.h /usr/include/sys/types.h
+widget.o: /usr/include/bits/types/clock_t.h
+widget.o: /usr/include/bits/types/clockid_t.h
+widget.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
+widget.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
+widget.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
+widget.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
+widget.o: /usr/include/sys/select.h /usr/include/bits/select.h
+widget.o: /usr/include/bits/types/sigset_t.h
+widget.o: /usr/include/bits/types/__sigset_t.h
+widget.o: /usr/include/bits/types/struct_timeval.h
+widget.o: /usr/include/bits/types/struct_timespec.h
+widget.o: /usr/include/bits/pthreadtypes.h
+widget.o: /usr/include/bits/thread-shared-types.h
+widget.o: /usr/include/bits/pthreadtypes-arch.h
+widget.o: /usr/include/bits/atomic_wide_counter.h
+widget.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
+widget.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
+widget.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+widget.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h node.h
+widget.o: data.h object.h callback.h sched.h widget.h
 dyn/buff.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
 dyn/buff.o: /usr/include/features.h /usr/include/features-time64.h
 dyn/buff.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h

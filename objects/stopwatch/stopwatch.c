@@ -8,6 +8,7 @@
 #include "sched.h"
 #include "timer.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -39,15 +40,12 @@ typedef struct InstanceData
 	unsigned long startSec;		/* the cached clock at the start event       */
 	unsigned long startUsec;
 	long          lastMs;		/* last measured interval, ms; -1 = none yet */
-	int           panelBuilt;
-	TaskObj       buildTask;
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void Stopwatch_BuildPanel(NodeObj instance);
-static int  Stopwatch_BuildTask(NodeObj instance, NodeObj data, int msgid);
+static WidgetItem StopwatchPanel[];
 
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
@@ -209,11 +207,7 @@ int Stopwatch_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		Stopwatch_BuildPanel(instance);
-	}
+	Widget_BuildOnce(instance, StopwatchPanel);
 
 	local->active = 0;
 	SetPropStr(instance, "OnEvent", "0");
@@ -224,281 +218,71 @@ int Stopwatch_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 /* ---- lifecycle ------------------------------------------------------ */
 
-static void Stopwatch_Handler(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
-
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->enabled = 1;
 	local->active = 0;
 	local->startSec = 0;
 	local->startUsec = 0;
 	local->lastMs = -1;
-	local->panelBuilt = 0;
-	local->buildTask = NULL;
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Stopwatch");
 
-	/* the edge / scale selectors and their option lists (a Dropdown reads
-	   its options from the companion *List property) */
-	SetPropStr(instance, "RunEdge", "Positive");
+	/* every control's value + handler from the table: Run/Stop/Enable/TimeUnits
+	   carry a handler, the rest are plain data */
+	Widget_Init(instance, StopwatchPanel);
+
+	/* the dropdowns' backing option lists and the lifecycle state - no control */
 	SetPropStr(instance, "RunEdgeList", "Positive,Negative");
-	SetPropStr(instance, "StopEdge", "Run Ends");
 	SetPropStr(instance, "StopEdgeList", "Run Ends,Positive,Negative");
-	SetPropStr(instance, "TimeUnits", "msecs");
 	SetPropStr(instance, "TimeUnitsList", "msecs,secs");
-
-	/* the readout and the two state LEDs */
-	SetPropStr(instance, "Duration", "");
-	SetPropStr(instance, "OnEvent", "0");
-	SetPropStr(instance, "OffEvent", "1");
-
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Stopwatch_Activate);
 
-	/* the controls that ACT when written - ordinary properties, each with
-	   a handler; TimeUnits re-displays on change */
-	Stopwatch_Handler(instance, "Run",    "0", (void *)Stopwatch_OnRun);
-	Stopwatch_Handler(instance, "Stop",   "0", (void *)Stopwatch_OnStop);
-	Stopwatch_Handler(instance, "Enable", "1", (void *)Stopwatch_OnEnable);
-	Stopwatch_Handler(instance, "TimeUnits", "msecs", (void *)Stopwatch_OnTimeUnits);
-
 	InitPosition(instance);
-
-	/* the view's OWN size, set before any client can subscribe - the
-	   reference main panel (265x216), grown for the Dropdowns and readout */
-	SetPropInt(instance, "W", 300);
-	SetPropInt(instance, "H", 250);
-
+	Widget_MainSize(instance, StopwatchPanel);
 	RegisterInstance(class, instance);
-
-	local->buildTask = CreateTask(ObjGetTaskList());
-	AddTaskMilli(local->buildTask, 1, (FuncPtr)Stopwatch_BuildTask, msg_send, instance);
+	Widget_DeferBuild(instance, StopwatchPanel);
 
 	return rtrn_handled;
 }
 
-/* wire a reflect (a property -> a control's input) AND seed it now, so the
-   GUI shows the underlying value at creation (see TCPPort / PulseGenerator) */
-static void Stopwatch_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, and every control (value +,
+   for the ports, handler). Backing *List props and State are published apart. */
+static WidgetItem StopwatchPanel[] = {
+	/* cls        prop         def         panel   x    y    w   h  label       [handler] */
+	{ "View",     "Stopwatch", "",         0,   0,   0, 300, 250, 0 },			/* 0: main */
+	{ "Help",     "objects/stopwatch/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	{ "Checkbox", "Enable",    "1",        0, 205,  13,  9,  9, LABEL_LEFT, (void *)Stopwatch_OnEnable },
+	{ "MoButton", "Run",       "0",        0,  21,  52, 40, 20, LABEL_NONE, (void *)Stopwatch_OnRun },
+	{ "MoButton", "Stop",      "0",        0,  21,  82, 40, 20, LABEL_NONE, (void *)Stopwatch_OnStop },
+	{ "Dropdown", "RunEdge",   "Positive", 0,  96,  54, 63, 14, LABEL_NONE },
+	{ "Dropdown", "StopEdge",  "Run Ends", 0,  96,  94, 63, 14, LABEL_NONE },
+	{ "LED",      "OnEvent",   "0",        0, 214,  52, 10, 10, LABEL_NONE },
+	{ "LED",      "OffEvent",  "1",        0, 214,  88, 10, 10, LABEL_NONE },
+	{ "Dropdown", "TimeUnits", "msecs",    0,  96, 142, 63, 14, LABEL_NONE, (void *)Stopwatch_OnTimeUnits },
+	{ "TextOut",  "Duration",  "",         0, 185, 143, 66, 13, LABEL_NONE },
 
-static void Stopwatch_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-						  int x, int y, int w, int h)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);		/* a command property */
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-	{
-		/* the Help box starts EMPTY; its README.md is read from disk into its
-		   Value only when the Help panel is OPENED (Stopwatch_OnHelpOpen). */
-	}
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		Stopwatch_Reflect(target, prop, c, "Value");	/* set its display property */
-	else if (strcmp(cls, "Dropdown") == 0)
-	{
-		char listprop[64];
-		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);			/* the pick drives the value */
-		Stopwatch_Reflect(target, listprop, c, "Items");	/* its options */
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));	/* show the pick */
-	}
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);
-		Stopwatch_Reflect(target, prop, c, "In");
-	}
-}
-
-/* read a whole file into a malloc'd, NUL-terminated string (caller frees) */
-static char *Stopwatch_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
-
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-/* the Help panel was OPENED: read the widget's README.md from disk and set
-   it into the Help box's Value with an update. No hardcoded help - the file
-   is the source, loaded on open. */
-int Stopwatch_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;			/* only on OPEN */
-
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = Stopwatch_ReadFile("objects/stopwatch/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-
-	return rtrn_handled;
-}
-
-static NodeObj Stopwatch_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-/* the panel: 0 = main panel, 1 = Help */
-typedef struct { char *cls, *prop; int x, y, w, h, panel; } SWCtl;
-
-static SWCtl StopwatchPanel[] = {
-	/* --- panel 0: Stop Watch (the object's own view) --- */
-	{ "Checkbox", "Enable",     205,  13,   9,  9, 0 },
-	{ "MoButton", "Run",         21,  52,  40, 20, 0 },
-	{ "MoButton", "Stop",        21,  82,  40, 20, 0 },
-	{ "Dropdown", "RunEdge",     96,  54,  63, 14, 0 },
-	{ "Dropdown", "StopEdge",    96,  94,  63, 14, 0 },
-	{ "LED",      "OnEvent",     214, 52,  10, 10, 0 },
-	{ "LED",      "OffEvent",    214, 88,  10, 10, 0 },
-	{ "Dropdown", "TimeUnits",   96, 142,  63, 14, 0 },
-	{ "TextOut",  "Duration",   185, 143,  66, 13, 0 },
-
-	/* --- panel 1: Help --- */
-	/* the standard help box: fills the Help panel with a 10px margin */
-	{ "Markdown", "HelpText",    10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
-
-static void Stopwatch_BuildPanel(NodeObj instance)
-{
-	NodeObj sub[2];
-	int i;
-
-	sub[0] = instance;
-	sub[1] = Stopwatch_SubPanel(instance, "Help", 12, 188, HELP_W, HELP_H);
-
-	/* load the README into the Help box when the Help panel is OPENED */
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)Stopwatch_OnHelpOpen);
-	}
-
-	for (i = 0; StopwatchPanel[i].cls; i++)
-	{
-		SWCtl *t = &StopwatchPanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 2) ? sub[t->panel] : instance;
-		if (container)
-			Stopwatch_Ctl(container, instance, t->cls, t->prop, t->x, t->y, t->w, t->h);
-	}
-}
-
-static int Stopwatch_BuildTask(NodeObj instance, NodeObj data, int msgid)
-{
-	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-
-	(void) data;
-	(void) msgid;
-
-	if (local && !local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		Stopwatch_BuildPanel(instance);
-		Stopwatch_Activate(instance, msg_initialize, NULL);
-	}
-
-	return rtrn_handled;
-}
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
+	Widget_CancelBuild(instance);
 	if (local)
-	{
-		if (local->buildTask)
-			RemoveTask(local->buildTask);
 		free(local);
-	}
 
 	return rtrn_handled;
 }
@@ -515,25 +299,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	/* EVERYTHING is a property - Run/Stop/Enable/TimeUnits carry handlers so
-	   a write acts, but they are ordinary data like the rest. No in/out port. */
-	PublishProp(ClassSelf, "Enable",        "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Run",           "data", PROP_NULL, "0");
-	PublishProp(ClassSelf, "Stop",          "data", PROP_NULL, "0");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, StopwatchPanel);
 
-	PublishProp(ClassSelf, "RunEdge",       "data", PROP_MENU, "Positive");
+	/* the dropdowns' backing lists and the lifecycle state - no on-screen control */
 	PublishProp(ClassSelf, "RunEdgeList",   "data", PROP_NULL, "Positive,Negative");
-	PublishProp(ClassSelf, "StopEdge",      "data", PROP_MENU, "Run Ends");
 	PublishProp(ClassSelf, "StopEdgeList",  "data", PROP_NULL, "Run Ends,Positive,Negative");
-	PublishProp(ClassSelf, "TimeUnits",     "data", PROP_MENU, "msecs");
 	PublishProp(ClassSelf, "TimeUnitsList", "data", PROP_NULL, "msecs,secs");
-
-	PublishProp(ClassSelf, "OnEvent",       "data", PROP_LED, "0");
-	PublishProp(ClassSelf, "OffEvent",      "data", PROP_LED, "1");
-	PublishProp(ClassSelf, "Duration",      "data", PROP_TEXTOUT, "");
-
 	PublishProp(ClassSelf, "State",         "data", PROP_LED, "1");
-	/* no HelpText property: the Help box loads README.md from disk on open */
 
 	return rtrn_handled;
 }

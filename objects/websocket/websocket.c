@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 #include "dyn/buff.h"
 
 /*
@@ -105,6 +106,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem WebSocketPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -626,8 +629,13 @@ int WS_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, WebSocketPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
@@ -635,16 +643,30 @@ int WS_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what WebSocket looks like, built once per instance */
-static ControlSpec WebSocketControls[] = {
-	{ "LED",    "State", 10, 10, 20, 20 },
-	{ "Button", NULL,    10, 40, 60, 20 },
+/* The whole panel in one table: main view, Help, and every control. The four
+   ports - app-facing In/Out and TCP-facing Wire/Send - are each shown as a
+   readout of the last message. */
+static WidgetItem WebSocketPanel[] = {
+	/* cls        prop        def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "WebSocket","",  0,   0,   0, 320, 280, 0 },			/* 0: main */
+	{ "Help",     "objects/websocket/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable",   "1", 0, 290,  12,   9,  9, LABEL_LEFT, (void *)WS_OnEnable },
+	{ "LED",      "State",    "1", 0,  15,  40,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",       "",  0,  15,  78, 285, 20, LABEL_LEFT, (void *)WS_OnAppIn },
+	{ "TextOut",  "Out",      "",  0,  15, 118, 285, 20, LABEL_LEFT },
+	{ "TextOut",  "Wire",     "",  0,  15, 158, 285, 20, LABEL_LEFT, (void *)WS_OnWire },
+	{ "TextOut",  "Send",     "",  0,  15, 198, 285, 20, LABEL_LEFT },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->active = 0;
 	local->enabled = 1;
@@ -653,33 +675,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "WebSocket");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable/In/Wire carry a
+	   handler; Out/Send are the outputs, all four ports read on the panel) */
+	Widget_Init(instance, WebSocketPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)WS_Activate);
 
-	/* app-facing: same In/Out shape every other translator object uses */
-	SetPropInt(instance, "Out", 0);
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long)WS_OnAppIn);
-
-	/* TCP-facing */
-	SetPropInt(instance, "Send", 0);
-	SetPropInt(instance, "Wire", 0);
-	port = GetPropNode(instance, "Wire");
-	SetPropLong(port, "OnMsg", (long)WS_OnWire);
-
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)WS_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, WebSocketPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, WebSocketControls, sizeof(WebSocketControls) / sizeof(WebSocketControls[0]));
+	Widget_DeferBuild(instance, WebSocketPanel);
 
 	return rtrn_handled;
 }
@@ -688,6 +695,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		NodeObj entry;
@@ -719,12 +727,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Wire",   "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Send",   "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	/* every control, from the table (the four ports shown as readouts) */
+	Widget_Publish(ClassSelf, WebSocketPanel);
 
 	return rtrn_handled;
 }

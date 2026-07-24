@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /* CharacterMap: rewrite Input into Output a byte at a time through a 256-entry
    table built from Map. Each Map line is "from to" (remap) or "from" (delete);
@@ -15,15 +16,12 @@
 typedef struct InstanceData
 {
 	int     enabled;
-	int     panelBuilt;
-	TaskObj buildTask;
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void CharMap_BuildPanel(NodeObj instance);
-static int  CharMap_BuildTask(NodeObj instance, NodeObj data, int msgid);
+static WidgetItem CharMapPanel[];
 
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
@@ -356,50 +354,30 @@ int CharMap_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		CharMap_BuildPanel(instance);
-	}
+	Widget_BuildOnce(instance, CharMapPanel);
 	CharMap_Recompute(instance);
 	return rtrn_handled;
 }
 
 /* ---- lifecycle ---- */
 
-/* a property whose write runs handler */
-static void CharMap_Port(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
-
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
 
+	(void) message; (void) data;
+
 	local->enabled = 1;
-	local->panelBuilt = 0;
-	local->buildTask = NULL;
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "CharacterMap");
 
-	SetPropStr(instance, "Input", "");
-	SetPropStr(instance, "Output", "");
+	/* every control's value + handler from the table (Input/Map/Enable/Preset
+	   carry a handler; Output is plain data) */
+	Widget_Init(instance, CharMapPanel);
 
-	SetPropInt(instance, "State", Starting);
-	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)CharMap_Activate);
-
-	CharMap_Port(instance, "Input",  "", (void *)CharMap_OnInput);
-	CharMap_Port(instance, "Map",    "", (void *)CharMap_OnMap);
-	CharMap_Port(instance, "Enable", "1", (void *)CharMap_OnEnable);
-	CharMap_Port(instance, "Preset", "default", (void *)CharMap_OnPreset);
+	/* the preset menu's backing list and the lifecycle state - no control */
 	SetPropStr(instance, "PresetList",
 			   "default,Upper Case,Lower Case,"
 			   "Strip CR (Win->Unix),CR->LF (Mac->Unix),LF->CR (Unix->Mac),"
@@ -407,230 +385,49 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 			   "Comma->Tab (CSV->TSV),Tab->Comma (TSV->CSV),"
 			   "Swap Quotes,Swap Brackets,Strip Tabs,"
 			   "ASCII to EBCDIC,EBCDIC to ASCII");
+	SetPropInt(instance, "State", Starting);
+	SetPropLong(instance, "local", (long)local);
+	SetPropLong(instance, "Activate", (long)CharMap_Activate);
 
 	InitPosition(instance);
-
-	/* set here, before any client subscribes */
-	SetPropInt(instance, "W", 450);
-	SetPropInt(instance, "H", 410);
-
+	Widget_MainSize(instance, CharMapPanel);
 	RegisterInstance(class, instance);
-
-	/* build the panel one tick later, once the instance has a path */
-	local->buildTask = CreateTask(ObjGetTaskList());
-	AddTaskMilli(local->buildTask, 1, (FuncPtr)CharMap_BuildTask, msg_send, instance);
+	Widget_DeferBuild(instance, CharMapPanel);
 
 	return rtrn_handled;
 }
 
-/* Connect a property to a control and seed the control's current value */
-static void CharMap_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, and every control (value +,
+   for the ports, handler). PresetList and State are published apart. */
+static WidgetItem CharMapPanel[] = {
+	/* cls        prop           def        panel   x    y    w    h  label       [handler] */
+	{ "View",     "CharacterMap", "",       0,   0,   0, 460, 410, 0 },			/* 0: main */
+	{ "Help",     "objects/charactermap/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	{ "Checkbox", "Enable", "1",            0, 430,  14,   9,   9, LABEL_LEFT, (void *)CharMap_OnEnable },
+	{ "Textbox",  "Input",  "",             0,  14,  45, 135, 255, LABEL_TOP,  (void *)CharMap_OnInput },
+	{ "Textbox",  "Map",    "",             0, 158,  45, 130, 255, LABEL_TOP,  (void *)CharMap_OnMap },
+	{ "Textbox",  "Output", "",             0, 300,  45, 135, 255, LABEL_TOP },
+	{ "Dropdown", "Preset", "default",      0,  55, 325, 150,  20, LABEL_NONE, (void *)CharMap_OnPreset },
 
-static char *CharMap_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
-
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-/* create one control and wire it to a widget property by control class */
-static void CharMap_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-						int x, int y, int w, int h, int rows, int cols)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
-	{
-		SetPropInt(c, "Rows", rows);
-		SetPropInt(c, "Cols", cols);
-	}
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-		;							/* Help box loads its README on open */
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		CharMap_Reflect(target, prop, c, "Value");
-	else if (strcmp(cls, "Dropdown") == 0)
-	{
-		char listprop[64];
-		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);				/* pick -> prop */
-		CharMap_Reflect(target, listprop, c, "Items");	/* options from propList */
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));
-	}
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);
-		CharMap_Reflect(target, prop, c, "In");
-	}
-}
-
-/* a View inside the panel, rendering as an openable icon */
-static NodeObj CharMap_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-/* on Help open, load README.md into the Help box (resolved by path) */
-int CharMap_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = CharMap_ReadFile("objects/charactermap/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-	return rtrn_handled;
-}
-
-/* panel 0 = the widget's view, panel 1 = Help */
-typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } CMCtl;
-
-static CMCtl CharMapPanel[] = {
-	{ "Checkbox", "Enable",   360,  14,   9,   9, 0,  0,  0 },
-	{ "Textbox",  "Input",     14,  45, 112, 184, 0, 15, 14 },
-	{ "Textbox",  "Map",      145,  45, 110, 184, 0, 15, 14 },
-	{ "Textbox",  "Output",   273,  45, 112, 184, 0, 15, 14 },
-	{ "Dropdown", "Preset",    55, 320, 150,  20, 0,  0,  0 },
-
-	{ "Markdown", "HelpText",  10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1,  0,  0 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
-
-static void CharMap_BuildPanel(NodeObj instance)
-{
-	NodeObj sub[2];
-	int i;
-
-	sub[0] = instance;
-	sub[1] = CharMap_SubPanel(instance, "Help", 12, 320, HELP_W, HELP_H);
-
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)CharMap_OnHelpOpen);
-	}
-
-	for (i = 0; CharMapPanel[i].cls; i++)
-	{
-		CMCtl *t = &CharMapPanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 2) ? sub[t->panel] : instance;
-		if (container)
-			CharMap_Ctl(container, instance, t->cls, t->prop,
-						t->x, t->y, t->w, t->h, t->rows, t->cols);
-	}
-}
-
-static int CharMap_BuildTask(NodeObj instance, NodeObj data, int msgid)
-{
-	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-
-	(void) data;
-	(void) msgid;
-
-	if (local && !local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		CharMap_BuildPanel(instance);
-		CharMap_Activate(instance, msg_initialize, NULL);
-	}
-	return rtrn_handled;
-}
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
+	Widget_CancelBuild(instance);
 	if (local)
-	{
-		if (local->buildTask)		/* stop the task before freeing local */
-			RemoveTask(local->buildTask);
 		free(local);
-	}
 	return rtrn_handled;
 }
 
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
-	NodeObj entry;
 
 	SetName(class, "CharacterMap");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
@@ -640,21 +437,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Enable", "data", PROP_CHECKBOX, "1");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, CharMapPanel);
 
-	entry = PublishProp(ClassSelf, "Input", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 15);
-	SetPropInt(entry, "Cols", 14);
-
-	entry = PublishProp(ClassSelf, "Map", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 15);
-	SetPropInt(entry, "Cols", 14);
-
-	entry = PublishProp(ClassSelf, "Output", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 15);
-	SetPropInt(entry, "Cols", 14);
-
-	PublishProp(ClassSelf, "Preset", "data", PROP_MENU, "default");
+	/* the preset menu's backing list and the lifecycle state - no control */
 	PublishProp(ClassSelf, "PresetList", "data", PROP_NULL,
 				"default,Upper Case,Lower Case,"
 				"Strip CR (Win->Unix),CR->LF (Mac->Unix),LF->CR (Unix->Mac),"
@@ -662,7 +448,6 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 				"Comma->Tab (CSV->TSV),Tab->Comma (TSV->CSV),"
 				"Swap Quotes,Swap Brackets,Strip Tabs,"
 				"ASCII to EBCDIC,EBCDIC to ASCII");
-
 	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
 
 	return rtrn_handled;

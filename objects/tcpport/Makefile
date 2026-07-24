@@ -47,7 +47,8 @@ tcpport.o: /usr/include/bits/floatn-common.h /usr/include/stdlib.h
 tcpport.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
 tcpport.o: /usr/include/sys/types.h /usr/include/bits/types/clock_t.h
 tcpport.o: /usr/include/bits/types/clockid_t.h
-tcpport.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
+tcpport.o: /usr/include/bits/types/time_t.h
+tcpport.o: /usr/include/bits/types/timer_t.h
 tcpport.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
 tcpport.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
 tcpport.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
@@ -60,9 +61,11 @@ tcpport.o: /usr/include/bits/pthreadtypes.h
 tcpport.o: /usr/include/bits/thread-shared-types.h
 tcpport.o: /usr/include/bits/pthreadtypes-arch.h
 tcpport.o: /usr/include/bits/atomic_wide_counter.h
-tcpport.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
-tcpport.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
-tcpport.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+tcpport.o: /usr/include/bits/struct_mutex.h
+tcpport.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
+tcpport.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
+tcpport.o: /usr/include/bits/types/locale_t.h
 tcpport.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
 tcpport.o: /usr/include/ctype.h ../../node.h ../../data.h ../../object.h
 tcpport.o: ../../sched.h ../../callback.h ../../DebugPrint.h
+tcpport.o: ../../widget.h

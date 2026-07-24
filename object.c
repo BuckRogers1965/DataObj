@@ -4,6 +4,7 @@
 
 #include "node.h"
 #include "object.h"
+#include "widget.h"
 #include "DebugPrint.h"
 #include "callback.h"
 #include "sched.h"
@@ -112,8 +113,10 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 		return 0;
 
 	name = GetPropStr(inst, "Name");
-	if (!name || !name[0])
+	if (!name || !name[0]){
+		DebugPrint ( "Instance has no name.", __FILE__, __LINE__, ERROR);
 		return 0;
+	}
 
 	/* Container + name, and nothing invented. Only a ROOT has no
 	   container (CreateRoot), and its path is just its own name - every
@@ -407,6 +410,15 @@ static NodeObj RootView = NULL;
 
 NodeObj GetRootView(void){ return RootView; }
 
+/* Where BuildSettingsView parks the controls it makes. A control has to be
+   created in a container, but the target has no path yet inside its own
+   InstanceStart, so the controls live in a named stash view instead - the
+   boot phases name it (/Initialize for the palette build, /DefaultApp for the
+   default app). Defaults to /Initialize, created on first use. */
+static NodeObj SettingsHome = NULL;
+
+void SetSettingsHome(NodeObj view){ SettingsHome = view; }
+
 NodeObj GetPaletteView(void){
 	return PaletteView;
 }
@@ -460,9 +472,7 @@ void BuildPalette(void){
 	if (!RootView)
 		RootView = CreateRoot("Root");
 
-	PaletteView = CreateObject(RootView, "View");
-	SetPropStr(PaletteView, "Name", "Palette");
-	RegisterPath("/Root/Palette", PaletteView);
+	PaletteView = Widget_Create(RootView, "View", "Palette");
 	SetPropStr(PaletteView, "ReservedViewOpen", "1");	/* views default closed; the palette starts open */
 	/* clear of the menus, which sit on the top row of the canvas at y=6 -
 	   the palette icon used to land on top of them and swallow every click */
@@ -496,9 +506,12 @@ void BuildPalette(void){
 		{
 			if (!IsPaletteExcluded(GetNameStr(class)))
 			{
-				inst = CreateObject(PaletteView, GetNameStr(class));
+				/* create + name + register in one call - a palette instance
+				   builds its panel (and, e.g., ScriptBox its inner host) in its
+				   deferred build, which needs it to resolve by path like any
+				   placed object */
+				inst = Widget_Create(PaletteView, GetNameStr(class), GetNameStr(class));
 				if (inst && GetMainView(inst)) {
-					SetPropStr(inst, "Name", GetNameStr(class));
 					SetPropInt(inst, "X", 10 + (slot % 2) * 80);
 					SetPropInt(inst, "Y", 10 + (slot / 2) * 66);
 					slot++;
@@ -637,8 +650,9 @@ CreateObject(NodeObj container, char * classname){
 		if (!PathOfInstance(container, cpath, sizeof(cpath))) {
 			snprintf(dbg, sizeof(dbg),
 					 "CreateObject('%s') REFUSED: the container has no path of its "
-					 "own, so it cannot hold anything yet.", classname);
+					 "own, so it cannot hold anything yet. container path: '%s'", classname, GetPropStr(container, "Container"));
 			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+			PrintNode(container);
 			return NULL;
 		}
 	}
@@ -1616,9 +1630,16 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
 	if (!target || !specs || count <= 0)
 		return NULL;
 
+	/* the controls need a home - the target has no path yet in its own
+	   InstanceStart, so they go into the settings-home stash view */
+	if (!SettingsHome)
+		SettingsHome = CreateRoot("Initialize");
+	if (!SettingsHome)
+		return NULL;
+
 	for (i = 0; i < count; i++)
 	{
-		control = CreateObject(NULL, specs[i].controlClass);
+		control = CreateObject(SettingsHome, specs[i].controlClass);
 		if (!control)
 			continue;
 

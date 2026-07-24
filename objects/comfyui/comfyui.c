@@ -16,6 +16,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /* ComfyUI: submit a workflow (with %%prompt%% replaced by the prompt) to a
    ComfyUI server, poll until the image is rendered, and publish the /view URL
@@ -49,6 +50,7 @@ static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
 static void Comfy_BuildPanel(NodeObj instance);
+static WidgetItem ComfyPanel[];
 static int  Comfy_BuildTask(NodeObj instance, NodeObj data, int msgid);
 static int  Comfy_Poll(NodeObj instance, NodeObj taskdata, int reason);
 static int  Comfy_Retry(NodeObj instance, NodeObj taskdata, int reason);
@@ -788,15 +790,6 @@ int Comfy_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 /* ---- lifecycle ---- */
 
-static void Comfy_Port(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
-
 static char DEFAULT_WORKFLOW[] =
 	"{\n"
 	"  \"3\": {\"class_type\": \"KSampler\", \"inputs\": {\"seed\": 42, \"steps\": 20,\n"
@@ -839,30 +832,19 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "ComfyUI");
 
-	SetPropStr(instance, "Server", "192.168.4.251");
-	SetPropStr(instance, "Port", "8188");
-	SetPropStr(instance, "Timeout", "36000");
-	SetPropStr(instance, "Prompt", "a cat wearing a wizard hat, digital art");
-	SetPropStr(instance, "Negative", "");
-	SetPropStr(instance, "Randomize", "1");
-	SetPropStr(instance, "Workflow", DEFAULT_WORKFLOW);
-	SetPropStr(instance, "Url", "");
-	SetPropStr(instance, "Status", "idle");
+	/* every control's value + handler from the table (Enable/Generate carry a
+	   handler; Server/Port/Timeout/Prompt/Negative/Randomize/Workflow/Url/Status
+	   are plain data) */
+	Widget_Init(instance, ComfyPanel);
 
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Comfy_Activate);
 
-	Comfy_Port(instance, "In",       "", (void *)Comfy_OnIn);
-	Comfy_Port(instance, "Generate", "0", (void *)Comfy_OnGenerate);
-	Comfy_Port(instance, "Enable",   "1", (void *)Comfy_OnEnable);
+	Widget_Port(instance, "In", "", (void *)Comfy_OnIn);	/* wire input, no control */
 
 	InitPosition(instance);
-
-	/* set here, before any client subscribes (padded well past the controls
-	   so the view never shows a scrollbar) */
-	SetPropInt(instance, "W", 560);
-	SetPropInt(instance, "H", 380);
+	Widget_MainSize(instance, ComfyPanel);		/* main size before any subscribe */
 
 	RegisterInstance(class, instance);
 
@@ -874,180 +856,37 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-static void Comfy_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, the Settings sub-view, and
+   every control (value +, for the ports, handler). In and State are apart. */
+static WidgetItem ComfyPanel[] = {
+	/* cls        prop        def   panel   x    y    w    h  label       [handler] */
+	{ "View", "ComfyUI",  "", 0,   0,   0, 560, 420, 0 },					/* 0: main */
+	{ "Help", "objects/comfyui/README.md", "", 0, 0, 0, 0, 0, 0 },			/* 1: help */
+	{ "View", "Settings", "", 0,  95, 356, 560, 440, 0 },					/* 2: settings */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	/* --- main (0) --- */
+	{ "Checkbox", "Enable",   "1",   0, 490,  12,   9,  9, LABEL_LEFT, (void *)Comfy_OnEnable },
+	{ "Textbox",  "Prompt",   "a cat wearing a wizard hat, digital art", 0, 15, 36, 490, 70, LABEL_NONE },
+	{ "Textbox",  "Negative", "",    0,  15, 114, 490, 70, LABEL_NONE },
+	{ "MoButton", "Generate", "0",   0,  15, 192,  90, 24, LABEL_NONE, (void *)Comfy_OnGenerate },
+	{ "TextOut",  "Status",   "idle",0, 115, 196, 390, 16, LABEL_NONE },
+	{ "Textbox",  "Url",      "",    0,  15, 226, 490, 70, LABEL_NONE },
 
-static char *Comfy_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
+	/* --- settings (2) --- */
+	{ "Textbox",  "Server",    "192.168.4.251", 2,  15, 15, 200, 22, LABEL_NONE },
+	{ "Textbox",  "Port",      "8188",          2, 225, 15,  70, 22, LABEL_NONE },
+	{ "Textbox",  "Timeout",   "36000",         2, 305, 15, 150, 22, LABEL_NONE },
+	{ "Checkbox", "Randomize", "1",             2,  15, 52,   9,  9, LABEL_NONE },
+	{ "Textbox",  "Workflow",  DEFAULT_WORKFLOW,2,  15, 82, 490, 300, LABEL_NONE },
 
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-static void Comfy_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-					  int x, int y, int w, int h, int rows, int cols)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
-	{
-		SetPropInt(c, "Rows", rows);
-		SetPropInt(c, "Cols", cols);
-	}
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-		;							/* Help box loads its README on open */
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		Comfy_Reflect(target, prop, c, "Value");
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);
-		Comfy_Reflect(target, prop, c, "In");
-	}
-}
-
-static NodeObj Comfy_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-int Comfy_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = Comfy_ReadFile("objects/comfyui/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-	return rtrn_handled;
-}
-
-/* panel 0 = the main view, panel 1 = Help, panel 2 = Settings */
-typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } CFCtl;
-
-static CFCtl ComfyPanel[] = {
-	/* --- main panel (0): the everyday controls --- */
-	{ "Checkbox", "Enable",     531,  12,   9,   9, 0,  0,  0 },
-	{ "Textbox",  "Prompt",      15,  36, 490,  70, 0,  4, 64 },
-	{ "Textbox",  "Negative",    15, 114, 490,  70, 0,  4, 64 },
-	{ "MoButton", "Generate",    15, 192,  90,  24, 0,  0,  0 },
-	{ "TextOut",  "Status",     115, 196, 390,  16, 0,  0,  0 },
-	{ "Textbox",  "Url",         15, 226, 490,  70, 0,  4, 64 },
-
-	/* --- settings sub-view (2): the wiring you set once --- */
-	{ "Textbox",  "Server",      15,  15, 200,  22, 2,  1, 26 },
-	{ "Textbox",  "Port",       225,  15,  70,  22, 2,  1,  7 },
-	{ "Textbox",  "Timeout",    305,  15, 150,  22, 2,  1, 13 },
-	{ "Checkbox", "Randomize",   15,  52,   9,   9, 2,  0,  0 },
-	{ "Textbox",  "Workflow",    15,  82, 490, 300, 2, 18, 64 },
-
-	/* --- help sub-view (1) --- */
-	{ "Markdown", "HelpText",    10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1,  0,  0 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
 
 static void Comfy_BuildPanel(NodeObj instance)
 {
-	NodeObj sub[3];
-	int i;
-
-	sub[0] = instance;
-	/* Help always sits in the bottom-left corner (Enable is always top-right);
-	   the Settings icon sits beside it */
-	sub[1] = Comfy_SubPanel(instance, "Help",     15, 336, HELP_W, HELP_H);
-	sub[2] = Comfy_SubPanel(instance, "Settings", 95, 336, 480, 430);
-
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)Comfy_OnHelpOpen);
-	}
-
-	for (i = 0; ComfyPanel[i].cls; i++)
-	{
-		CFCtl *t = &ComfyPanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 3) ? sub[t->panel] : instance;
-		if (container)
-			Comfy_Ctl(container, instance, t->cls, t->prop,
-					  t->x, t->y, t->w, t->h, t->rows, t->cols);
-	}
+	/* main view, Help, the Settings sub-view, and every control - all from the
+	   one table, walked by Widget_BuildTable */
+	Widget_BuildTable(instance, ComfyPanel);
 }
 
 static int Comfy_BuildTask(NodeObj instance, NodeObj data, int msgid)
@@ -1098,7 +937,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
-	NodeObj entry;
 
 	SetName(class, "ComfyUI");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
@@ -1108,39 +946,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Enable", "data", PROP_CHECKBOX, "1");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, ComfyPanel);
 
-	entry = PublishProp(ClassSelf, "Server", "data", PROP_TEXTBOX, "192.168.4.251");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 26);
-	entry = PublishProp(ClassSelf, "Port", "data", PROP_TEXTBOX, "8188");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 7);
-	entry = PublishProp(ClassSelf, "Timeout", "data", PROP_TEXTBOX, "36000");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 11);
-
-	entry = PublishProp(ClassSelf, "Prompt", "data", PROP_TEXTBOX, "a cat wearing a wizard hat, digital art");
-	SetPropInt(entry, "Rows", 4);
-	SetPropInt(entry, "Cols", 64);
-	entry = PublishProp(ClassSelf, "Negative", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 4);
-	SetPropInt(entry, "Cols", 64);
-
-	PublishProp(ClassSelf, "Randomize", "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In", "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "Generate", "data", PROP_NULL, "0");
-
-	entry = PublishProp(ClassSelf, "Workflow", "data", PROP_TEXTBOX, DEFAULT_WORKFLOW);
-	SetPropInt(entry, "Rows", 18);
-	SetPropInt(entry, "Cols", 64);
-
-	PublishProp(ClassSelf, "Status", "data", PROP_TEXTBOX, "idle");
-
-	entry = PublishProp(ClassSelf, "Url", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 4);
-	SetPropInt(entry, "Cols", 64);
-
+	/* the wire input and the lifecycle state - no on-screen control */
+	PublishProp(ClassSelf, "In",    "data", PROP_NULL, "");
 	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
 
 	return rtrn_handled;

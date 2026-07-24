@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 #include "dyn/queue.h"
 
 /*
@@ -55,6 +56,8 @@ typedef struct InstanceData
 	int      active;
 	int      enabled;
 } InstanceData;
+
+static WidgetItem QueuePanel[];
 
 static NodeObj LibrarySelf;
 static NodeObj QueueClass;
@@ -165,8 +168,13 @@ int Queue_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, QueuePanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
@@ -174,19 +182,30 @@ int Queue_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what a Queue or Stack looks like, built once per */
-/* instance - the same table shape for both, since the whole difference */
-/* between them is pop direction (local->mode), not presentation        */
-static ControlSpec QueueControls[] = {
-	{ "LED",    "State", 10, 10, 20, 20 },
-	{ "Button", NULL,    10, 40, 60, 20 },
+/* The whole panel in one table: main view, Help, and every control. In pushes,
+   Clock pops one per message, Out carries pops - each port shown as a readout.
+   Queue and Stack share it; only pop direction (local->mode) differs. */
+static WidgetItem QueuePanel[] = {
+	/* cls        prop     def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "Queue", "",  0,   0,   0, 300, 250, 0 },			/* 0: main */
+	{ "Help",     "objects/queue/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable","1", 0, 270,  12,   9,  9, LABEL_LEFT, (void *)Queue_OnEnable },
+	{ "LED",      "State", "1", 0,  15,  40,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",    "",  0,  15,  80, 260, 20, LABEL_LEFT, (void *)Queue_OnIn },
+	{ "TextOut",  "Clock", "",  0,  15, 120, 260, 20, LABEL_LEFT, (void *)Queue_OnClock },
+	{ "TextOut",  "Out",   "",  0,  15, 160, 260, 20, LABEL_LEFT },
+
+	{ NULL }
 };
 
 /* shared by both classes: the class name picks the pop direction */
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->q = queueCreate();
 	local->mode = CmpName(class, "Stack") ? pop_lifo : pop_fifo;
@@ -195,32 +214,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, local->mode == pop_lifo ? "Stack" : "Queue");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
-	SetPropInt(instance, "Out", 0);		/* popped entries leave here */
+
+	/* every control's value + handler from the table (Enable/In/Clock carry a
+	   handler; State/Out are plain data - the three ports read on the panel) */
+	Widget_Init(instance, QueuePanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Queue_Activate);
 
-	/* input port: arriving messages are pushed */
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long)Queue_OnIn);
-
-	/* clock port: each arriving message pops one entry */
-	SetPropInt(instance, "Clock", 0);
-	port = GetPropNode(instance, "Clock");
-	SetPropLong(port, "OnMsg", (long)Queue_OnClock);
-
-	/* enable port, the LED: 1 enables, 0 disables */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Queue_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, QueuePanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, QueueControls, sizeof(QueueControls) / sizeof(QueueControls[0]));
+	Widget_DeferBuild(instance, QueuePanel);
 
 	return rtrn_handled;
 }
@@ -229,6 +234,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->q)
@@ -252,12 +258,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	QueueClass = RegisterClass(library, class);
 
 	PublishPosition(QueueClass);
-
-	PublishProp(QueueClass, "Enable", "in",  PROP_CHECKBOX, "1");
-	PublishProp(QueueClass, "In",     "in",  PROP_NULL, "");
-	PublishProp(QueueClass, "Clock",  "in",  PROP_NULL, "");
-	PublishProp(QueueClass, "Out",    "out", PROP_NULL, "");
-	PublishProp(QueueClass, "State",  "data", PROP_LED, "1");
+	Widget_Publish(QueueClass, QueuePanel);
 
 	class = NewNode(INTEGER);
 	SetName(class, "Stack");
@@ -266,12 +267,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	StackClass = RegisterClass(library, class);
 
 	PublishPosition(StackClass);
-
-	PublishProp(StackClass, "Enable", "in",  PROP_CHECKBOX, "1");
-	PublishProp(StackClass, "In",     "in",  PROP_NULL, "");
-	PublishProp(StackClass, "Clock",  "in",  PROP_NULL, "");
-	PublishProp(StackClass, "Out",    "out", PROP_NULL, "");
-	PublishProp(StackClass, "State",  "data", PROP_LED, "1");
+	Widget_Publish(StackClass, QueuePanel);
 
 	return rtrn_handled;
 }

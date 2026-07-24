@@ -9,6 +9,7 @@
 #include "dirscan.h"
 
 #include "object.h"
+#include "widget.h"
 #include "timer.h"
 #include "libload.h"
 #include "dyn/bufftest.h"
@@ -162,7 +163,14 @@ bridge first (ensure_raw_bridge, rawtest.py) - a transport is just
 objects plus wiring, so the disabled flows below stay disabled.
 
 */
-void CreateDefaultApp(NodeObj Main){
+/* Home is a path-bearing View (/DefaultApp) the app's objects are created IN,
+   so each has a path of its own and can build its panel; Main is passed through
+   for the few cross-references that need the root (users, Bridge's Main). */
+
+   static NodeObj DefaultAppView;
+   static NodeObj DefaultRootView;
+
+   void CreateDefaultApp(NodeObj Main, NodeObj Home){
 
 	/* Web GUI, HTTP and WebSocket sharing one TCP port - */
 	/* Phases 3.1/3.2/3.3 together, and what a browser (or a firewall     */
@@ -183,19 +191,25 @@ void CreateDefaultApp(NodeObj Main){
 	{
 		NodeObj WebTcp, Router, Http, Ws, WebBridge, WebProbe, FileMenu;
 
-                DebugPrint ( "Creating web gui objects.", __FILE__, __LINE__, PROG_FLOW);
+		if (!DefaultRootView)
+		    DefaultRootView = CreateRoot("DefaultApp");
 
-		WebTcp    = CreateObject(Main, "TCP");
-		Router    = CreateObject(Main, "Router");
-		Http      = CreateObject(Main, "Http");
-		Ws        = CreateObject(Main, "WebSocket");
-		WebBridge = CreateObject(Main, "Bridge");
-		WebProbe  = CreateObject(Main, "Out");
+		/* create + name + register, in one call each (Widget_Create) */
+		DefaultAppView = Widget_Create(DefaultRootView, "View", "WebGUI");
+		SetPropStr(DefaultAppView, "ReservedViewOpen", "1");
+
+        DebugPrint ( "Creating web gui objects.", __FILE__, __LINE__, PROG_FLOW);
+
+		WebTcp    = Widget_Create(DefaultAppView, "TCP",       "WebTCP");
+		Router    = Widget_Create(DefaultAppView, "Router",    "Router");
+		Http      = Widget_Create(DefaultAppView, "Http",      "Http");
+		Ws        = Widget_Create(DefaultAppView, "WebSocket", "WebSocket");
+		WebBridge = Widget_Create(DefaultAppView, "Bridge",    "WebBridge");
+		WebProbe  = Widget_Create(DefaultAppView, "Out",       "WebProbe");
 
 		if (WebTcp && Router && Http && Ws && WebBridge && WebProbe) {
 
-                        
-                        DebugPrint ( "Initializing Default Application function.", __FILE__, __LINE__, PROG_FLOW);
+            DebugPrint ( "Initializing Default Application function.", __FILE__, __LINE__, PROG_FLOW);
 
 			SetPropStr(WebTcp, "LocalAddr", GetPropStr(Main, "ip"));
 			SetPropInt(WebTcp, "LocalPort", GetPropInt(Main, "port"));
@@ -229,7 +243,7 @@ void CreateDefaultApp(NodeObj Main){
 				Connect(FileMenu, "Selected", WebBridge, "FileCmd");
 			}
 
-                        DebugPrint ( "Activating Default Application function.", __FILE__, __LINE__, PROG_FLOW);
+            DebugPrint ( "Activating Default Application function.", __FILE__, __LINE__, PROG_FLOW);
 
 			ActivateInstance(WebProbe);
 			ActivateInstance(WebBridge);
@@ -330,9 +344,9 @@ int IsRunning(NodeObj Main){
 }
 
 /* Load in a default application */
-void LoadDefaultApp(NodeObj Main){
+void LoadDefaultApp(NodeObj Main, NodeObj Home){
 	DebugPrint ( "Entering Default Application function.", __FILE__, __LINE__, PROG_FLOW);
-	CreateDefaultApp(Main);
+	CreateDefaultApp(Main, Home);
 }
 
 void PerformTesting(){
@@ -623,6 +637,10 @@ int main ( int argc, char* argv[] ){
 
 	InstallObjects();
 
+	/* the palette build makes one inert instance per class, and each of
+	   those parks its settings controls in a stash view - name it now */
+	SetSettingsHome(CreateRoot("Initialize"));
+
 	/* one inert instance per registered class, so a connecting client's */
 	/* palette is real instances to walk, not a class-description dump  */
 	/* (see BuildPalette's own comment in object.c) - also needs every   */
@@ -641,7 +659,13 @@ int main ( int argc, char* argv[] ){
 		SkinTest();
 	}
 
-	LoadDefaultApp(Main);
+	/* the default app's objects are created IN this View, so each has a path
+	   of its own and can build its panel (a plumbing object in Main has none) */
+	{
+		NodeObj DefaultApp = CreateRoot("DefaultApp");
+		SetSettingsHome(DefaultApp);
+		LoadDefaultApp(Main, DefaultApp);
+	}
 
 	DebugPrint ( "Entering Main Loop.", __FILE__, __LINE__, PROG_FLOW);
 

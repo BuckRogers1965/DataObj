@@ -442,10 +442,11 @@ function buildValueControl(widgetClass, defaultValue, onCommit) {
       el.value = defaultValue || '';
       el.onchange = () => onCommit(el.value);
       el.addEventListener('blur', () => onCommit(el.value));
-      /* fixed one-line size until the object's declared Rows/Cols are      */
-      /* applied (bindLiveControl); boxes never resize by content            */
-      el.style.height = '1lh';
-      el.style.width = '10ch';
+      /* the default box when nothing declares a size (an options/dissection */
+      /* property); a placed control overrides it with its own W/H. Boxes    */
+      /* never resize by content.                                            */
+      el.style.height = '2lh';
+      el.style.width = '20ch';
   }
   return el;
 }
@@ -715,22 +716,21 @@ document.addEventListener('click', () => {
 /* Connect()ed source) shows up here too, the same way selfDisplays does */
 function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit) {
   const el = buildValueControl(widgetClass, defaultValue, onCommit);
-  /* a Textbox takes the size its OBJECT declared on the published entry   */
-  /* (subscribeAlias is always the real instance, whatever rendering asked  */
-  /* - card row, dissection member, copied-out atom)                         */
-  if (widgetClass === 'Textbox') {
+  /* a PLACED Textbox control (its own Value) sizes to its instance's pixel   */
+  /* W/H - the box the panel that placed it gave it. But a Textbox standing   */
+  /* in for ANOTHER object's property (the options/dissection table) must NOT */
+  /* grab that object's W/H: that is the whole widget's size. It takes the    */
+  /* box its class declared, or the default.                                  */
+  if (widgetClass === 'Textbox' && subscribeProp === 'Value') {
+    (liveControls[subscribeAlias + '.W'] = liveControls[subscribeAlias + '.W'] || []).push({ el, widgetClass: 'AtomW' });
+    (liveControls[subscribeAlias + '.H'] = liveControls[subscribeAlias + '.H'] || []).push({ el, widgetClass: 'AtomH' });
+    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'W' });
+    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'H' });
+  } else if (widgetClass === 'Textbox') {
     const inst = instances[subscribeAlias];
     const pub = inst && (classes[inst.className] || []).find((p) => p.Name === subscribeProp);
-    if (pub && pub.Rows) el.style.height = pub.Rows + 'lh';  /* lh = one line */
     if (pub && pub.Cols) el.style.width = pub.Cols + 'ch';
-    /* and its own per-instance declared size, subscribed like any value -    */
-    /* pushed on instantiation (Bridge_Subscribe), so a box sized by the       */
-    /* object that made it (a panel's TxData at 6x44) overrides the class      */
-    /* default the moment it renders                                            */
-    (liveControls[subscribeAlias + '.Rows'] = liveControls[subscribeAlias + '.Rows'] || []).push({ el, widgetClass: 'TextboxRows' });
-    (liveControls[subscribeAlias + '.Cols'] = liveControls[subscribeAlias + '.Cols'] || []).push({ el, widgetClass: 'TextboxCols' });
-    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'Rows' });
-    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'Cols' });
+    if (pub && pub.Rows) el.style.height = pub.Rows + 'lh';
   }
   send({ cmd: 'subscribe', instance: subscribeAlias, port: subscribeProp });
   /* more than one rendering can subscribe to the same alias.prop (an       */
@@ -756,9 +756,13 @@ function wireSlot(alias, propName, controlEl) {
 }
 
 function updateLiveControl(entry, value) {
+  if (entry.widgetClass === 'AtomLabelPos') {
+    const pos = ['left', 'right', 'top', 'bottom', 'none'].indexOf(value) >= 0 ? value : 'bottom';
+    entry.el.classList.remove('atom-label-left', 'atom-label-right', 'atom-label-top', 'atom-label-bottom', 'atom-label-none');
+    entry.el.classList.add('atom-label-' + pos);
+    return;
+  }
   if (entry.widgetClass === 'MoLabel') { entry.el.textContent = value; return; }
-  if (entry.widgetClass === 'TextboxRows') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'lh'; return; }
-  if (entry.widgetClass === 'TextboxCols') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'ch'; return; }
   if (entry.widgetClass === 'AtomW') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'px'; return; }
   if (entry.widgetClass === 'AtomH') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'px'; return; }
   if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
@@ -920,6 +924,11 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
     label.textContent = baseName(alias);
     label.title = alias;
     el.appendChild(label);
+
+    /* the layout table can place (or hide) the caption via a LabelPos
+       property - left/right/top/bottom/none; default is bottom */
+    (liveControls[alias + '.LabelPos'] = liveControls[alias + '.LabelPos'] || []).push({ el, widgetClass: 'AtomLabelPos' });
+    send({ cmd: 'subscribe', instance: alias, port: 'LabelPos' });
   }
 
   /* the whole atom IS the property, the same way clicking a card's row is  */

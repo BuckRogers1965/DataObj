@@ -52,6 +52,9 @@ NodeObj GetPaletteView(void);
 
 /* the session's root view - what everything else is created in */
 NodeObj GetRootView(void);
+
+/* name the view BuildSettingsView parks its controls in (a boot stash) */
+void    SetSettingsHome(NodeObj view);
 void BuildPalette(void);
 
 /* the app's own chrome, addressed and broadcast the exact same way the   */

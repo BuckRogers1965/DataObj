@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "DebugPrint.h"
+
 #define IN_NAMESPACE
 
 /* allocation accounting - see the twin counter in node.c for the idea */
@@ -242,6 +244,7 @@ long NSSearch(NSObj *Root, char *String)
 		}
 	}
 
+	DebugPrint ( "String not found.", __FILE__, __LINE__, PROG_FLOW);
 	// Not Found
 	return 0;
 }

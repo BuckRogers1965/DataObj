@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -49,6 +50,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem FilterPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -140,8 +143,13 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 	char * mode;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, FilterPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	mode = GetPropStr(instance, "Mode");
 	if (mode && strcmp(mode, "change") == 0)
@@ -159,17 +167,28 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Filter looks like, built once per instance */
-static ControlSpec FilterControls[] = {
-	{ "Textbox", "Mode",  10, 10, 80, 20 },
-	{ "LED",     "State", 10, 40, 20, 20 },
-	{ "Button",  NULL,    10, 70, 60, 20 },
+/* The whole panel in one table: main view, Help, and every control. In and Out
+   are the flow ports, each shown as a readout of the last message. */
+static WidgetItem FilterPanel[] = {
+	/* cls        prop     def   panel   x    y    w    h  label       [handler] */
+	{ "View",     "Filter","",   0,   0,   0, 300, 245, 0 },			/* 0: main */
+	{ "Help",     "objects/filter/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable","1",  0, 270,  12,   9,  9, LABEL_LEFT, (void *)Filter_OnEnable },
+	{ "Textbox",  "Mode",  "all",0,  15,  35, 120, 22, LABEL_NONE },
+	{ "LED",      "State", "1",  0,  15,  78,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",    "",   0,  15, 118, 260, 20, LABEL_LEFT, (void *)Filter_OnIn },
+	{ "TextOut",  "Out",   "",   0,  15, 160, 260, 20, LABEL_LEFT },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->active = 0;
 	local->enabled = 1;
@@ -178,29 +197,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Filter");
-	SetPropStr(instance, "Mode", "all");
-	WatchableProp(instance, "Mode");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
-	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
+
+	/* every control's value + handler from the table (Enable/In carry a handler;
+	   Mode/State/Out are plain data - In/Out are the ports, read on the panel) */
+	Widget_Init(instance, FilterPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Filter_Activate);
 
-	/* input port: Connect() reads the OnMsg handler off this port */
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long)Filter_OnIn);
-
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Filter_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, FilterPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, FilterControls, sizeof(FilterControls) / sizeof(FilterControls[0]));
+	Widget_DeferBuild(instance, FilterPanel);
 
 	return rtrn_handled;
 }
@@ -209,6 +217,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->last)
@@ -231,11 +240,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Mode",   "data", PROP_TEXTBOX, "all");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	/* every control, from the table (In/Out among them, shown as readouts) */
+	Widget_Publish(ClassSelf, FilterPanel);
 
 	return rtrn_handled;
 }

@@ -8,6 +8,7 @@
 #include "buff.h"
 #include "queue.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -46,6 +47,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem StatsPanel[];
 
 static int Stats_CurrentInterval(NodeObj instance)
 {
@@ -155,8 +158,13 @@ int Stats_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, StatsPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	/* one task struct for the instance's whole life - see leaktest.py */
 	if (!local->task)
@@ -172,24 +180,33 @@ int Stats_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: six readouts, the sampling knob, and the switch */
-static ControlSpec StatsControls[] = {
-	{ "TextOut", "Nodes",     10,  10,  80, 20 },
-	{ "TextOut", "Datas",     100, 10,  80, 20 },
-	{ "TextOut", "Envelopes", 10,  40,  80, 20 },
-	{ "TextOut", "Tasks",     100, 40,  80, 20 },
-	{ "TextOut", "Buffs",     10,  70,  80, 20 },
-	{ "TextOut", "Queues",    100, 70,  80, 20 },
-	{ "Knob",    "Interval",  10,  100, 60, 20 },
-	{ "LED",     "State",     80,  100, 20, 20 },
-	{ "Button",  NULL,        110, 100, 60, 20 },
+/* The whole panel in one table: main view, Help, and every control - six live
+   counters, the sampling-interval knob, the enable, and the state LED. Stats
+   samples the core's alloc counters; the readouts ARE its outputs. */
+static WidgetItem StatsPanel[] = {
+	/* cls        prop        def    panel   x    y    w   h  label       [handler] */
+	{ "View",     "Stats",    "",    0,   0,   0, 320, 290, 0 },			/* 0: main */
+	{ "Help",     "objects/stats/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
+
+	{ "Checkbox", "Enable",   "1",   0, 290,  12,   9,  9, LABEL_LEFT, (void *)Stats_OnEnable },
+	{ "TextOut",  "Nodes",     "",   0,  15,  40, 120, 20, LABEL_NONE },
+	{ "TextOut",  "Datas",     "",   0, 175,  40, 120, 20, LABEL_NONE },
+	{ "TextOut",  "Envelopes", "",   0,  15,  85, 120, 20, LABEL_NONE },
+	{ "TextOut",  "Tasks",     "",   0, 175,  85, 120, 20, LABEL_NONE },
+	{ "TextOut",  "Buffs",     "",   0,  15, 130, 120, 20, LABEL_NONE },
+	{ "TextOut",  "Queues",    "",   0, 175, 130, 120, 20, LABEL_NONE },
+	{ "Knob",     "Interval", "1000",0,  15, 185,  60, 60, LABEL_NONE },
+	{ "LED",      "State",    "1",   0, 130, 200,  12, 12, LABEL_NONE },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
-	NodeObj port;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->task = NULL;
 	local->active = 0;
@@ -198,27 +215,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Stats");
-	SetPropInt(instance, "Interval", 1000);
-	SetPropStr(instance, "Nodes", "");
-	SetPropStr(instance, "Datas", "");
-	SetPropStr(instance, "Envelopes", "");
-	SetPropStr(instance, "Tasks", "");
-	SetPropStr(instance, "Buffs", "");
-	SetPropStr(instance, "Queues", "");
-	SetPropInt(instance, "State", Starting);
+
+	/* every control's value + handler from the table (Enable carries a handler;
+	   the six counters, Interval and State are plain data) */
+	Widget_Init(instance, StatsPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Stats_Activate);
 
-	/* enable port: 1 samples, 0 pauses, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Stats_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, StatsPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, StatsControls, sizeof(StatsControls) / sizeof(StatsControls[0]));
+	Widget_DeferBuild(instance, StatsPanel);
 
 	return rtrn_handled;
 }
@@ -227,6 +235,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* stop the sampling task before freeing local, or a scheduled  */
@@ -251,15 +260,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Nodes",     "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Datas",     "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Envelopes", "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Tasks",     "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Buffs",     "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Queues",    "data", PROP_TEXTOUT, "");
-	PublishProp(ClassSelf, "Interval",  "data", PROP_KNOB, "1000");
-	PublishProp(ClassSelf, "Enable",    "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",     "data", PROP_LED, "1");
+	/* every control, from the table (the six counters are the readouts) */
+	Widget_Publish(ClassSelf, StatsPanel);
 
 	return rtrn_handled;
 }

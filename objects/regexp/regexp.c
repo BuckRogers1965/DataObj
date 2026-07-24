@@ -8,6 +8,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /* RegExp: line-oriented POSIX-ERE match/replace. Each line of Input is tested
    against Expression; Action decides what reaches Output. Replace expands
@@ -16,15 +17,12 @@
 typedef struct InstanceData
 {
 	int     enabled;
-	int     panelBuilt;
-	TaskObj buildTask;
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void RegExp_BuildPanel(NodeObj instance);
-static int  RegExp_BuildTask(NodeObj instance, NodeObj data, int msgid);
+static WidgetItem RegExpPanel[];
 
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
@@ -275,274 +273,78 @@ int RegExp_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		RegExp_BuildPanel(instance);
-	}
+	Widget_BuildOnce(instance, RegExpPanel);
 	RegExp_Recompute(instance);
 	return rtrn_handled;
 }
 
 /* ---- lifecycle ---- */
 
-static void RegExp_Port(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
-
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
 
+	(void) message; (void) data;
+
 	local->enabled = 1;
-	local->panelBuilt = 0;
-	local->buildTask = NULL;
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "RegExp");
 
-	SetPropStr(instance, "Output", "");
-	SetPropStr(instance, "Error", "");
-	SetPropStr(instance, "ActionList", "Match,Reject,Replace,Replace Line");
+	/* every control's value + handler from the table (Input/Expression/
+	   Substitution/Action/CaseSensitive/Enable carry a handler; Output/Error
+	   are plain data) */
+	Widget_Init(instance, RegExpPanel);
 
+	/* the Action menu's backing list and the lifecycle state - no control */
+	SetPropStr(instance, "ActionList", "Match,Reject,Replace,Replace Line");
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)RegExp_Activate);
 
-	RegExp_Port(instance, "Input",         "",      (void *)RegExp_OnInput);
-	RegExp_Port(instance, "Expression",    "",      (void *)RegExp_OnExpression);
-	RegExp_Port(instance, "Substitution",  "",      (void *)RegExp_OnSubstitution);
-	RegExp_Port(instance, "Action",        "Match", (void *)RegExp_OnAction);
-	RegExp_Port(instance, "CaseSensitive", "1",     (void *)RegExp_OnCaseSensitive);
-	RegExp_Port(instance, "Enable",        "1",     (void *)RegExp_OnEnable);
-
 	InitPosition(instance);
-
-	/* set here, before any client subscribes */
-	SetPropInt(instance, "W", 490);
-	SetPropInt(instance, "H", 460);
-
+	Widget_MainSize(instance, RegExpPanel);
 	RegisterInstance(class, instance);
-
-	local->buildTask = CreateTask(ObjGetTaskList());
-	AddTaskMilli(local->buildTask, 1, (FuncPtr)RegExp_BuildTask, msg_send, instance);
+	Widget_DeferBuild(instance, RegExpPanel);
 
 	return rtrn_handled;
 }
 
-static void RegExp_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, and every control (value +,
+   for the ports, handler). ActionList and State are published apart. */
+static WidgetItem RegExpPanel[] = {
+	/* cls        prop            def      panel   x    y    w    h  label       [handler] */
+	{ "View",     "RegExp", "",            0,   0,   0, 490, 460, 0 },			/* 0: main */
+	{ "Help",     "objects/regexp/README.md", "", 0, 0, 0, 0, 0, 0 },			/* 1: help */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	{ "Checkbox", "Enable",        "1",     0, 435,  12,   9,   9, LABEL_LEFT, (void *)RegExp_OnEnable },
+	{ "Textbox",  "Expression",    "",      0,  15,  38, 460,  22, LABEL_NONE, (void *)RegExp_OnExpression },
+	{ "Textbox",  "Substitution",  "",      0,  15,  86, 460,  22, LABEL_NONE, (void *)RegExp_OnSubstitution },
+	{ "Dropdown", "Action",        "Match", 0,  15, 120, 150,  20, LABEL_NONE, (void *)RegExp_OnAction },
+	{ "Checkbox", "CaseSensitive", "1",     0, 185, 122,   9,   9, LABEL_NONE, (void *)RegExp_OnCaseSensitive },
+	{ "Textbox",  "Input",         "",      0,  15, 160, 215, 165, LABEL_NONE, (void *)RegExp_OnInput },
+	{ "Textbox",  "Output",        "",      0, 240, 160, 215, 165, LABEL_NONE },
+	{ "TextOut",  "Error",         "",      0,  15, 332, 440,  16, LABEL_NONE },
 
-static char *RegExp_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
-
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-static void RegExp_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-					   int x, int y, int w, int h, int rows, int cols)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
-	{
-		SetPropInt(c, "Rows", rows);
-		SetPropInt(c, "Cols", cols);
-	}
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-		;							/* Help box loads its README on open */
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		RegExp_Reflect(target, prop, c, "Value");
-	else if (strcmp(cls, "Dropdown") == 0)
-	{
-		char listprop[64];
-		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);
-		RegExp_Reflect(target, listprop, c, "Items");
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));
-	}
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);
-		RegExp_Reflect(target, prop, c, "In");
-	}
-}
-
-static NodeObj RegExp_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-int RegExp_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = RegExp_ReadFile("objects/regexp/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-	return rtrn_handled;
-}
-
-/* panel 0 = the widget's view, panel 1 = Help */
-typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } RXCtl;
-
-static RXCtl RegExpPanel[] = {
-	{ "Checkbox", "Enable",         435,  12,   9,   9, 0,  0,  0 },
-	{ "Textbox",  "Expression",      15,  38, 440,  22, 0,  1, 62 },
-	{ "Textbox",  "Substitution",    15,  86, 440,  22, 0,  1, 62 },
-	{ "Dropdown", "Action",          15, 120, 150,  20, 0,  0,  0 },
-	{ "Checkbox", "CaseSensitive",  185, 122,   9,   9, 0,  0,  0 },
-	{ "Textbox",  "Input",           15, 160, 215, 165, 0, 11, 28 },
-	{ "Textbox",  "Output",         240, 160, 215, 165, 0, 11, 28 },
-	{ "TextOut",  "Error",           15, 332, 440,  16, 0,  0,  0 },
-
-	{ "Markdown", "HelpText",        10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1,  0,  0 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
-
-static void RegExp_BuildPanel(NodeObj instance)
-{
-	NodeObj sub[2];
-	int i;
-
-	sub[0] = instance;
-	sub[1] = RegExp_SubPanel(instance, "Help", 15, 352, HELP_W, HELP_H);
-
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)RegExp_OnHelpOpen);
-	}
-
-	for (i = 0; RegExpPanel[i].cls; i++)
-	{
-		RXCtl *t = &RegExpPanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 2) ? sub[t->panel] : instance;
-		if (container)
-			RegExp_Ctl(container, instance, t->cls, t->prop,
-					   t->x, t->y, t->w, t->h, t->rows, t->cols);
-	}
-}
-
-static int RegExp_BuildTask(NodeObj instance, NodeObj data, int msgid)
-{
-	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-
-	(void) data;
-	(void) msgid;
-
-	if (local && !local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		RegExp_BuildPanel(instance);
-		RegExp_Activate(instance, msg_initialize, NULL);
-	}
-	return rtrn_handled;
-}
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
+	Widget_CancelBuild(instance);
 	if (local)
-	{
-		if (local->buildTask)
-			RemoveTask(local->buildTask);
 		free(local);
-	}
 	return rtrn_handled;
 }
 
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
-	NodeObj entry;
 
 	SetName(class, "RegExp");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
@@ -552,28 +354,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Enable", "data", PROP_CHECKBOX, "1");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, RegExpPanel);
 
-	entry = PublishProp(ClassSelf, "Expression", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 62);
-	entry = PublishProp(ClassSelf, "Substitution", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 62);
-
-	PublishProp(ClassSelf, "Action", "data", PROP_MENU, "Match");
+	/* the Action menu's backing list and the lifecycle state - no control */
 	PublishProp(ClassSelf, "ActionList", "data", PROP_NULL, "Match,Reject,Replace,Replace Line");
-	PublishProp(ClassSelf, "CaseSensitive", "data", PROP_CHECKBOX, "1");
-
-	entry = PublishProp(ClassSelf, "Input", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 11);
-	SetPropInt(entry, "Cols", 28);
-	entry = PublishProp(ClassSelf, "Output", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 11);
-	SetPropInt(entry, "Cols", 28);
-
-	PublishProp(ClassSelf, "Error", "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
 
 	return rtrn_handled;
 }

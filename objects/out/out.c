@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -35,6 +36,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem OutPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -108,8 +111,13 @@ int Out_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, OutPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	local->active = 1;
 	local->messages = 0;
@@ -119,18 +127,28 @@ int Out_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Out looks like, built once per instance */
-static ControlSpec OutControls[] = {
-	{ "Textbox",  "Label", 10, 10,  80, 20 },
-	{ "Checkbox", "Echo",  100, 10, 20, 20 },
-	{ "LED",      "State", 10, 40,  20, 20 },
-	{ "Button",   NULL,    10, 70,  60, 20 },
+/* The whole panel in one table: main view, Help, and every control. In is the
+   probe's watched input, shown as a readout of the last message that passed. */
+static WidgetItem OutPanel[] = {
+	/* cls        prop     def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "Out",   "",  0,   0,   0, 280, 240, 0 },			/* 0: main */
+	{ "Help",     "objects/out/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable","1", 0, 250,  12,   9,  9, LABEL_LEFT, (void *)Out_OnEnable },
+	{ "Textbox",  "Label", "",  0,  15,  35, 240, 22, LABEL_NONE },
+	{ "Checkbox", "Echo",  "1", 0,  15,  78,   9,  9, LABEL_NONE },
+	{ "LED",      "State", "1", 0,  15, 108,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",    "",  0,  15, 150, 240, 20, LABEL_LEFT, (void *)Out_OnIn },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, inPort;
+	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->active = 0;
 	local->enabled = 1;
@@ -139,30 +157,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Out");
-	SetPropStr(instance, "Label", "");
-	WatchableProp(instance, "Label");
-	SetPropInt(instance, "Echo", 1);
-	WatchableProp(instance, "Echo");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable carries a handler;
+	   Label/Echo/State are plain data) */
+	Widget_Init(instance, OutPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Out_Activate);
 
-	/* input port: Connect() reads the OnMsg handler off this port */
-	SetPropInt(instance, "In", 0);
-	inPort = GetPropNode(instance, "In");
-	SetPropLong(inPort, "OnMsg", (long)Out_OnIn);
-
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	inPort = GetPropNode(instance, "Enable");
-	SetPropLong(inPort, "OnMsg", (long)Out_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, OutPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, OutControls, sizeof(OutControls) / sizeof(OutControls[0]));
+	Widget_DeferBuild(instance, OutPanel);
 
 	return rtrn_handled;
 }
@@ -171,6 +177,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 		free(local);
 
@@ -189,11 +196,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Label",  "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Echo",   "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	/* every control, from the table - In among them, shown as a readout */
+	Widget_Publish(ClassSelf, OutPanel);
 
 	return rtrn_handled;
 }

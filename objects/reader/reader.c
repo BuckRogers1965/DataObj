@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -38,6 +39,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem ReaderPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -143,8 +146,13 @@ int Reader_Activate(NodeObj instance, MsgId message, NodeObj data)
 	char * filename;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, ReaderPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	filename = GetPropStr(instance, "Filename");
 	if (!filename || !filename[0])
@@ -173,19 +181,27 @@ int Reader_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Reader looks like, built once per instance -  */
-/* see BuildSettingsView's doc comment (object.h) and the VNOS panel-     */
-/* builder pattern (objects/demo/pulsegenerator/pulsepb.c) it comes from  */
-static ControlSpec ReaderControls[] = {
-	{ "Textbox", "Filename", 10, 10, 140, 20 },
-	{ "LED",     "State",    10, 40,  20, 20 },
-	{ "Button",  NULL,       10, 70,  60, 20 },
+/* The whole panel in one table: main view, Help, and every control. Out is the
+   output port, shown as a readout of the last chunk it emitted. */
+static WidgetItem ReaderPanel[] = {
+	/* cls        prop       def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "Reader",  "",  0,   0,   0, 300, 220, 0 },			/* 0: main */
+	{ "Help",     "objects/reader/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable",  "1", 0, 270,  12,   9,  9, LABEL_LEFT, (void *)Reader_OnEnable },
+	{ "Textbox",  "Filename","",  0,  15,  35, 260, 22, LABEL_NONE },
+	{ "LED",      "State",   "1", 0,  15,  78,  12, 12, LABEL_NONE },
+	{ "TextOut",  "Out",     "",  0,  15, 118, 260, 20, LABEL_LEFT },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->file = NULL;
 	local->task = NULL;
@@ -195,24 +211,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Reader");
-	SetPropStr(instance, "Filename", "");
-	WatchableProp(instance, "Filename");
-	SetPropInt(instance, "Out", 0);		/* output port, subscribers attach here */
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable carries a handler;
+	   Filename/State/Out are plain data - Out is the emit port, read on the panel) */
+	Widget_Init(instance, ReaderPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Reader_Activate);
 
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Reader_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, ReaderPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, ReaderControls, sizeof(ReaderControls) / sizeof(ReaderControls[0]));
+	Widget_DeferBuild(instance, ReaderPanel);
 
 	return rtrn_handled;
 }
@@ -221,6 +231,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* stop the read task before freeing local, or a still-scheduled */
@@ -247,10 +258,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Filename", "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Out",      "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+	/* every control, from the table (Out among them, shown as a readout) */
+	Widget_Publish(ClassSelf, ReaderPanel);
 
 	return rtrn_handled;
 }

@@ -41,18 +41,17 @@ image.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 image.o: /usr/include/bits/types/__mbstate_t.h
 image.o: /usr/include/bits/types/__fpos64_t.h
 image.o: /usr/include/bits/types/__FILE.h /usr/include/bits/types/FILE.h
-image.o: /usr/include/bits/types/struct_FILE.h
-image.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
-image.o: /usr/include/bits/floatn-common.h /usr/include/stdlib.h
-image.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
-image.o: /usr/include/sys/types.h /usr/include/bits/types/clock_t.h
-image.o: /usr/include/bits/types/clockid_t.h
-image.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
-image.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
-image.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
-image.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
-image.o: /usr/include/sys/select.h /usr/include/bits/select.h
-image.o: /usr/include/bits/types/sigset_t.h
+image.o: /usr/include/bits/types/struct_FILE.h /usr/include/bits/stdio_lim.h
+image.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
+image.o: /usr/include/stdlib.h /usr/include/bits/waitflags.h
+image.o: /usr/include/bits/waitstatus.h /usr/include/sys/types.h
+image.o: /usr/include/bits/types/clock_t.h
+image.o: /usr/include/bits/types/clockid_t.h /usr/include/bits/types/time_t.h
+image.o: /usr/include/bits/types/timer_t.h /usr/include/bits/stdint-intn.h
+image.o: /usr/include/endian.h /usr/include/bits/endian.h
+image.o: /usr/include/bits/endianness.h /usr/include/bits/byteswap.h
+image.o: /usr/include/bits/uintn-identity.h /usr/include/sys/select.h
+image.o: /usr/include/bits/select.h /usr/include/bits/types/sigset_t.h
 image.o: /usr/include/bits/types/__sigset_t.h
 image.o: /usr/include/bits/types/struct_timeval.h
 image.o: /usr/include/bits/types/struct_timespec.h

@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -38,15 +39,12 @@ typedef struct InstanceData
 	int     enabled;	/* the Enable checkbox - gates the gate       */
 	int     lastInput;	/* the most recent value seen on In           */
 	int     parity;		/* running parity state for Parity mode       */
-	int     panelBuilt;	/* the panel is built once, when it has a path */
-	TaskObj buildTask;	/* fires one tick after creation, to build     */
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void LogicGate_BuildPanel(NodeObj instance);
-static int  LogicGate_BuildTask(NodeObj instance, NodeObj data, int msgid);
+static WidgetItem LogicGatePanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -159,303 +157,73 @@ int LogicGate_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		LogicGate_BuildPanel(instance);
-	}
-
+	Widget_BuildOnce(instance, LogicGatePanel);
 	return rtrn_handled;
 }
 
 /* ---- lifecycle ------------------------------------------------------ */
-
-static void LogicGate_Port(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
 
+	(void) message; (void) data;
+
 	local->enabled = 1;
 	local->lastInput = 0;
 	local->parity = 0;
-	local->panelBuilt = 0;
-	local->buildTask = NULL;
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "LogicGate");
 
-	/* the mode selector and its option list */
-	SetPropStr(instance, "GateMode", "OR Gate");
+	/* every control's value + handler from the table (Enable/Interpret carry
+	   a handler; GateMode/the checkboxes/Out are plain data) */
+	Widget_Init(instance, LogicGatePanel);
+
+	/* the wire input (has a handler, no control), the dropdown's backing list,
+	   and the lifecycle state */
+	Widget_Port(instance, "In", "0", (void *)LogicGate_OnIn);
 	SetPropStr(instance, "GateModeList", "OR Gate,AND Gate,XOR Gate,Parity Gate");
-
-	/* the option checkboxes - plain data, read live by the logic */
-	SetPropStr(instance, "InvertOp", "0");
-	SetPropStr(instance, "ChangesOnly", "1");
-	SetPropStr(instance, "AutoInterpret", "1");
-
-	/* Out - the result; just a property, the LED reflects it and downstream
-	   wires from it */
-	SetPropStr(instance, "Out", "0");
-
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)LogicGate_Activate);
 
-	/* the things that ACT when written - In (input), Interpret, Enable.
-	   In and Out are ordinary properties named In and Out. */
-	LogicGate_Port(instance, "In",        "0", (void *)LogicGate_OnIn);
-	LogicGate_Port(instance, "Interpret", "0", (void *)LogicGate_OnInterpret);
-	LogicGate_Port(instance, "Enable",    "1", (void *)LogicGate_OnEnable);
-
 	InitPosition(instance);
-
-	/* the view's OWN size, set before any client can subscribe */
-	SetPropInt(instance, "W", 300);
-	SetPropInt(instance, "H", 250);
-
+	Widget_MainSize(instance, LogicGatePanel);
 	RegisterInstance(class, instance);
-
-	/* arm the deferred build: populated one tick from now, after the bridge
-	   has given this instance its path */
-	local->buildTask = CreateTask(ObjGetTaskList());
-	AddTaskMilli(local->buildTask, 1, (FuncPtr)LogicGate_BuildTask, msg_send, instance);
+	Widget_DeferBuild(instance, LogicGatePanel);
 
 	return rtrn_handled;
 }
 
-/* wire a reflect (a property -> a control) AND seed it now, so the GUI
-   shows the underlying value the moment the control is created (see TCPPort) */
-static void LogicGate_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, every control (value +, for
+   the ports, handler). In (a wire input), GateModeList and State are apart. */
+static WidgetItem LogicGatePanel[] = {
+	/* cls        prop            def       panel   x    y    w    h  label       [handler] */
+	{ "View",     "LogicGate",    "",       0,   0,   0, 300, 250, 0 },			/* 0: main */
+	{ "Help",     "objects/logicgate/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	{ "Checkbox", "Enable",        "1",      0, 148,  13,   8,  8, LABEL_LEFT, (void *)LogicGate_OnEnable },
+	{ "Dropdown", "GateMode",      "OR Gate",0,  15,  57, 178, 15, LABEL_NONE },
+	{ "Checkbox", "InvertOp",      "0",      0,  16,  89,   8,  8, LABEL_NONE },
+	{ "Checkbox", "ChangesOnly",   "1",      0, 108,  89,   8,  8, LABEL_NONE },
+	{ "Checkbox", "AutoInterpret", "1",      0, 108, 119,   8,  8, LABEL_NONE },
+	{ "MoButton", "Interpret",     "0",      0, 108, 141,  60, 20, LABEL_NONE, (void *)LogicGate_OnInterpret },
+	{ "LED",      "Out",           "0",      0,  14, 118,  12, 12, LABEL_NONE },
 
-/* read a whole file into a malloc'd, NUL-terminated string (caller frees) */
-static char *LogicGate_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
-
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-/* one control put into a container view and wired to the gate's own
-   property - a widget dropped into a view. The kind of wire follows the
-   control class, exactly as in PulseGenerator/TCPPort. */
-static void LogicGate_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-						  int x, int y, int w, int h, int rows, int cols)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
-	{
-		SetPropInt(c, "Rows", rows);
-		SetPropInt(c, "Cols", cols);
-	}
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);		/* a command property */
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-	{
-		/* the Help box starts EMPTY; its README.md is read from disk and set
-		   into its Value only when the Help panel is OPENED
-		   (LogicGate_OnHelpOpen resolves it by path) - never eagerly. */
-	}
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		LogicGate_Reflect(target, prop, c, "Value");	/* set its display property */
-	else if (strcmp(cls, "Dropdown") == 0)
-	{
-		char listprop[64];
-		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);			/* the pick drives the value */
-		LogicGate_Reflect(target, listprop, c, "Items");	/* its options */
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));	/* show the pick */
-	}
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);		/* edits it */
-		LogicGate_Reflect(target, prop, c, "In");	/* and reflects it, seeded now */
-	}
-}
-
-/* a sub-panel: a View put into the panel (renders as an icon that opens),
-   then populated with its own controls - a view inside a view. */
-static NodeObj LogicGate_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-/* the Help panel was OPENED: its Open was delivered here (not stored). Read
-   the widget's README.md from disk and set it into the Help box's Value with
-   an update. No hardcoded help - the file is the source, loaded on open. */
-int LogicGate_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;			/* only on OPEN (Open -> 1) */
-
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = LogicGate_ReadFile("objects/logicgate/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-
-	return rtrn_handled;
-}
-
-/* The panel: 0 = main, 1 = Help. The Out LED
-   shows the result. */
-typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } LGCtl;
-
-static LGCtl LogicGatePanel[] = {
-	/* --- panel 0: Logic Gate (the object's own view) --- */
-	{ "Checkbox", "Enable",        148,  13,   8,  8, 0,  0,  0 },
-	{ "Dropdown", "GateMode",           15,  57, 178, 15, 0,  0,  0 },
-	{ "Checkbox", "InvertOp",        16,  89,   8,  8, 0,  0,  0 },
-	{ "Checkbox", "ChangesOnly",    108,  89,   8,  8, 0,  0,  0 },
-	{ "Checkbox", "AutoInterpret",  108, 119,   8,  8, 0,  0,  0 },
-	{ "MoButton", "Interpret",      108, 141,  60, 20, 0,  0,  0 },
-	{ "LED",      "Out",             14, 118,  12, 12, 0,  0,  0 },
-
-	/* --- panel 1: Help --- */
-	/* the standard help box: fills the Help panel with a 10px margin */
-	{ "Markdown", "HelpText",        10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1,  0,  0 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
-
-/* build the panel: panel 0 goes straight into the object, the Help panel is
-   a sub-view rendering as an openable icon. */
-static void LogicGate_BuildPanel(NodeObj instance)
-{
-	NodeObj sub[2];
-	int i;
-
-	sub[0] = instance;
-	sub[1] = LogicGate_SubPanel(instance, "Help", 10, 188, HELP_W, HELP_H);
-
-	/* load the README into the Help box when the Help panel is OPENED */
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)LogicGate_OnHelpOpen);
-	}
-
-	for (i = 0; LogicGatePanel[i].cls; i++)
-	{
-		LGCtl *t = &LogicGatePanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 2) ? sub[t->panel] : instance;
-		if (container)
-			LogicGate_Ctl(container, instance, t->cls, t->prop,
-						  t->x, t->y, t->w, t->h, t->rows, t->cols);
-	}
-}
-
-static int LogicGate_BuildTask(NodeObj instance, NodeObj data, int msgid)
-{
-	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-
-	(void) data;
-	(void) msgid;
-
-	if (local && !local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		LogicGate_BuildPanel(instance);
-		LogicGate_Activate(instance, msg_initialize, NULL);
-	}
-
-	return rtrn_handled;
-}
 
 int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
+	Widget_CancelBuild(instance);
 	if (local)
-	{
-		if (local->buildTask)
-			RemoveTask(local->buildTask);
 		free(local);
-	}
 
 	return rtrn_handled;
 }
@@ -472,22 +240,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	/* EVERYTHING is a property. In/Interpret/Enable carry handlers so a write
-	   acts; the rest is plain data read live. In and Out are ordinary
-	   properties named In and Out - not a special port kind. */
-	PublishProp(ClassSelf, "Enable",        "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "GateMode",          "data", PROP_MENU, "OR Gate");
-	PublishProp(ClassSelf, "GateModeList",      "data", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
-	PublishProp(ClassSelf, "InvertOp",      "data", PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "ChangesOnly",   "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "AutoInterpret", "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Interpret",     "data", PROP_NULL, "0");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, LogicGatePanel);
 
-	PublishProp(ClassSelf, "In",            "data", PROP_NULL, "0");
-	PublishProp(ClassSelf, "Out",           "data", PROP_LED, "0");
-
-	PublishProp(ClassSelf, "State",         "data", PROP_LED, "1");
-	/* no HelpText property: the Help box loads README.md from disk */
+	/* the wire input, the dropdown's backing list, and the lifecycle state */
+	PublishProp(ClassSelf, "In",           "data", PROP_NULL, "0");
+	PublishProp(ClassSelf, "GateModeList", "data", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
+	PublishProp(ClassSelf, "State",        "data", PROP_LED, "1");
 
 	return rtrn_handled;
 }

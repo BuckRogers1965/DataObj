@@ -280,6 +280,14 @@ svg.view-wires {
   text-overflow: ellipsis;
 }
 
+/* where the caption sits, driven by the control's LabelPos property (the
+   widget layout table declares it). DOM order is [control, label]. */
+.atom-label-bottom { flex-direction: column; }
+.atom-label-top    { flex-direction: column-reverse; }
+.atom-label-right  { flex-direction: row; }
+.atom-label-left   { flex-direction: row-reverse; }
+.atom-label-none > .widget-atom-label { display: none; }
+
 .widget-atom input[type=text],
 .widget-atom input[type=number] {
   width: 70px;

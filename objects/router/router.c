@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /*
 
@@ -56,6 +57,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem RouterPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -128,8 +131,13 @@ int Router_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, RouterPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
@@ -137,16 +145,26 @@ int Router_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Router looks like, built once per instance */
-static ControlSpec RouterControls[] = {
-	{ "LED",    "State", 10, 10, 20, 20 },
-	{ "Button", NULL,    10, 40, 60, 20 },
+/* The whole panel in one table: main view, Help, and every control. Wire is the
+   input port (raw bytes from TCP's Out), shown as a readout. */
+static WidgetItem RouterPanel[] = {
+	/* cls        prop     def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "Router","",  0,   0,   0, 300, 210, 0 },			/* 0: main */
+	{ "Help",     "objects/router/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable","1", 0, 270,  12,   9,  9, LABEL_LEFT, (void *)Router_OnEnable },
+	{ "LED",      "State", "1", 0,  15,  40,  12, 12, LABEL_NONE },
+	{ "TextOut",  "Wire",  "",  0,  15,  80, 260, 20, LABEL_LEFT, (void *)Router_OnWire },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
+	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->active = 0;
 	local->enabled = 1;
@@ -154,8 +172,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Router");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable/Wire carry a
+	   handler; State is plain data - Wire is the input, read on the panel) */
+	Widget_Init(instance, RouterPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Router_Activate);
 
@@ -164,21 +185,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropLong(instance, "HttpTarget", (long) NULL);
 	SetPropLong(instance, "WsTarget", (long) NULL);
 
-	/* input port: raw bytes arrive here, from TCP's Out */
-	SetPropInt(instance, "Wire", 0);
-	port = GetPropNode(instance, "Wire");
-	SetPropLong(port, "OnMsg", (long)Router_OnWire);
-
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Router_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, RouterPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, RouterControls, sizeof(RouterControls) / sizeof(RouterControls[0]));
+	Widget_DeferBuild(instance, RouterPanel);
 
 	return rtrn_handled;
 }
@@ -187,6 +197,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		DelNode(local->connModes);
@@ -208,9 +219,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Wire",   "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	/* every control, from the table (Wire among them, shown as a readout) */
+	Widget_Publish(ClassSelf, RouterPanel);
 
 	return rtrn_handled;
 }

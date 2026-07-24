@@ -16,6 +16,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 
 /* Ollama: POST a chat payload to an OpenAI-format endpoint (Ollama's
    /v1/chat/completions) and put the reply text in Output. The socket is
@@ -46,6 +47,7 @@ static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
 static void Ollama_BuildPanel(NodeObj instance);
+static WidgetItem OllamaPanel[];
 static int  Ollama_BuildTask(NodeObj instance, NodeObj data, int msgid);
 static int  Ollama_Poll(NodeObj instance, NodeObj taskdata, int reason);
 
@@ -649,19 +651,12 @@ int Ollama_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 /* ---- lifecycle ---- */
 
-static void Ollama_Port(NodeObj instance, char *name, char *initial, void *handler)
-{
-	NodeObj port;
-
-	SetPropStr(instance, name, initial);
-	port = GetPropNode(instance, name);
-	SetPropLong(port, "OnMsg", (long)handler);
-}
-
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance;
 	InstanceData *local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->enabled = 1;
 	local->panelBuilt = 0;
@@ -679,31 +674,17 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	instance = NewNode(INTEGER);
 	SetName(instance, "Ollama");
 
-	SetPropStr(instance, "Server", "192.168.4.253");
-	SetPropStr(instance, "Port", "11434");
-	SetPropStr(instance, "Path", "/v1/chat/completions");
-	SetPropStr(instance, "Timeout", "3600");
-	SetPropStr(instance, "Model", "llama3.2");
-	SetPropStr(instance, "ModelsList", "");
-	SetPropStr(instance, "Payload", "Say hello in one sentence.");
-	SetPropStr(instance, "Output", "");
-	SetPropStr(instance, "Status", "idle");
+	/* every control's value + handler from the table (Send/Refresh/Models/Enable
+	   carry a handler; the rest are plain data) */
+	Widget_Init(instance, OllamaPanel);
 
+	SetPropStr(instance, "ModelsList", "");	/* the Models menu's backing list - no control */
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Ollama_Activate);
 
-	Ollama_Port(instance, "Send",    "0", (void *)Ollama_OnSend);
-	Ollama_Port(instance, "Refresh", "0", (void *)Ollama_OnRefresh);
-	Ollama_Port(instance, "Models",  "", (void *)Ollama_OnModels);
-	Ollama_Port(instance, "Enable",  "1", (void *)Ollama_OnEnable);
-
 	InitPosition(instance);
-
-	/* set here, before any client subscribes */
-	SetPropInt(instance, "W", 490);
-	SetPropInt(instance, "H", 510);
-
+	Widget_MainSize(instance, OllamaPanel);
 	RegisterInstance(class, instance);
 
 	local->poll = CreateTask(ObjGetTaskList());
@@ -713,182 +694,33 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-static void Ollama_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
-{
-	char *cur;
+/* The whole widget in one table: main view, Help, and every control (value +,
+   for the ports, handler). ModelsList and State are published apart. */
+static WidgetItem OllamaPanel[] = {
+	/* cls        prop      def       panel   x    y    w    h  label       [handler] */
+	{ "View", "Ollama", "", 0, 0, 0, 490, 510, 0 },						/* 0: main */
+	{ "Help", "objects/ollama/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
 
-	Connect(src, sp, dst, dp);
-	cur = GetPropStr(src, sp);
-	if (cur)
-		SetOrDeliverProp(dst, dp, cur);
-}
+	{ "Checkbox", "Enable",  "1",             0, 455,  12,   9,   9, LABEL_LEFT, (void *)Ollama_OnEnable },
+	{ "Textbox",  "Server",  "192.168.4.253", 0,  15,  38, 200,  22, LABEL_NONE },
+	{ "Textbox",  "Port",    "11434",         0, 225,  38,  70,  22, LABEL_NONE },
+	{ "Textbox",  "Timeout", "3600",          0, 305,  38, 120,  22, LABEL_NONE },
+	{ "Textbox",  "Model",   "llama3.2",       0,  15,  72, 210,  22, LABEL_NONE },
+	{ "Dropdown", "Models",  "",              0, 235,  72, 150,  20, LABEL_NONE, (void *)Ollama_OnModels },
+	{ "MoButton", "Refresh", "0",             0, 395,  72,  70,  22, LABEL_NONE, (void *)Ollama_OnRefresh },
+	{ "Textbox",  "Path",    "/v1/chat/completions", 0, 15, 106, 450, 22, LABEL_NONE },
+	{ "Textbox",  "Payload", "Say hello in one sentence.", 0, 15, 140, 450, 120, LABEL_NONE },
+	{ "MoButton", "Send",    "0",             0,  15, 272,  80,  24, LABEL_NONE, (void *)Ollama_OnSend },
+	{ "TextOut",  "Status",  "idle",          0, 105, 276, 360,  16, LABEL_NONE },
+	{ "Textbox",  "Output",  "",              0,  15, 305, 450, 150, LABEL_NONE },
 
-static char *Ollama_ReadFile(char *path)
-{
-	FILE *f = fopen(path, "rb");
-	long  n;
-	char *buf;
-
-	if (!f)
-		return NULL;
-	fseek(f, 0, SEEK_END);
-	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (n < 0)
-	{
-		fclose(f);
-		return NULL;
-	}
-	buf = malloc(n + 1);
-	if (!buf)
-	{
-		fclose(f);
-		return NULL;
-	}
-	n = (long)fread(buf, 1, n, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-static void Ollama_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
-					   int x, int y, int w, int h, int rows, int cols)
-{
-	char cpath[256], path[300];
-	NodeObj c = CreateObject(container, cls);
-	if (!c)
-		return;
-
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
-	{
-		SetPropStr(c, "Name", prop && prop[0] ? prop : cls);
-		snprintf(path, sizeof(path), "%s/%s", cpath, prop && prop[0] ? prop : cls);
-		RegisterPath(path, c);
-	}
-
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
-
-	if (strcmp(cls, "Textbox") == 0 && rows > 0 && cols > 0)
-	{
-		SetPropInt(c, "Rows", rows);
-		SetPropInt(c, "Cols", cols);
-	}
-
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
-		;							/* Help box loads its README on open */
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0)
-		Ollama_Reflect(target, prop, c, "Value");
-	else if (strcmp(cls, "Dropdown") == 0)
-	{
-		char listprop[64];
-		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);
-		Ollama_Reflect(target, listprop, c, "Items");
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));
-	}
-	else						/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);
-		Ollama_Reflect(target, prop, c, "In");
-	}
-}
-
-static NodeObj Ollama_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
-{
-	char ppath[256], path[300];
-	NodeObj v = CreateObject(panel, "View");
-	if (!v)
-		return NULL;
-	SetPropStr(v, "Name", name);
-	if (PathOfInstance(panel, ppath, sizeof(ppath)))
-	{
-		snprintf(path, sizeof(path), "%s/%s", ppath, name);
-		RegisterPath(path, v);
-	}
-	SetPropInt(v, "X", x);
-	SetPropInt(v, "Y", y);
-	SetPropInt(v, "W", w);
-	SetPropInt(v, "H", h);
-	return v;
-}
-
-int Ollama_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
-{
-	char vpath[256], mpath[320];
-	NodeObj box;
-	char *md;
-
-	if (message == msg_eof || !GetValueInt(data))
-		return rtrn_handled;
-	if (!PathOfInstance(view, vpath, sizeof(vpath)))
-		return rtrn_handled;
-	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
-	box = ResolvePath(mpath);
-	if (!box)
-		return rtrn_handled;
-
-	md = Ollama_ReadFile("objects/ollama/README.md");
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
-	return rtrn_handled;
-}
-
-/* panel 0 = the widget's view, panel 1 = Help */
-typedef struct { char *cls, *prop; int x, y, w, h, panel, rows, cols; } OLCtl;
-
-static OLCtl OllamaPanel[] = {
-	{ "Checkbox", "Enable",     455,  12,   9,   9, 0,  0,  0 },
-	{ "Textbox",  "Server",      15,  38, 200,  22, 0,  1, 26 },
-	{ "Textbox",  "Port",       225,  38,  70,  22, 0,  1,  7 },
-	{ "Textbox",  "Timeout",    305,  38, 120,  22, 0,  1, 11 },
-	{ "Textbox",  "Model",       15,  72, 210,  22, 0,  1, 28 },
-	{ "Dropdown", "Models",     235,  72, 150,  20, 0,  0,  0 },
-	{ "MoButton", "Refresh",    395,  72,  70,  22, 0,  0,  0 },
-	{ "Textbox",  "Path",        15, 106, 450,  22, 0,  1, 62 },
-	{ "Textbox",  "Payload",     15, 140, 450, 120, 0,  7, 62 },
-	{ "MoButton", "Send",        15, 272,  80,  24, 0,  0,  0 },
-	{ "TextOut",  "Status",     105, 276, 360,  16, 0,  0,  0 },
-	{ "Textbox",  "Output",      15, 305, 450, 150, 0,  9, 62 },
-
-	{ "Markdown", "HelpText",    10,  10, HELP_W - HELP_W_OFF, HELP_H - HELP_H_OFF, 1,  0,  0 },
-
-	{ NULL, NULL, 0, 0, 0, 0, 0, 0, 0 }
+	{ NULL }
 };
 
 static void Ollama_BuildPanel(NodeObj instance)
 {
-	NodeObj sub[2];
-	int i;
-
-	sub[0] = instance;
-	sub[1] = Ollama_SubPanel(instance, "Help", 15, 462, HELP_W, HELP_H);
-
-	if (sub[1])
-	{
-		NodeObj openPort = GetPropNode(sub[1], "ReservedViewOpen");
-		if (openPort)
-			SetPropLong(openPort, "OnMsg", (long)Ollama_OnHelpOpen);
-	}
-
-	for (i = 0; OllamaPanel[i].cls; i++)
-	{
-		OLCtl *t = &OllamaPanel[i];
-		NodeObj container = (t->panel >= 0 && t->panel < 2) ? sub[t->panel] : instance;
-		if (container)
-			Ollama_Ctl(container, instance, t->cls, t->prop,
-					   t->x, t->y, t->w, t->h, t->rows, t->cols);
-	}
+	/* main view, Help, and every control - all from the one table */
+	Widget_BuildTable(instance, OllamaPanel);
 }
 
 static int Ollama_BuildTask(NodeObj instance, NodeObj data, int msgid)
@@ -932,7 +764,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
-	NodeObj entry;
 
 	SetName(class, "Ollama");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
@@ -942,38 +773,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Enable", "data", PROP_CHECKBOX, "1");
+	/* every control, from the table (widget type from each control's class) */
+	Widget_Publish(ClassSelf, OllamaPanel);
 
-	entry = PublishProp(ClassSelf, "Server", "data", PROP_TEXTBOX, "192.168.4.253");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 28);
-	entry = PublishProp(ClassSelf, "Port", "data", PROP_TEXTBOX, "11434");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 8);
-	entry = PublishProp(ClassSelf, "Timeout", "data", PROP_TEXTBOX, "3600");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 12);
-	entry = PublishProp(ClassSelf, "Model", "data", PROP_TEXTBOX, "llama3.2");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 28);
-	PublishProp(ClassSelf, "Models", "data", PROP_MENU, "");
+	/* the Models menu's backing list and the lifecycle state - no control */
 	PublishProp(ClassSelf, "ModelsList", "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "Refresh", "data", PROP_NULL, "0");
-	entry = PublishProp(ClassSelf, "Path", "data", PROP_TEXTBOX, "/v1/chat/completions");
-	SetPropInt(entry, "Rows", 1);
-	SetPropInt(entry, "Cols", 60);
-	entry = PublishProp(ClassSelf, "Payload", "data", PROP_TEXTBOX, "Say hello in one sentence.");
-	SetPropInt(entry, "Rows", 7);
-	SetPropInt(entry, "Cols", 60);
-
-	PublishProp(ClassSelf, "Send", "data", PROP_NULL, "0");
-	PublishProp(ClassSelf, "Status", "data", PROP_TEXTBOX, "idle");
-
-	entry = PublishProp(ClassSelf, "Output", "data", PROP_TEXTBOX, "");
-	SetPropInt(entry, "Rows", 9);
-	SetPropInt(entry, "Cols", 60);
-
-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
 
 	return rtrn_handled;
 }

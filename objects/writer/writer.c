@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "widget.h"
 #include "dyn/buff.h"
 
 /*
@@ -38,6 +39,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+static WidgetItem WriterPanel[];
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -171,8 +174,13 @@ int Writer_Activate(NodeObj instance, MsgId message, NodeObj data)
 	char * filename;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || local->active)
+	if (!local)
 		return rtrn_dropped;
+
+	Widget_BuildOnce(instance, WriterPanel);
+
+	if (local->active)
+		return rtrn_handled;
 
 	filename = GetPropStr(instance, "Filename");
 	if (!filename || !filename[0])
@@ -199,17 +207,27 @@ int Writer_Activate(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the settings panel: what Writer looks like, built once per instance */
-static ControlSpec WriterControls[] = {
-	{ "Textbox", "Filename", 10, 10, 140, 20 },
-	{ "LED",     "State",    10, 40,  20, 20 },
-	{ "Button",  NULL,       10, 70,  60, 20 },
+/* The whole panel in one table: main view, Help, and every control. In is the
+   input port, shown as a readout of the last chunk that arrived. */
+static WidgetItem WriterPanel[] = {
+	/* cls        prop       def  panel   x    y    w    h  label       [handler] */
+	{ "View",     "Writer",  "",  0,   0,   0, 300, 220, 0 },			/* 0: main */
+	{ "Help",     "objects/writer/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
+
+	{ "Checkbox", "Enable",  "1", 0, 270,  12,   9,  9, LABEL_LEFT, (void *)Writer_OnEnable },
+	{ "Textbox",  "Filename","",  0,  15,  35, 260, 22, LABEL_NONE },
+	{ "LED",      "State",   "1", 0,  15,  78,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",      "",  0,  15, 118, 260, 20, LABEL_LEFT, (void *)Writer_OnIn },
+
+	{ NULL }
 };
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, inPort;
+	NodeObj instance;
 	InstanceData * local = malloc(sizeof(InstanceData));
+
+	(void) message; (void) data;
 
 	local->file = NULL;
 	local->task = NULL;
@@ -221,29 +239,18 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Writer");
-	SetPropStr(instance, "Filename", "");
-	WatchableProp(instance, "Filename");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
+
+	/* every control's value + handler from the table (Enable/In carry a handler;
+	   Filename/State are plain data - In is the sink port, read on the panel) */
+	Widget_Init(instance, WriterPanel);
+
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Writer_Activate);
 
-	/* input port: Connect() reads the OnMsg handler off this port */
-	/* to build the subscription it records on the source           */
-	SetPropInt(instance, "In", 0);
-	inPort = GetPropNode(instance, "In");
-	SetPropLong(inPort, "OnMsg", (long)Writer_OnIn);
-
-	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
-	SetPropStr(instance, "Enable", "1");
-	inPort = GetPropNode(instance, "Enable");
-	SetPropLong(inPort, "OnMsg", (long)Writer_OnEnable);
-
 	InitPosition(instance);
-
+	Widget_MainSize(instance, WriterPanel);
 	RegisterInstance(class, instance);
-
-	BuildSettingsView(instance, WriterControls, sizeof(WriterControls) / sizeof(WriterControls[0]));
+	Widget_DeferBuild(instance, WriterPanel);
 
 	return rtrn_handled;
 }
@@ -252,6 +259,7 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* stop the drain task before freeing local, or a still-scheduled */
@@ -280,10 +288,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Filename", "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In",       "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+	/* every control, from the table (In among them, shown as a readout) */
+	Widget_Publish(ClassSelf, WriterPanel);
 
 	return rtrn_handled;
 }
