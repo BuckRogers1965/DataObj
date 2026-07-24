@@ -407,7 +407,7 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *classname, *alias, *container, *x, *y;
 	char fresh[256];
-	int hidden;
+	int hidden, force;
 	NodeObj inst;
 
 	classname = GetPropStr(command, "class");
@@ -416,6 +416,7 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	x         = GetPropStr(command, "x");
 	y         = GetPropStr(command, "y");
 	hidden    = GetPropInt(command, "hidden") != 0;
+	force     = GetPropInt(command, "force") != 0;
 
 	if (!classname || !classname[0])
 	{
@@ -464,7 +465,12 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	/* every binding through it dead (what Import into a session that      */
 	/* already had the name used to do). The final name is stamped back    */
 	/* into the command so the flow log records a fully-determined birth.  */
-	if (!alias || !alias[0] || ResolvePath(alias))
+	/* EXCEPT force=1: the caller guarantees the name is free and MUST be   */
+	/* kept verbatim - import creates a view's INTERNALS in the fresh view  */
+	/* it just made, where the saved names cannot collide and relative      */
+	/* links resolve by those exact names (only the dropped-in view itself  */
+	/* is re-minted). Keeping the name is what makes the internals wire up.  */
+	if (!alias || !alias[0] || (ResolvePath(alias) && !force))
 	{
 		Bridge_FreshAlias(local, container, classname, fresh, sizeof(fresh));
 		alias = fresh;
@@ -2200,7 +2206,9 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 }
 
 void Bridge_SaveFlow(NodeObj instance, InstanceData *local, NodeObj command);
+void Bridge_ExportFlow(NodeObj instance, InstanceData *local, NodeObj command);
 void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command);
+void Bridge_ImportFlow(NodeObj instance, InstanceData *local, NodeObj command);
 void Bridge_ListFlows(NodeObj instance, InstanceData *local, NodeObj command);
 
 /* the command switch itself, factored out of Bridge_OnIn so Load/Import  */
@@ -2249,8 +2257,12 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_ListConnections(instance, local);
 	else if (strcmp(cmd, "save-flow") == 0)
 		Bridge_SaveFlow(instance, local, command);
-	else if (strcmp(cmd, "load-flow") == 0 || strcmp(cmd, "import-flow") == 0)
+	else if (strcmp(cmd, "export-flow") == 0)
+		Bridge_ExportFlow(instance, local, command);
+	else if (strcmp(cmd, "load-flow") == 0)
 		Bridge_LoadFlow(instance, local, command);
+	else if (strcmp(cmd, "import-flow") == 0)
+		Bridge_ImportFlow(instance, local, command);
 	else if (strcmp(cmd, "list-flows") == 0)
 		Bridge_ListFlows(instance, local, command);
 	else
@@ -2448,6 +2460,35 @@ void Bridge_SaveFlow(NodeObj instance, InstanceData *local, NodeObj command)
 }
 
 /*
+ * Export ONE view's subtree to saved/<file> by serializing its live node
+ * state. The mechanism is the core's ExportView (a Serializer -> Writer flow);
+ * this translator just resolves the view + file path and calls it.
+ */
+void Bridge_ExportFlow(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char   *of = GetPropStr(command, "of");
+	char    path[300];
+	NodeObj view;
+
+	if (!of || !of[0])
+	{
+		Bridge_Error(instance, "export-flow", "of (the view to export) is required");
+		return;
+	}
+	view = ResolvePath(of);
+	if (!view)
+	{
+		Bridge_Error(instance, "export-flow", "no such view to export");
+		return;
+	}
+
+	mkdir("saved", 0755);
+	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+	ExportView(view, path);
+	Bridge_ReplyEvent(instance, local, "flow-saved", "file", path);
+}
+
+/*
  * Load a saved flow into the session (Import is the same operation) -
  * the objects and wiring the file records arrive alongside whatever is
  * already on the canvas, nothing is cleared. Each recorded instruction
@@ -2561,6 +2602,679 @@ void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
 			DelNode(map);
 			DelNode(flow);
 		}
+	}
+	fclose(f);
+
+	Bridge_ReplyEvent(instance, local, "flow-loaded", "file", path);
+}
+
+/*
+ * Import a serialized view (Serializer's {class,name,props,children} tree,
+ * written by Export) back onto the canvas. This is a CLONE with a side trip
+ * to disk: where clone-instance snapshots a live instance, this reads the
+ * snapshot from a file - but the result is the same, fresh instances created
+ * additively next to whatever is already there. Each node is replayed as a
+ * real create-instance (then set-property for its data) through the same
+ * Bridge_Dispatch a live client uses, so every instance announces to its
+ * parent view exactly like a normal create and every window renders it. Names
+ * are minted fresh (a taken "as" re-mints), and a node's children are placed
+ * in the parent's ACTUAL minted path - threaded down the recursion, no rename
+ * map needed. Wires/alias links are not in the file (the Serializer emits
+ * state, not connections) so they are not restored - a known limitation.
+ */
+
+/* skip JSON whitespace */
+static void IJ_Ws(char **pp)
+{
+	char *p = *pp;
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+		p++;
+	*pp = p;
+}
+
+/* parse a JSON string token at *pp (must be on the opening quote); returns the
+   malloc'd, unescaped contents and advances *pp past the closing quote. */
+static char *IJ_Str(char **pp)
+{
+	char *p = *pp, *out, *o;
+
+	if (*p != '"')
+		return NULL;
+	p++;
+	out = malloc(strlen(p) + 1);
+	o = out;
+	while (*p && *p != '"')
+	{
+		if (*p == '\\')
+		{
+			p++;
+			switch (*p)
+			{
+				case 'n': *o++ = '\n'; break;
+				case 't': *o++ = '\t'; break;
+				case 'r': *o++ = '\r'; break;
+				case 'b': *o++ = '\b'; break;
+				case 'f': *o++ = '\f'; break;
+				case '/': *o++ = '/';  break;
+				case '"': *o++ = '"';  break;
+				case '\\': *o++ = '\\'; break;
+				case 'u':
+				{
+					int h = 0, i;
+					p++;
+					for (i = 0; i < 4 && *p; i++)
+					{
+						char c = *p;
+						h <<= 4;
+						if (c >= '0' && c <= '9') h |= c - '0';
+						else if (c >= 'a' && c <= 'f') h |= c - 'a' + 10;
+						else if (c >= 'A' && c <= 'F') h |= c - 'A' + 10;
+						p++;
+					}
+					p--;					/* the loop ++ below re-consumes one */
+					if (h < 0x80)
+						*o++ = (char) h;
+					else if (h < 0x800)
+					{
+						*o++ = 0xC0 | (h >> 6);
+						*o++ = 0x80 | (h & 0x3F);
+					}
+					else
+					{
+						*o++ = 0xE0 | (h >> 12);
+						*o++ = 0x80 | ((h >> 6) & 0x3F);
+						*o++ = 0x80 | (h & 0x3F);
+					}
+					break;
+				}
+				default: *o++ = *p; break;
+			}
+			if (*p)
+				p++;
+		}
+		else
+			*o++ = *p++;
+	}
+	if (*p != '"')
+	{
+		free(out);
+		return NULL;
+	}
+	p++;
+	*o = '\0';
+	*pp = p;
+	return out;
+}
+
+/* create one instance (create-instance + set-property for its data props) the
+   way a live client would; returns its actual minted full path (caller frees).
+   No rename map: a freshly-created view keeps its children's names (fresh
+   container = no collision), so the relative links in the file resolve by
+   prepending the imported view's new path - see Bridge_ImportAliases/Wires. */
+static char *Bridge_ImportCreate(NodeObj instance, InstanceData *local,
+								 char *className, char *nodeName,
+								 NodeObj propbag, char *containerPath, int force)
+{
+	NodeObj cmd, p;
+	char    desired[320], dbg[512], *x, *y, *actual, *ap, *ident;
+
+	if (!className || !className[0])
+		return NULL;
+
+	/* the node's IDENTITY is its "Name" PROP (Slider_1), NOT the JSON "name"
+	   field - that is GetNameStr(node), the CLASS node name ("Slider"), the
+	   same for every instance of the class. Relative links are stored by the
+	   Name prop (PathOfInstance uses it), so import must recreate each node
+	   under that same name or every link misses. Fall back to the "name" field
+	   only if a node somehow carries no Name prop. */
+	ident = propbag ? GetPropStr(propbag, "Name") : NULL;
+	if (!ident || !ident[0])
+		ident = nodeName;
+
+	cmd = NewNode(INTEGER);
+	SetPropStr(cmd, "class", className);
+	SetPropStr(cmd, "container", containerPath ? containerPath : "/Root");
+	x = propbag ? GetPropStr(propbag, "X") : NULL;
+	y = propbag ? GetPropStr(propbag, "Y") : NULL;
+	SetPropStr(cmd, "x", (x && x[0]) ? x : "0");
+	SetPropStr(cmd, "y", (y && y[0]) ? y : "0");
+	if (ident && ident[0])
+	{
+		snprintf(desired, sizeof(desired), "%s/%s",
+				 containerPath ? containerPath : "/Root", ident);
+		SetPropStr(cmd, "as", desired);
+		/* force keeps the name verbatim (internals of the fresh view); the  */
+		/* top drop-in view is created force=0 so a collision re-mints it     */
+		if (force)
+			SetPropInt(cmd, "force", 1);
+	}
+
+	Bridge_Dispatch(instance, local, "create-instance", cmd);
+
+	actual = GetPropStr(cmd, "as");
+	ap = (actual && actual[0]) ? strdup(actual) : NULL;
+
+	snprintf(dbg, sizeof(dbg), "IMPORT create %s: asked '%s/%s'%s -> got '%s'",
+			 className, containerPath ? containerPath : "/Root",
+			 ident ? ident : "(no name!)", force ? " [force]" : "", actual ? actual : "(FAILED)");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	/* a MISSED NAME silently breaks every relative link that names this node -
+	   an internal (force) node MUST keep the exact name it asked for */
+	if (force && ident && ident[0] && actual)
+	{
+		char *gotLeaf = strrchr(actual, '/');
+		gotLeaf = gotLeaf ? gotLeaf + 1 : actual;
+		if (strcmp(gotLeaf, ident) != 0)
+		{
+			snprintf(dbg, sizeof(dbg),
+					 "IMPORT NAME MISSED: asked '%s' but got '%s' - links to it will break",
+					 ident, gotLeaf);
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		}
+	}
+
+	/* the rest of the data props - skip identity/geometry (set by placement) */
+	/* and State (a runtime readout, not portable state)                      */
+	if (ap && propbag)
+		for (p = GetNextProp(propbag); p; p = GetNextSibling(p))
+		{
+			char   *pn = GetNameStr(p);
+			NodeObj sc;
+
+			if (!strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
+				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
+				continue;
+
+			sc = NewNode(INTEGER);
+			SetPropStr(sc, "instance", ap);
+			SetPropStr(sc, "prop", pn);
+			SetPropStr(sc, "value", GetValueStr(p));
+			Bridge_Dispatch(instance, local, "set-property", sc);
+			DelNode(sc);
+		}
+
+	DelNode(cmd);
+	return ap;
+}
+
+/* an Alias is a LINK, not a data snapshot - creating it as a plain instance and
+   copying its Target string leaves a dead control pointing at the original (the
+   round-trip regression flowdiff caught). So aliases are not created in the
+   build pass; they are remembered here and remade afterwards, once every target
+   exists and the rename map is complete, via create-alias onto the mapped copy.
+   `containerPath` is the parent view's ACTUAL new path. */
+static void Bridge_ImportDeferAlias(NodeObj propbag, char *containerPath, NodeObj deferred)
+{
+	NodeObj c = NewNode(INTEGER);
+	char   *v;
+
+	SetName(c, "alias");
+	v = propbag ? GetPropStr(propbag, "Target") : NULL;
+	SetPropStr(c, "of_old", v ? v : "");
+	v = propbag ? GetPropStr(propbag, "TargetProp") : NULL;
+	SetPropStr(c, "prop", v ? v : "");
+	SetPropStr(c, "container", containerPath ? containerPath : "/Root");
+	v = propbag ? GetPropStr(propbag, "X") : NULL;
+	SetPropStr(c, "x", v ? v : "0");
+	v = propbag ? GetPropStr(propbag, "Y") : NULL;
+	SetPropStr(c, "y", v ? v : "0");
+	v = propbag ? GetPropStr(propbag, "Widget") : NULL;
+	SetPropStr(c, "Widget", v ? v : "");
+	v = propbag ? GetPropStr(propbag, "Label") : NULL;
+	SetPropStr(c, "Label", v ? v : "");
+	AppendChild(deferred, c);
+}
+
+/* create a node if it is a concrete instance, or defer it if it is an Alias.
+   Returns the new path for concrete nodes (so children parent onto it), NULL
+   for aliases (they hold no children). */
+static char *Bridge_ImportPlace(NodeObj instance, InstanceData *local,
+								char *className, char *nodeName, NodeObj propbag,
+								char *containerPath, NodeObj deferred, int force)
+{
+	if (className && strcmp(className, "Alias") == 0)
+	{
+		Bridge_ImportDeferAlias(propbag, containerPath, deferred);
+		return strdup("");		/* handled, but holds no path (NULL = malformed) */
+	}
+	return Bridge_ImportCreate(instance, local, className, nodeName,
+							   propbag, containerPath, force);
+}
+
+/* parse one {class,name,props,children} object at *pp and recreate it (and,
+   recursively, its children) under containerPath. Returns the node's actual
+   minted path (caller frees), NULL on a malformed object. */
+static char *Bridge_ImportNode(NodeObj instance, InstanceData *local,
+							   char **pp, char *containerPath,
+							   NodeObj deferred, NodeObj wires, int isTop,
+							   char *dropX, char *dropY)
+{
+	char   *key, *className = NULL, *nodeName = NULL, *actualPath = NULL;
+	NodeObj propbag = NULL;
+	int     force = !isTop;		/* only the dropped-in view re-mints; internals verbatim */
+
+	IJ_Ws(pp);
+	if (**pp != '{')
+		return NULL;
+	(*pp)++;
+
+	for (;;)
+	{
+		IJ_Ws(pp);
+		if (**pp == '}')
+		{
+			(*pp)++;
+			break;
+		}
+		key = IJ_Str(pp);
+		if (!key)
+			goto fail;
+		IJ_Ws(pp);
+		if (**pp != ':')
+		{
+			free(key);
+			goto fail;
+		}
+		(*pp)++;
+		IJ_Ws(pp);
+
+		if (strcmp(key, "class") == 0)
+			className = IJ_Str(pp);
+		else if (strcmp(key, "name") == 0)
+			nodeName = IJ_Str(pp);
+		else if (strcmp(key, "props") == 0)
+		{
+			if (**pp != '{')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			propbag = NewNode(INTEGER);
+			for (;;)
+			{
+				char *pk, *pv;
+
+				IJ_Ws(pp);
+				if (**pp == '}')
+				{
+					(*pp)++;
+					break;
+				}
+				pk = IJ_Str(pp);
+				if (!pk)
+				{
+					free(key);
+					goto fail;
+				}
+				IJ_Ws(pp);
+				if (**pp != ':')
+				{
+					free(pk);
+					free(key);
+					goto fail;
+				}
+				(*pp)++;
+				IJ_Ws(pp);
+				pv = IJ_Str(pp);
+				if (!pv)
+				{
+					free(pk);
+					free(key);
+					goto fail;
+				}
+				SetPropStr(propbag, pk, pv);
+				free(pk);
+				free(pv);
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+			/* the dropped-in view is BORN where it was dropped, not at its
+			   saved canvas spot - override X/Y before it is created so the
+			   instance-created already carries the drop point (no snap). Only
+			   the top node; a child's X/Y stay relative to its own view. */
+			if (isTop && dropX && dropX[0])
+			{
+				SetPropStr(propbag, "X", dropX);
+				SetPropStr(propbag, "Y", (dropY && dropY[0]) ? dropY : "0");
+			}
+		}
+		else if (strcmp(key, "wires") == 0)
+		{
+			/* this node's outgoing connections. It must exist to be the wire's */
+			/* `from`; the sink `to` is an original path, remapped in the wire   */
+			/* pass once every instance exists.                                  */
+			if (!actualPath)
+				actualPath = Bridge_ImportPlace(instance, local, className,
+												nodeName, propbag, containerPath,
+												deferred, force);
+			IJ_Ws(pp);
+			if (**pp != '[')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			for (;;)
+			{
+				char *wf = NULL, *wt = NULL, *wp = NULL, *wk;
+
+				IJ_Ws(pp);
+				if (**pp == ']')
+				{
+					(*pp)++;
+					break;
+				}
+				if (**pp != '{')
+				{
+					free(key);
+					goto fail;
+				}
+				(*pp)++;
+				for (;;)
+				{
+					char *wv;
+
+					IJ_Ws(pp);
+					if (**pp == '}')
+					{
+						(*pp)++;
+						break;
+					}
+					wk = IJ_Str(pp);
+					if (!wk)
+					{
+						free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					IJ_Ws(pp);
+					if (**pp != ':')
+					{
+						free(wk); free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					(*pp)++;
+					IJ_Ws(pp);
+					wv = IJ_Str(pp);
+					if (!wv)
+					{
+						free(wk); free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					if (!strcmp(wk, "from"))      { free(wf); wf = wv; }
+					else if (!strcmp(wk, "to"))   { free(wt); wt = wv; }
+					else if (!strcmp(wk, "port")) { free(wp); wp = wv; }
+					else free(wv);
+					free(wk);
+					IJ_Ws(pp);
+					if (**pp == ',')
+						(*pp)++;
+				}
+				/* record from OUR new path -> the sink's ORIGINAL path (remap  */
+				/* deferred). Aliases carry no path, so they wire nothing here.  */
+				if (actualPath && actualPath[0] && wf && wt)
+				{
+					NodeObj w = NewNode(INTEGER);
+					SetPropStr(w, "from", actualPath);
+					SetPropStr(w, "fromPort", wf);
+					SetPropStr(w, "to_old", wt);
+					SetPropStr(w, "toPort", wp ? wp : "");
+					AppendChild(wires, w);
+				}
+				free(wf); free(wt); free(wp);
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+		}
+		else if (strcmp(key, "children") == 0)
+		{
+			/* the parent must exist before its children can name it as their */
+			/* container - class/name/props are all in by now (they precede)  */
+			if (!actualPath)
+				actualPath = Bridge_ImportPlace(instance, local, className,
+												nodeName, propbag, containerPath,
+												deferred, force);
+			IJ_Ws(pp);
+			if (**pp != '[')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			for (;;)
+			{
+				char *cp;
+
+				IJ_Ws(pp);
+				if (**pp == ']')
+				{
+					(*pp)++;
+					break;
+				}
+				cp = Bridge_ImportNode(instance, local, pp,
+									   actualPath ? actualPath : containerPath,
+									   deferred, wires, 0, NULL, NULL);	/* children: verbatim, own X/Y */
+				if (cp)
+					free(cp);
+				else
+					goto childfail;		/* a bad child aborts the whole import */
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+		}
+		else
+		{
+			char *sk = IJ_Str(pp);		/* unknown key: skip its string value */
+			if (sk)
+				free(sk);
+		}
+		free(key);
+		IJ_Ws(pp);
+		if (**pp == ',')
+			(*pp)++;
+	}
+
+	/* a childless node was never created in the children branch - do it now */
+	if (!actualPath)
+		actualPath = Bridge_ImportPlace(instance, local, className, nodeName,
+										propbag, containerPath, deferred, force);
+	(void) wires;
+
+	if (className) free(className);
+	if (nodeName)  free(nodeName);
+	if (propbag)   DelNode(propbag);
+	return actualPath;
+
+childfail:
+	free(key);
+fail:
+	if (className) free(className);
+	if (nodeName)  free(nodeName);
+	if (propbag)   DelNode(propbag);
+	if (actualPath) free(actualPath);
+	return NULL;
+}
+
+/* resolve a saved link target against the imported view. A RELATIVE target
+   (no leading '/') pointed inside the exported view - prepend the imported
+   view's new path, and because a fresh view keeps its children's names it
+   lands on the copy. An ABSOLUTE target pointed OUTSIDE the view - leave it,
+   it still names the live original. Writes into `out`, returns it. */
+static char *Bridge_ResolveTarget(char *importRoot, char *saved, char *out, int len)
+{
+	if (!saved || !saved[0])
+	{
+		out[0] = '\0';
+		return out;
+	}
+	if (saved[0] == '/')					/* absolute - external, as-is */
+		snprintf(out, len, "%s", saved);
+	else									/* relative - inside the imported view */
+		snprintf(out, len, "%s/%s", importRoot ? importRoot : "/Root", saved);
+	return out;
+}
+
+/* second pass: every alias remembered during the build, now remade as a real
+   link. of_old is the saved target (relative for an internal link, absolute for
+   an external one); Bridge_ResolveTarget turns it into the live path, so
+   create-alias subscribes the alias to the right underlying thing. The alias's
+   own presentation (Widget/Label) is then restored from the file. */
+static void Bridge_ImportAliases(NodeObj instance, InstanceData *local,
+								 char *importRoot, NodeObj deferred)
+{
+	NodeObj d;
+
+	for (d = GetChild(deferred); d; d = GetNextSibling(d))
+	{
+		char    of[320];
+		char   *newAlias, *w, *lb;
+		NodeObj cmd;
+
+		char dbg[512];
+
+		Bridge_ResolveTarget(importRoot, GetPropStr(d, "of_old"), of, sizeof(of));
+
+		snprintf(dbg, sizeof(dbg), "IMPORT alias: target '%s' -> '%s' (prop %s) in %s",
+				 GetPropStr(d, "of_old"), of, GetPropStr(d, "prop"), GetPropStr(d, "container"));
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+		if (of[0] && !ResolvePath(of))
+		{
+			snprintf(dbg, sizeof(dbg), "IMPORT alias target does NOT resolve: '%s' - alias will be dead", of);
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		}
+
+		cmd = NewNode(INTEGER);
+		SetPropStr(cmd, "of", of);
+		SetPropStr(cmd, "prop", GetPropStr(d, "prop"));
+		SetPropStr(cmd, "container", GetPropStr(d, "container"));
+		SetPropStr(cmd, "x", GetPropStr(d, "x"));
+		SetPropStr(cmd, "y", GetPropStr(d, "y"));
+		Bridge_Dispatch(instance, local, "create-alias", cmd);
+
+		/* restore the alias's own look (create-alias stamps the target's    */
+		/* published default; the saved alias may have been restyled)         */
+		newAlias = GetPropStr(cmd, "as");
+		if (newAlias && newAlias[0])
+		{
+			w  = GetPropStr(d, "Widget");
+			lb = GetPropStr(d, "Label");
+			if (w && w[0])
+			{
+				NodeObj sc = NewNode(INTEGER);
+				SetPropStr(sc, "instance", newAlias);
+				SetPropStr(sc, "prop", "Widget");
+				SetPropStr(sc, "value", w);
+				Bridge_Dispatch(instance, local, "set-property", sc);
+				DelNode(sc);
+			}
+			if (lb && lb[0])
+			{
+				NodeObj sc = NewNode(INTEGER);
+				SetPropStr(sc, "instance", newAlias);
+				SetPropStr(sc, "prop", "Label");
+				SetPropStr(sc, "value", lb);
+				Bridge_Dispatch(instance, local, "set-property", sc);
+				DelNode(sc);
+			}
+		}
+		DelNode(cmd);
+	}
+}
+
+/* third pass: the wires. from is already OUR minted path; to is the saved sink
+   (relative inside the view -> resolved under the imported root, absolute
+   outside -> left alone), then replayed as connect through the same dispatch a
+   live client uses, so the wire announces normally. */
+static void Bridge_ImportWires(NodeObj instance, InstanceData *local,
+							   char *importRoot, NodeObj wires)
+{
+	NodeObj w;
+
+	for (w = GetChild(wires); w; w = GetNextSibling(w))
+	{
+		char    to[320], dbg[600];
+		char   *from = GetPropStr(w, "from");
+		NodeObj cmd = NewNode(INTEGER);
+
+		Bridge_ResolveTarget(importRoot, GetPropStr(w, "to_old"), to, sizeof(to));
+
+		snprintf(dbg, sizeof(dbg), "IMPORT wire: %s.%s -> [%s] '%s'.%s",
+				 from, GetPropStr(w, "fromPort"), GetPropStr(w, "to_old"),
+				 to, GetPropStr(w, "toPort"));
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+		if ((from && from[0] && !ResolvePath(from)) || (to[0] && !ResolvePath(to)))
+		{
+			snprintf(dbg, sizeof(dbg),
+					 "IMPORT wire endpoint does NOT resolve (from '%s'=%s, to '%s'=%s) - connection dropped",
+					 from, ResolvePath(from) ? "ok" : "MISSING",
+					 to, ResolvePath(to) ? "ok" : "MISSING");
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		}
+
+		SetPropStr(cmd, "from", from);
+		SetPropStr(cmd, "fromPort", GetPropStr(w, "fromPort"));
+		SetPropStr(cmd, "to", to);
+		SetPropStr(cmd, "toPort", GetPropStr(w, "toPort"));
+		Bridge_Dispatch(instance, local, "connect", cmd);
+		DelNode(cmd);
+	}
+}
+
+void Bridge_ImportFlow(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char    path[300], *into, *text, *cursor, *ap, *dx, *dy;
+	FILE   *f;
+	long    size;
+	NodeObj deferred, wires;
+
+	into = GetPropStr(command, "into");
+	if (!into || !into[0])
+		into = GetPropStr(command, "container");
+	if (!into || !into[0])
+		into = "/Root";					/* import onto the canvas by default */
+	dx = GetPropStr(command, "x");		/* where the view was DROPPED (clone-style) */
+	dy = GetPropStr(command, "y");
+
+	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+
+	f = fopen(path, "r");
+	if (!f)
+	{
+		Bridge_Error(instance, "import-flow", "no such flow in saved/");
+		return;
+	}
+	fseek(f, 0, SEEK_END);
+	size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	text = malloc(size + 1);
+	if (text)
+	{
+		fread(text, 1, size, f);
+		text[size] = '\0';
+		cursor = text;
+
+		deferred = NewNode(INTEGER);	/* aliases, remade after the build   */
+		wires = NewNode(INTEGER);		/* connections, remade after aliases */
+
+		/* ap is the imported view's new path - the base every relative link */
+		/* resolves against; the drop point (dx/dy) is where it is born       */
+		ap = Bridge_ImportNode(instance, local, &cursor, into, deferred, wires, 1, dx, dy);
+		if (ap)
+		{
+			Bridge_ImportAliases(instance, local, ap, deferred);
+			Bridge_ImportWires(instance, local, ap, wires);
+			free(ap);
+		}
+		else
+			Bridge_Error(instance, "import-flow", "malformed flow file");
+
+		DelNode(wires);
+		DelNode(deferred);
+		free(text);
 	}
 	fclose(f);
 

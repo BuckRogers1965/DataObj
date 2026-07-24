@@ -83,6 +83,11 @@ let pendingContainer = {};  // containerAlias -> [el, el, ...], elements waiting
 /* applyMode(). "Operate" matches BuildChrome's own default (object.c).     */
 let currentMode = 'Operate';
 
+/* armed by File > Export: the next thing clicked is the view to export - a
+   client-local one-shot (like the file dialog, it collects intent, then sends
+   ONE verb, export-flow). Cleared by the click that consumes it or by Escape. */
+let pendingExport = false;
+
 function $(id) { return document.getElementById(id); }
 
 /* what a thing is CALLED on screen is just its name - the path is where   */
@@ -570,6 +575,13 @@ function makeMenuButtonEl(alias) {
           openFlowDialog(item);
           return;
         }
+        /* Export is not a whole-session file action - it arms "click the view
+           to export", and the next click opens the dialog named after it */
+        if (baseName(alias) === 'FileMenu' && item === 'Export') {
+          pendingExport = true;
+          document.body.classList.add('mode-export');
+          return;
+        }
         send({ cmd: 'set-property', instance: alias, prop: 'Selected', value: item });
       };
       dropdown.appendChild(row);
@@ -619,7 +631,8 @@ function closeFlowDialog() {
   }
 }
 
-function openFlowDialog(kind) {
+function openFlowDialog(kind, opts) {
+  opts = opts || {};
   closeFlowDialog();
 
   const overlay = document.createElement('div');
@@ -650,14 +663,27 @@ function openFlowDialog(kind) {
   input.type = 'text';
   input.className = 'flow-dialog-name';
   input.placeholder = 'flow name';
-  input.value = 'session';
+  input.value = opts.name || 'session';
   body.appendChild(input);
   box.appendChild(body);
 
-  const doIt = () => {
+  const doIt = (ev) => {
     const name = input.value.trim();
     if (!name) return;
-    const verb = kind === 'Save' ? 'save-flow' : kind === 'Import' ? 'import-flow' : 'load-flow';
+    if (kind === 'Export') {
+      /* export just the clicked view's subtree (Serializer -> Writer) */
+      send({ cmd: 'export-flow', file: name, of: opts.of });
+      return;
+    }
+    if (kind === 'Import') {
+      /* import is a DROP, identical to dropping a clone: pick the file
+         here, then the next click places the view where it lands (its
+         internal links are relative, so it parents anywhere). */
+      closeFlowDialog();
+      startGestureDrag(ev, 'import', { file: name }, 'import: ' + name);
+      return;
+    }
+    const verb = kind === 'Save' ? 'save-flow' : 'load-flow';
     send({ cmd: verb, file: name });
     /* stays open until flow-saved/flow-loaded confirms (handleEvent) -   */
     /* the engine is the one that knows whether it happened               */
@@ -668,7 +694,7 @@ function openFlowDialog(kind) {
   const go = document.createElement('button');
   go.className = 'activate-btn';
   go.textContent = kind;
-  go.onclick = doIt;
+  go.onclick = (ev) => doIt(ev);
   const cancel = document.createElement('button');
   cancel.className = 'activate-btn';
   cancel.textContent = 'Cancel';
@@ -677,7 +703,7 @@ function openFlowDialog(kind) {
   footer.appendChild(cancel);
   box.appendChild(footer);
 
-  input.onkeydown = (ev) => { if (ev.key === 'Enter') doIt(); };
+  input.onkeydown = (ev) => { if (ev.key === 'Enter') doIt(ev); };
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -1909,6 +1935,16 @@ function startDrag(ev, el, alias, className, primaryProp) {
   const mode = effectiveMode(el);
   alias = aliasOfEl(el, alias);   /* the CURRENT name, not the birth name */
 
+  /* Export armed: this click names the view to export. Open the dialog
+     pre-filled with its name; export-flow does the rest. */
+  if (pendingExport && alias) {
+    pendingExport = false;
+    document.body.classList.remove('mode-export');
+    ev.stopPropagation();
+    openFlowDialog('Export', { name: baseName(alias), of: alias });
+    return;
+  }
+
   if (mode === 'Clone' && alias && className) {
     startGestureDrag(ev, 'clone', { sourceAlias: alias, className }, 'clone: ' + className);
     return;
@@ -2003,6 +2039,12 @@ document.addEventListener('pointerdown', (ev) => {
   {
     if (g.kind === 'clone') {
       cloneInstance(g.data.sourceAlias, g.data.className, drop.container, { x: drop.x, y: drop.y });
+    } else if (g.kind === 'import') {
+      /* drop the saved view here - the server rebuilds it in this container
+         at this spot, internal links resolving under the new copy */
+      send({ cmd: 'import-flow', file: g.data.file, into: drop.container,
+             x: String(Math.round(drop.x)), y: String(Math.round(drop.y)) });
+      log('imported ' + g.data.file, 'event');
     } else if (g.kind === 'alias') {
       /* one verb carrying the whole intent - the server names it and    */
       /* places it in a single atomic birth (see readmefirst.md); this    */
@@ -2045,6 +2087,10 @@ document.addEventListener('keydown', (ev) => {
     log('cancelled', 'event');
   }
   if (flowDialog) closeFlowDialog();
+  if (pendingExport) {
+    pendingExport = false;
+    document.body.classList.remove('mode-export');
+  }
   if (pendingPort) {
     pendingPort.el.classList.remove('armed');
     pendingPort = null;

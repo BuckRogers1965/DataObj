@@ -122,6 +122,10 @@ DeliverMsg(NodeObj target, char * port, MsgId message, NodeObj data);
 int
 ActivateInstance(NodeObj instance);
 
+/* Export a view's subtree to a file by serializing its live node state
+   (a Serializer -> Writer flow the core composes and activates). */
+void ExportView(NodeObj view, char * path);
+
 /* Write a named property on target the way something OUTSIDE the object */
 /* has to: if the name resolves to a port (an OnMsg handler is present,  */
 /* e.g. Enable), deliver a message so the port's own handler actually    */

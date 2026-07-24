@@ -48,6 +48,9 @@ GetTypeStr(int type){
 	case PLACE:
 		return "Place";
 
+	case IMPORT:
+		return "Import";
+
 	default:
 		return "Needs Finished";
 	}
@@ -97,6 +100,12 @@ TypeThreshold(int type){
 	/* placement tracing: every instance made, and WHERE it landed - the
 	   question "why is that in the root?" answered directly. -v 3 */
 	case PLACE:
+		return 3;
+
+	/* import tracing: every node rebuilt on import, its requested vs actual
+	   name, and every alias/wire re-resolution. -v 3 (a NAME MISMATCH is
+	   logged separately at ERROR, since it silently breaks every link). */
+	case IMPORT:
 		return 3;
 
 	default:

@@ -116,7 +116,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Alias_OnEnable);
 
-	InitPosition(instance);
+	/* NO InitPosition: an alias has no X/Y of its own - it is placed where it
+	   is dropped (the client sets X/Y) or where its owner puts it (a card
+	   member, bridge.c). Stamping a 0,0 here would give the palette prototype a
+	   position it should not have and let it into the palette (GetMainView) as
+	   a "placeable" thing, which it is not - it stands for another property. */
 
 	RegisterInstance(class, instance);
 

@@ -524,6 +524,11 @@ void BuildPalette(void){
 					snprintf(alias, sizeof(alias), "/Root/Palette/%s", GetNameStr(class));
 					SetPropLong(Palette, alias, (long) inst);
 				}
+				else if (inst)
+					/* no main view - not a placeable palette item (an atomic
+					   control lives INSIDE widgets, never on its own). Undo the
+					   create so it is not named/registered into the palette. */
+					Widget_Destroy(inst);
 			}
 
 			class = GetNextSibling(class);
@@ -569,7 +574,7 @@ void BuildChrome(void){
 		SetPropInt(fileMenu, "X", 8);
 		SetPropInt(fileMenu, "Y", 6);
 		SetPropStr(fileMenu, "Label", "File");
-		SetPropStr(fileMenu, "Items", "Load,Save,Import");
+		SetPropStr(fileMenu, "Items", "Load,Save,Import,Export");
 		/* an ordinary property, the same guard the palette carries: you
 		   cannot delete the menus you drive the session with. Nothing
 		   special about these instances - anything can be marked this way */
@@ -676,6 +681,45 @@ CreateObject(NodeObj container, char * classname){
 	}
 
 	return inst;
+}
+
+/*
+ * Export a view's subtree to a file the correct way - by SERIALIZING the live
+ * node state, not replaying commands. It composes the same objects+wiring any
+ * flow does: a Serializer walks `view` (Root = its path) and streams its
+ * portable state out Out, a Writer drains that to `path`. The walk is the
+ * Serializer's OWN task, so this just wires and activates - the file fills as
+ * the flow drains (Serializer -> Writer is Save, the way Reader -> Writer is
+ * cat). The plumbing lives off-canvas in a /Export root of its own.
+ */
+static NodeObj ExportHome = NULL;
+static int     exportSeq = 0;
+
+void ExportView(NodeObj view, char *path)
+{
+	char    viewpath[300], sername[64], wrname[64];
+	NodeObj ser, wr;
+
+	if (!view || !path || !path[0] || !PathOfInstance(view, viewpath, sizeof(viewpath)))
+		return;
+
+	if (!ExportHome)
+		ExportHome = CreateRoot("Export");
+
+	/* fresh, uniquely-named plumbing per export (create + name + register) */
+	exportSeq++;
+	snprintf(sername, sizeof(sername), "Ser%d", exportSeq);
+	snprintf(wrname,  sizeof(wrname),  "Wr%d",  exportSeq);
+	ser = Widget_Create(ExportHome, "Serializer", sername);
+	wr  = Widget_Create(ExportHome, "Writer",     wrname);
+	if (!ser || !wr)
+		return;
+
+	SetPropStr(ser, "Root", viewpath);		/* walk this view */
+	SetPropStr(wr,  "Filename", path);		/* drain to the file */
+	Connect(ser, "Out", wr, "In");
+	ActivateInstance(wr);					/* open the file, then */
+	ActivateInstance(ser);					/* walk + stream into it */
 }
 
 /*

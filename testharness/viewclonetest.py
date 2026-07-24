@@ -284,6 +284,94 @@ def test_clone_into_self_refused(raw, r, home):
              bool(err2))
 
 
+def wait_file(path, timeout=8.0):
+    """Export is async (the Serializer walk and Writer drain run as scheduler
+    tasks); wait for the file to exist and stop growing before importing it."""
+    import os
+    deadline = time.time() + timeout
+    last = -1
+    while time.time() < deadline:
+        try:
+            sz = os.path.getsize(path)
+            if sz > 0 and sz == last:
+                return True
+            last = sz
+        except OSError:
+            pass
+        time.sleep(0.3)
+    return last > 0
+
+
+def test_export_import_view_wiring(raw, r, home):
+    """Export ONE view to disk and import it back - a clone with a side trip
+    to disk. The imported copy must be as self-contained as a clone: its wire
+    lands on its OWN members, its alias on its OWN slider, and driving it never
+    reaches back into the original. This is the round-trip flowdiff caught
+    breaking (dangling alias, dropped connection)."""
+    view, src, dst, al = build_view(raw, home, "WireViewEI")
+
+    # export just THIS view (not the whole session, unlike save-flow)
+    raw.send({"cmd": "export-flow", "file": "eitwin", "of": view})
+    raw.wait_event(lambda e: e.get("event") == "flow-saved", timeout=6)
+    wait_file("saved/eitwin.flow")
+
+    # import it back INTO this suite's view, so the copy's members announce here
+    raw.events = []
+    raw.send({"cmd": "import-flow", "file": "eitwin", "into": home})
+    raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=8)
+    time.sleep(0.4)
+
+    # the imported view is the fresh View inside home
+    fresh = [e.get("instance") for e in raw.events
+             if e.get("event") == "instance-created" and e.get("class") == "View"
+             and e.get("container") == home and e.get("instance") != view]
+    copy, csl, cal = None, [], None
+    for v in fresh:
+        sl, a = parts(raw, v)
+        if len(sl) == 2 and a:
+            copy, csl, cal = v, sl, a
+            break
+
+    r.expect("import: the members came along",
+             "the imported view holds two Sliders and an Alias",
+             "copy=%s sliders=%s alias=%s" % (copy, csl, cal),
+             len(csl) == 2 and bool(cal))
+
+    # the connection: find it among the imported sliders (list-connections),
+    # then prove it functionally - from drives to
+    wires = [w for w in connections(raw) if w[0] in csl and w[2] in csl]
+    r.expect("import: the connection survived the round trip",
+             "a wire between the imported view's own two sliders",
+             "imported wires: %s" % wires,
+             len(wires) == 1 and wires[0][1] == "Value" and wires[0][3] == "In")
+
+    isrc = wires[0][0] if wires else None
+    idst = wires[0][2] if wires else None
+    r.expect("import: the members are wired to EACH OTHER, not the original",
+             "writing the imported source drives the imported sink",
+             "driven: %s" % (drives(raw, isrc, idst, "51") if isrc and idst else "no wire"),
+             bool(isrc) and bool(idst) and drives(raw, isrc, idst, "52"))
+
+    # the alias points at a slider INSIDE the imported copy (the user's ask:
+    # "the alias has to link to the thing in its view")
+    tgt = raw.value_of(cal, "Target") if cal else None
+    r.expect("import: the alias links to the thing in ITS view",
+             "the imported Alias targets a slider inside the copy (%s)" % csl,
+             "Target=%s" % tgt,
+             tgt in csl)
+
+    # independence: driving the copy must not move the original's sink
+    before = raw.value_of(dst, "Value")
+    if isrc:
+        raw.send({"cmd": "set-property", "instance": isrc, "prop": "Value", "value": "88"})
+        time.sleep(0.6)
+    after = raw.value_of(dst, "Value")
+    r.expect("import: the copy does not reach back into the original",
+             "driving the imported source leaves the original sink at %s" % before,
+             "before=%s after=%s" % (before, after),
+             before == after)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
@@ -312,6 +400,7 @@ def main():
     guarded(test_clone_of_clone, raw, r, home)
     guarded(test_clone_into_self_refused, raw, r, home)
     guarded(test_save_load_view_wiring, raw, r, home)
+    guarded(test_export_import_view_wiring, raw, r, home)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)
