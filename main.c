@@ -163,14 +163,11 @@ bridge first (ensure_raw_bridge, rawtest.py) - a transport is just
 objects plus wiring, so the disabled flows below stay disabled.
 
 */
-/* Home is a path-bearing View (/DefaultApp) the app's objects are created IN,
-   so each has a path of its own and can build its panel; Main is passed through
-   for the few cross-references that need the root (users, Bridge's Main). */
-
-   static NodeObj DefaultAppView;
-   static NodeObj DefaultRootView;
-
-   void CreateDefaultApp(NodeObj Main, NodeObj Home){
+/* DefaultRootView is the /DefaultApp root the app's objects are created under,
+   so each has a path of its own and can build its panel; it is created a level
+   up (in main) so that handle on the namespace stays there. Main is passed
+   through for the few cross-references that need the root (users, Bridge's Main). */
+void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 
 	/* Web GUI, HTTP and WebSocket sharing one TCP port - */
 	/* Phases 3.1/3.2/3.3 together, and what a browser (or a firewall     */
@@ -190,9 +187,7 @@ objects plus wiring, so the disabled flows below stay disabled.
 	/*                                              +--> probe "web.Out"  */
 	{
 		NodeObj WebTcp, Router, Http, Ws, WebBridge, WebProbe, FileMenu;
-
-		if (!DefaultRootView)
-		    DefaultRootView = CreateRoot("DefaultApp");
+		NodeObj DefaultAppView;
 
 		/* create + name + register, in one call each (Widget_Create) */
 		DefaultAppView = Widget_Create(DefaultRootView, "View", "WebGUI");
@@ -344,9 +339,9 @@ int IsRunning(NodeObj Main){
 }
 
 /* Load in a default application */
-void LoadDefaultApp(NodeObj Main, NodeObj Home){
+void LoadDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 	DebugPrint ( "Entering Default Application function.", __FILE__, __LINE__, PROG_FLOW);
-	CreateDefaultApp(Main, Home);
+	CreateDefaultApp(Main, DefaultRootView);
 }
 
 void PerformTesting(){
@@ -662,9 +657,11 @@ int main ( int argc, char* argv[] ){
 	/* the default app's objects are created IN this View, so each has a path
 	   of its own and can build its panel (a plumbing object in Main has none) */
 	{
-		NodeObj DefaultApp = CreateRoot("DefaultApp");
-		SetSettingsHome(DefaultApp);
-		LoadDefaultApp(Main, DefaultApp);
+		/* the /DefaultApp root lives here, a level up from the app itself, so
+		   this scope keeps the handle on that namespace and hands it down */
+		NodeObj DefaultRootView = CreateRoot("DefaultApp");
+		SetSettingsHome(DefaultRootView);
+		LoadDefaultApp(Main, DefaultRootView);
 	}
 
 	DebugPrint ( "Entering Main Loop.", __FILE__, __LINE__, PROG_FLOW);
