@@ -673,6 +673,19 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 	if (!curAlias)
 		curAlias = of;
 
+	/* asking for internals IS looking inside this thing - same "asking
+	   to list a container is looking at it" convention Bridge_ListInstances
+	   already uses. The dissection panel lives INSIDE curAlias (_Hidden,
+	   announced to this connection directly below, not by a broadcast),
+	   so without this a connection that only ever asked internals - never
+	   separately opened curAlias's own contents - was never marked as
+	   viewing curAlias itself. A later rename's instance-renamed for the
+	   panel is scoped to "where it lives" (curAlias, Bridge_RepathSubtree),
+	   so it silently reached nobody: the panel's key never moved to its
+	   new alias in this connection's own maps, and its still-open window
+	   looked closed even though every member inside it followed correctly. */
+	Bridge_MarkViewing(local, local->replyConn, curAlias);
+
 	existing = GetPropStr(inst, "_Internals");
 	if (!(existing && existing[0] && ResolvePath(existing)))
 	{
@@ -1241,8 +1254,6 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 		}
 		else
 			oldCont[0] = 0;
-		if (strcmp(oldCont, "/Root") == 0)
-			oldCont[0] = 0;
 
 		/* swap the old container prefix in its Container property */
 		cont = GetPropStr(inst, "Container");
@@ -1265,7 +1276,7 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 		snprintf(buf, sizeof(buf), "{\"event\":\"instance-renamed\",\"from\":%s,\"to\":%s}", escFrom, escTo);
 		free(escFrom);
 		free(escTo);
-		Bridge_SendEventScoped(instance, local, buf, oldCont);
+		Bridge_SendEventScoped(instance, local, buf, oldCont[0] ? oldCont : "/Root");
 	}
 	DelNode(snap);
 
@@ -1376,12 +1387,22 @@ static void Bridge_Rename(NodeObj instance, InstanceData *local, char *oldAlias,
 		}
 		else
 			oldCont[0] = 0;
-		if (strcmp(oldCont, "/Root") == 0)
-			oldCont[0] = 0;
 
-		Bridge_SendEventScoped(instance, local, buf, oldCont);
-		if (strcmp(oldCont[0] ? oldCont : "/", (newContainer && newContainer[0]) ? newContainer : "/") != 0)
-			Bridge_SendEventScoped(instance, local, buf, newContainer);
+		/* scope both ends to their RAW container string, same as create/
+		   delete (Bridge_Delete's fix): Bridge_ViewKey maps "" -> "/" but
+		   "/Root" -> "/Root", and Bridge_ListInstances registers root-
+		   viewers under "/Root" - collapsing "/Root" to "" here sent a
+		   move's departure/arrival to a key nobody was viewing, so a
+		   view's own rename (which routes through here for a Container
+		   write) never updated live, only on reload. */
+		{
+			char *viewOldCont = oldCont[0] ? oldCont : "/Root";
+			char *viewNewCont = (newContainer && newContainer[0]) ? newContainer : "/Root";
+
+			Bridge_SendEventScoped(instance, local, buf, viewOldCont);
+			if (strcmp(viewOldCont, viewNewCont) != 0)
+				Bridge_SendEventScoped(instance, local, buf, viewNewCont);
+		}
 	}
 
 	/* the thing moved - everything inside it moves with it */
@@ -1439,10 +1460,14 @@ static void Bridge_RenameName(NodeObj instance, InstanceData *local, char *oldAl
 	free(escFrom);
 	free(escTo);
 
-	/* a pure rename is only visible where the thing lives */
-	if (strcmp(oldCont, "/Root") == 0)
-		oldCont[0] = 0;
-	Bridge_SendEventScoped(instance, local, buf, oldCont);
+	/* a pure rename is only visible where the thing lives - scoped to the
+	   RAW container string, same as create/delete (Bridge_Delete's fix):
+	   Bridge_ViewKey maps "" -> "/" but "/Root" -> "/Root", and
+	   Bridge_ListInstances registers root-viewers under "/Root", so
+	   collapsing "/Root" to "" here sent the event to a key nobody was
+	   viewing - the rename never showed up live, only after a reload
+	   re-listed everything from scratch. */
+	Bridge_SendEventScoped(instance, local, buf, oldCont[0] ? oldCont : "/Root");
 
 	{
 		char dbg[1024];
@@ -1486,7 +1511,30 @@ void Bridge_Set(NodeObj instance, InstanceData *local, NodeObj command)
 		NodeObj owner = inst;
 		NodeObj node = ResolvePort(&owner, prop);
 		char *realProp = node ? GetNameStr(node) : prop;
-		char *ownAlias = Bridge_AliasForInstance(local, owner);
+		char ownAliasBuf[300];
+		char *ownAliasSrc = Bridge_AliasForInstance(local, owner);
+		char *ownAlias;
+
+		/* copied out of Bridge_AliasForInstance's ring IMMEDIATELY: a rename
+		   on a container with many published properties (a View's own
+		   dissection panel, say) fans out through SetOrDeliverProp below and
+		   then through Bridge_RepathSubtree's whole-subtree walk, and EVERY
+		   subscribed property notification along the way calls
+		   Bridge_AliasForInstance again for its own event - each one
+		   rotating the SAME 4-slot ring. Holding a raw pointer into it across
+		   that whole rename left ownAlias pointing at a LATER call's string
+		   by the time Bridge_RenameName/Bridge_Rename finally read it (seen
+		   live: oldAlias came out reading as some descendant's NEW path),
+		   so only the first couple of a panel's members ever got their
+		   Container actually rewritten - the rest silently kept the stale
+		   Container property despite the path index re-pathing them fine. */
+		if (ownAliasSrc)
+		{
+			snprintf(ownAliasBuf, sizeof(ownAliasBuf), "%s", ownAliasSrc);
+			ownAlias = ownAliasBuf;
+		}
+		else
+			ownAlias = NULL;
 
 		SetOrDeliverProp(inst, prop, value);
 

@@ -272,6 +272,21 @@ per-property or per-object opt-in.
 1. **HTTP object** on top of the TCP object: enough to serve the
    static web app files (Reader → HTTP → browser: the cat flow grows
    up). Dogfood: the framework serves its own UI.
+   **Next (July 2026, user's own idea): prove this as a general,
+   standalone TWO-WIDGET composition, not just internal web-serving
+   plumbing** - a TCP server widget wired to an HTTP protocol widget,
+   the two of them coordinating around a specific connection rather
+   than the framework's own boot flow gluing them together invisibly.
+   The `Conn` tagging is already real (`objects/http/http.c`: every
+   request arrives tagged with a connection id, every response carries
+   the SAME tag back out) - the concrete next step is demonstrating and
+   testing it as its own thing: drop a TCP (server mode) and an HTTP
+   object on a canvas, wire them to each other, and prove multiple
+   simultaneous connections each get correctly isolated per-connection
+   state (partial-request buffering/reassembly keyed by `Conn`, not
+   just single-message tagging) - "both mutexing internally around
+   that connection," so one slow or partial connection can never bleed
+   into another's parsing state.
 2. **WebSocket object**: handshake + framing over the TCP object.
    *Already present: TCP server, buff, the port pattern.*
 3. **Bridge object / control protocol**: JSON commands in
@@ -328,6 +343,27 @@ per-property or per-object opt-in.
    contents are real, addressable, persistent state regardless of
    whether anyone is currently connected to view it. Not yet coded -
    noted here for when this phase starts.*
+
+   *Combine with a `data://` scheme (July 2026 idea) - the same
+   nesting move, one more hop outward. `/User/Root/...` answers "which
+   user's tree, on this server"; `data://host:port/path/instance/
+   property` answers "which server's tree at all," using the exact
+   same path vocabulary underneath, just prefixed with where to find
+   the tree instead of assuming it's this process's own. A property
+   address doesn't stop being a property address because a network
+   sits under it - it's the same "resolve a path" primitive both
+   times, only the resolver differs (the local trie vs. a connector).
+   This is also the natural convergence point for Phase 6's federated
+   connectors (MCP client View, web API wrapper classes, the eventual
+   MCP server View): each currently has to be its own bespoke
+   translator because there's no single uniform way to NAME a remote
+   property; a `data://` address would make "where a value lives" the
+   same kind of fact whether local or remote, and every Phase 6
+   connector a resolver for one scheme instead of a separate
+   subsystem. Not yet coded, no design commitment yet on the wire
+   format for the resolver hop - noted here as where the user-nesting
+   work and the federation work are really the same idea at different
+   radii, so they should be designed together, not twice.*
 
 ## Phase 4 — The browser client
 
@@ -437,6 +473,39 @@ shouldn't have been recreated in the first place.)
    hand-maintained per-widget stylesheet shrinks to a base theme;
    custom looks stop being client code entirely.
 
+   **Broken into small, sequential chunks (July 2026) - aim at this
+   over time, not in one sweep, and look for chunks that ride on other
+   work already happening rather than needing a dedicated push:**
+   1. *Audit, read-only, zero risk*: inventory which current visual
+      facts already have SOME property backing (LabelPos -> the
+      `atom-label-*` class swap; ScriptBox's Rows/Cols -> its own box
+      sizing) versus which are still 100% CSS-class-driven with no
+      property behind them at all (color, font, border, background).
+      Answers "how much of this is already true" before changing
+      anything.
+   2. *Move ScriptBox's own Rows/Cols translation into the bridge* -
+      already explicitly the seed case above, already client-side
+      today, so this is the smallest real step: one existing
+      client-side translation relocated, not a new mechanism invented.
+      Proves the bridge-side translation path once, on something that
+      already works end to end.
+   3. *One new visual fact, on whatever widget is already being built
+      for other reasons* - the natural combination point: a
+      dynamically-generated widget (the MCPSource agent-view pattern -
+      already sets per-instance W/H/X/Y at runtime with zero compile-
+      time table) is the cheapest possible testbed for "one more
+      per-instance property, honored by the bridge as real CSS,"
+      because the runtime-property-setting path is already exercised
+      code, not new plumbing. Prove ONE fact (a single color property,
+      say) rides that same path before widening to more.
+   4. *Widen fact-by-fact* (font, border, background) as normal widget
+      work touches each one, not as a dedicated sweep across every
+      existing widget at once.
+   5. *Retire the hand-maintained per-widget stylesheet last*, once
+      enough facts have moved over that what's left is genuinely just
+      a base theme, not per-widget appearance - a natural end state to
+      notice, not a deadline to force.
+
 ### Worked example: wiring a slider to a VU meter, live
 
 1. Drag `Slider` from the palette onto the canvas — create-instance,
@@ -488,6 +557,42 @@ shouldn't have been recreated in the first place.)
    (input -> container port -> inner control -> script -> output control
    -> container port -> outside). This is the concrete Phase 5 + Phase 7
    convergence.*
+   **Next (July 2026, from the MCPSource agent-widget work): a real test
+   suite around save, load, export, and import of scripted composite
+   widgets, then work through whatever it finds.** Confirmed working so
+   far: build, Submit round-trip, and clone (see
+   `objects/mcpsource/mcpsource.c` and its own `MCPAgent` class + Lua
+   `sibget`/`sibset` fix) - but session save/load and single-view
+   export/import of a View containing a script instance that reaches
+   siblings by path have not been exercised at all yet. Concrete risks
+   worth a test each: does a saved-and-reloaded script's `Source`
+   survive and re-activate; does `sibget`/`sibset`'s relative path
+   resolution still find the right sibling after export (single-view
+   export stores internal links relative, no `/Root` prefix) and after
+   import (a clone-drop into the target view); does a script-containing
+   View round-trip through save/load with its Runner correctly NOT
+   re-activating twice.
+
+**Also found during the MCPSource work, not yet fixed - a general
+notification gap:** an instance created or moved server-side (not in
+direct response to a client's own `create-instance`/`clone-instance`/
+`move-instance` command - e.g. MCPSource building agent widgets in
+reaction to a TCP reply) never gets announced to an already-connected
+browser. Every call to `Bridge_InstanceEvent` (bridge.c) traces back to
+an explicit client command; there is no general "something was placed,
+tell whoever's watching its container" hook. A full page reload works
+around it today only because reload re-runs `list-instances` from
+scratch. The right fix is general, not MCPSource-specific: hook it at
+`PlaceInstance` (object.c) - already the one shared choke point behind
+create, clone, AND move - so it covers all three at once. Shape:
+`PlaceInstance` calls an optional, registered notify callback (a global
+function-pointer slot in the shared library, the same pattern
+`ObjSetRegObjList`/`ObjSetTaskList` already use) that bridge.c sets
+once at load time; bridge.c's own implementation walks its live
+connections' viewing records and sends the instance-created event to
+whichever ones are watching the affected container. Touches both
+object.c and bridge.c - a real core change, deliberately deferred
+rather than rushed.
 2. **Composite classes**: register a saved flow file in the registry
    as a class — its InstanceStart loads and wires the inner flow.
    Composites appear on the palette beside the C classes,

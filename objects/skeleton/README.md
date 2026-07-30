@@ -142,6 +142,56 @@ right — don't undo them.
     misbehaves, diff against `pulsegenerator.c` — they share this structure on
     purpose.
 
+12. **A property-driven control's write is `msg_change`, not `msg_send`.**
+    `Enable` here has an `OnMsg` handler, but the panel's own Enable
+    *checkbox* is a separate control instance — clicking it changes the
+    checkbox's own `Value`, which fans out to its subscribers (this widget)
+    as an ordinary property change, `msg_change`. `msg_send` only happens
+    when something already carrying an `OnMsg` handler is written to
+    directly (a raw `set-property` from outside, or another object's
+    `Connect`'d port). A handler that filters `message != msg_send` silently
+    swallows every click the real on-screen checkbox sends — it looked
+    enabled, took the click, and never turned anything off. Filter only
+    `message == msg_eof`, like every handler here now does.
+
+13. **Never delete a contained instance from inside a callback IT triggered
+    synchronously.** Property writes fan out inline, not queued (unlike
+    `SndMsg`, which queues through the scheduler and never nests inside the
+    sender's own call stack). If you contain another instance (a TCP engine,
+    say) and `Connect` one of its plain properties (e.g. `Connected`) to a
+    handler here, that handler runs *inside* the inner instance's own
+    currently-executing scheduled task the moment the property changes.
+    Calling `DeleteInstance` on it right there frees the task/instance data
+    that task is still using and corrupts the scheduler's shared task list -
+    every object on the whole session starves, not just this one. Only ever
+    delete a contained instance from a top-level trigger that isn't nested
+    inside its callback chain: the start of a fresh operation, Enable
+    dropping to 0, or a dedicated timeout task. A message-driven callback
+    (arriving via `SndMsg`, e.g. `Out` data) is safe to delete from; a
+    plain-property callback (`Connect`'d to something like `Connected`) is
+    not.
+
+14. **Never re-arm a reused `TaskObj` from outside its own callback.** A
+    recurring task is safe to re-arm with `AddTaskMilli` *from inside its own
+    firing callback* - the scheduler has already unlinked it by the time
+    that callback runs. Calling `AddTaskMilli` on the same `TaskObj` from
+    anywhere else (a button handler, say) while it might still be linked
+    from an earlier arm does not reposition it - it corrupts the doubly-
+    linked task list. If you need a one-shot guard (a timeout) armed from
+    multiple call sites, either `DeleteTask` any previous one before
+    `CreateTask`-ing a fresh `TaskObj` every time, or don't reuse the task at
+    all.
+
+15. **Every loaded class gets a real instance at boot - the palette icon
+    itself.** `BuildPalette` creates one live instance of every class to
+    stand for its palette icon, running the same deferred build and
+    `Activate` any placed instance gets. Anything your `Activate` does
+    unconditionally - checking a status, dialing out, generating - runs on
+    that palette seed too, at every boot, before anyone has dragged one out
+    or set it up. `Activate` should build the panel and set resting state,
+    nothing else; any real action belongs behind an explicit trigger (a
+    button, a wired `In`), gated on `Enable` like everything else.
+
 Two things the core now handles for you (don't re-solve them):
 - **Two-way bindings are safe.** An unchanged data-property write no longer
   re-fans-out, so a control that both edits and reflects a property can't loop.

@@ -178,7 +178,7 @@ static int Widget_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
 NodeObj Widget_AddHelp(NodeObj instance, char *helpFile)
 {
 	int     h = GetPropInt(instance, "H");
-	NodeObj help = Widget_SubPanel(instance, "Help", 15, h - 60, HELP_W, HELP_H);
+	NodeObj help = Widget_SubPanel(instance, "Help", HELP_ICON_X, h - HELP_ICON_Y_OFF, HELP_W, HELP_H);
 	NodeObj openPort;
 
 	if (!help)

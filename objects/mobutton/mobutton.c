@@ -91,7 +91,13 @@ int MoButton_OnPress(NodeObj instance, MsgId message, NodeObj data)
 	int down, interval;
 
 	if (!local || !local->enabled || message == msg_eof)
+	{
+		char dbg[300];
+		snprintf(dbg, sizeof(dbg), "MoButton_OnPress dropped on '%s': local=%p enabled=%d message=%d",
+				 GetPropStr(instance, "Name"), (void *)local, local ? local->enabled : -1, message);
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 		return rtrn_dropped;
+	}
 
 	down = GetValueInt(data) ? 1 : 0;
 	if (down == local->down)
@@ -99,6 +105,11 @@ int MoButton_OnPress(NodeObj instance, MsgId message, NodeObj data)
 
 	local->down = down;
 	SetPropStr(instance, "Value", down ? "1" : "0");
+	{
+		char dbg[200];
+		snprintf(dbg, sizeof(dbg), "MoButton_OnPress firing Out=%s on '%s'", down ? "1" : "0", GetPropStr(instance, "Name"));
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	}
 	MoButton_Edge(instance, down ? "1" : "0");
 
 	interval = GetPropInt(instance, "Interval");

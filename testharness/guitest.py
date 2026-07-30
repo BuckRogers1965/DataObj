@@ -483,12 +483,110 @@ def test_rename_then_manipulate(t, r):
     t.clear_events()
     drag("views['%s'].header" % renamed, 40, 25)
     moved = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='property-changed'"
-                 " && m.instance==='%s' && (m.port==='PanelX'||m.port==='PanelY'))"
+                 " && m.instance==='%s' && (m.port==='ReservedViewPanelX'||m.port==='ReservedViewPanelY'))"
                  ".map(m=>m.port+'='+m.value))" % renamed)
     r.expect("rename: a renamed view's panel still drags",
              "dragging the titlebar writes PanelX and PanelY back under the NEW name",
              "%s" % moved,
              moved and len(json.loads(moved)) == 2)
+
+
+def test_rename_cascades_into_own_options_panel(t, r):
+    """A view's own Options/dissection panel is created INSIDE the view
+    it dissects (Bridge_Internals), nesting one Alias member per
+    published property. Renaming the view through that SAME panel's own
+    Name control must cascade live, with no reload: the view itself
+    relocates, its panel relocates with it (still open), and every
+    member's Container AND Target link follow - not just the path index.
+
+    This reproduces two bugs found live (both server-side, bridge.c):
+    (1) Bridge_Rename/Bridge_RenameName scoped a root-level rename's own
+    instance-renamed event to "" after computing the correct "/Root",
+    but Bridge_ListInstances registers root viewers under "/Root"
+    (Bridge_ViewKey maps "" -> "/" but "/Root" -> "/Root") - so the
+    rename of the view itself never reached anyone live, only a reload
+    (which re-lists from scratch) showed it right.
+    (2) Bridge_Set captured the owner's pre-write alias from
+    Bridge_AliasForInstance's 4-slot static ring, then triggered (via
+    SetOrDeliverProp and the whole-subtree repath) a live property
+    notification for every member ahead of it - each one rotating the
+    SAME ring - so by the time Bridge_RenameName/Bridge_RepathSubtree
+    finally read that pointer for a panel with more than a couple of
+    members, it had been overwritten with some LATER member's own new
+    path. Only the first couple of members ever got their Container and
+    Target actually rewritten; the rest kept stale links (the "little
+    icon under the Name box" - the ReservedViewOpen icon - kept showing
+    the view's OLD name) even though the path index quietly got them
+    all right."""
+    view = '/Root/RenameCascadeTest'
+    t.js("send({cmd:'create-instance',class:'View',as:'%s',container:'',x:'820',y:'8'})" % view)
+    t.wait_js("!!views['%s']" % view, "rename-cascade test view")
+
+    # dissect the VIEW ITSELF - its own options panel is created INSIDE
+    # it, one Alias member per published property (Name, X, Y, the
+    # ReservedViewOpen icon, ...)
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % view)
+    t.click(src["x"], src["y"])
+    panel = t.wait_js(
+        "(Object.keys(panels).find(k=>k.startsWith('%s/') && /Panel_/.test(k)) || false)" % view,
+        "view's own internals panel")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1080'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'340'})" % panel)
+    time.sleep(1.2)  # members stream in on open
+
+    raw = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
+               ".map(k=>({alias:k,prop:aliasAtoms[k].targetProp})))" % panel)
+    mlist = json.loads(raw) if raw else []
+    before_count = len(mlist)
+    name_member = next((m["alias"] for m in mlist if m["prop"] == "Name"), None)
+    open_member = next((m["alias"] for m in mlist if m["prop"] == "ReservedViewOpen"), None)
+    r.expect("rename-cascade: the dissection table has its members before the rename",
+             "at least Name and ReservedViewOpen among the published members",
+             "%d members, name_member=%s, open_member=%s" % (before_count, name_member, open_member),
+             before_count > 0 and name_member and open_member)
+
+    t.clear_events()
+    # rename through the panel's OWN Name control - the doorway a user
+    # actually types into
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'RenameCascadeDone'})" % name_member)
+    time.sleep(1.5)
+
+    renamed = '/Root/RenameCascadeDone'
+    renamed_panel = renamed + panel[len(view):]
+    renamed_open_member = open_member.replace(view, renamed, 1)
+
+    live = t.js("JSON.stringify({"
+                "hasNewView: !!views['%s'],"
+                "hasOldView: !!views['%s'],"
+                "panelStillOpen: (()=>{const p=panels['%s'];return !!p && p.el.style.display!=='none';})(),"
+                "memberCount: Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/')).length,"
+                "openTarget: aliasAtoms['%s'] && aliasAtoms['%s'].target,"
+                "openLabel: (()=>{const rec=aliasAtoms['%s'];const l=rec&&rec.slot.querySelector('.instance-icon-label');"
+                "return l&&l.textContent;})()"
+                "})" % (renamed, view, renamed_panel, renamed_panel,
+                        renamed_open_member, renamed_open_member, renamed_open_member))
+    state = json.loads(live) if live else {}
+    r.expect("rename-cascade: the view itself relocates live, no reload",
+             "views['%s'] exists, views['%s'] is gone" % (renamed, view),
+             "%s" % state,
+             state.get("hasNewView") and not state.get("hasOldView"))
+    r.expect("rename-cascade: the view's own options panel stays open and follows",
+             "the dissection panel is still open under its new nested path",
+             "%s" % state,
+             state.get("panelStillOpen"))
+    r.expect("rename-cascade: every member's Container followed (not just the first couple)",
+             "all %d members still resolve under the panel's new path" % before_count,
+             "%s" % state,
+             state.get("memberCount") == before_count)
+    r.expect("rename-cascade: the Open icon's Target link followed, not stale",
+             "%s" % renamed,
+             "%s" % state,
+             state.get("openTarget") == renamed)
+    r.expect("rename-cascade: the Open icon's own label reads the NEW name",
+             "RenameCascadeDone",
+             "%s" % state,
+             state.get("openLabel") == "RenameCascadeDone")
 
 
 def test_lazy_contents(t, r):
@@ -984,6 +1082,7 @@ def main():
     guarded("move", lambda: test_move(t, r))
     guarded("open-close", lambda: test_open_close(t, r))
     guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
+    guarded("rename-cascade-options-panel", lambda: test_rename_cascades_into_own_options_panel(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
     guarded("lua-pulse", lambda: test_lua_pulse(t, r))
     guarded("js-pulse", lambda: test_js_pulse(t, r))

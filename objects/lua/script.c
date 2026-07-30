@@ -33,6 +33,11 @@ What a script sees (registered as globals in its Lua state):
     send(value)      send a message out the Out port
     getprop(name)    read one of this instance's own properties
     setprop(n, v)    write one of this instance's own properties
+    sibget(name)     read a sibling's Value by name (Container + "/" +
+                     name, resolved fresh every call - a sibling control
+                     dragged in beside this script, or generated
+                     alongside it, e.g. by a container-widget host)
+    sibset(n, v)     write a sibling's Value the same way
     log(text)        a line on the server's stdout, tagged
 
 Callbacks run synchronously inside message delivery, exactly like a
@@ -57,6 +62,8 @@ typedef struct InstanceData
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
+
+int Script_Activate(NodeObj instance, MsgId message, NodeObj data);
 
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
@@ -113,11 +120,16 @@ static int l_getprop(lua_State *L)
 	InstanceData *local = Script_Local(L);
 	const char *name = luaL_checkstring(L, 1);
 	char *v;
+	char dbg[300];
 
 	if (!local)
 		return 0;
 
 	v = GetPropStr(local->instance, (char *) name);
+	snprintf(dbg, sizeof(dbg), "getprop('%s') on %s/%s (instance=%p) -> %s%s%s",
+			 name, GetPropStr(local->instance, "Container"), GetPropStr(local->instance, "Name"),
+			 (void *)local->instance, v ? "'" : "", v ? v : "nil", v ? "'" : "");
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	if (v)
 		lua_pushstring(L, v);
 	else
@@ -130,9 +142,79 @@ static int l_setprop(lua_State *L)
 	InstanceData *local = Script_Local(L);
 	const char *name = luaL_checkstring(L, 1);
 	const char *v = luaL_checkstring(L, 2);
+	char dbg[300];
 
-	if (local)
-		SetOrDeliverProp(local->instance, (char *) name, (char *) v);
+	if (!local)
+		return 0;
+	snprintf(dbg, sizeof(dbg), "setprop('%s', '%s') on %s/%s (instance=%p)",
+			 name, v, GetPropStr(local->instance, "Container"), GetPropStr(local->instance, "Name"),
+			 (void *)local->instance);
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	SetOrDeliverProp(local->instance, (char *) name, (char *) v);
+	return 0;
+}
+
+/* the sibling this script's own Container + name resolves to right now -
+   never cached, so it is whatever currently sits there: the original,
+   or a clone's own sibling with the same relative name (a clone's
+   children keep their names, only the container path changes) */
+static NodeObj Script_Sibling(NodeObj instance, const char *name)
+{
+	char cont[300], path[360];
+
+	if (!GetPropStr(instance, "Container"))
+		return NULL;
+	snprintf(cont, sizeof(cont), "%s", GetPropStr(instance, "Container"));
+	snprintf(path, sizeof(path), "%s/%s", cont, name);
+	return ResolvePath(path);
+}
+
+/* read a sibling control's own Value by name - this is the real fix for
+   "getprop/setprop don't survive clone": a sibling Textbox is a proper,
+   independently cloned instance with its own published Value, already
+   correctly copied by the engine's own clone mechanism. No Connect-based
+   mirror onto this script's own properties is needed at all - the script
+   just reaches over and reads/writes the control directly, by path,
+   the same "reach a sibling by path" mechanism this whole roadmap phase
+   (container ports, path addressing) is built on. */
+static int l_sibget(lua_State *L)
+{
+	InstanceData *local = Script_Local(L);
+	const char *name = luaL_checkstring(L, 1);
+	NodeObj sib;
+	char *v;
+	char dbg[300];
+
+	if (!local)
+		return 0;
+	sib = Script_Sibling(local->instance, name);
+	v = sib ? GetPropStr(sib, "Value") : NULL;
+	snprintf(dbg, sizeof(dbg), "sibget('%s') from %s -> %s%s%s",
+			 name, sib ? "found" : "MISSING",
+			 v ? "'" : "", v ? v : "nil", v ? "'" : "");
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	if (v)
+		lua_pushstring(L, v);
+	else
+		lua_pushnil(L);
+	return 1;
+}
+
+static int l_sibset(lua_State *L)
+{
+	InstanceData *local = Script_Local(L);
+	const char *name = luaL_checkstring(L, 1);
+	const char *v = luaL_checkstring(L, 2);
+	NodeObj sib;
+	char dbg[300];
+
+	if (!local)
+		return 0;
+	sib = Script_Sibling(local->instance, name);
+	snprintf(dbg, sizeof(dbg), "sibset('%s', '%s') -> %s", name, v, sib ? "found" : "MISSING");
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	if (sib)
+		SetOrDeliverProp(sib, "Value", (char *) v);
 	return 0;
 }
 
@@ -155,8 +237,26 @@ int Script_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	char *value;
 	const char *kind;
 
+	/* a clone (or anything else that never got an explicit "activate")
+	   has Source copied (a published property) but no interpreter -
+	   clone calls no class's Activate, only an explicit user command
+	   does (Bridge_DoActivate). Rather than sit dead forever, run
+	   Source now, on the first real message, same as a fresh instance's
+	   own build-time Activate call already does. */
+	if (local && !local->L)
+		Script_Activate(instance, message, data);
+
 	if (!local || !local->enabled || !local->L || local->onin_ref == LUA_NOREF)
+	{
+		char dbg[300];
+		snprintf(dbg, sizeof(dbg),
+				 "Script_OnIn dropped on '%s': local=%p enabled=%d L=%p onin_ref=%d",
+				 GetPropStr(instance, "Name"), (void *)local,
+				 local ? local->enabled : -1, local ? (void *)local->L : NULL,
+				 local ? local->onin_ref : -999);
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 		return rtrn_dropped;
+	}
 
 	value = data ? GetValueStr(data) : NULL;
 	kind = (message == msg_eof) ? "eof" : (message == msg_change) ? "change" : "send";
@@ -170,6 +270,12 @@ int Script_OnIn(NodeObj instance, MsgId message, NodeObj data)
 		fflush(stdout);
 		lua_pop(local->L, 1);
 		DebugPrint ( "Script callback raised an error.", __FILE__, __LINE__, ERROR);
+	}
+	else
+	{
+		char dbg[200];
+		snprintf(dbg, sizeof(dbg), "Script_OnIn ran oninput on '%s' (kind=%s)", GetPropStr(instance, "Name"), kind);
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
 	return rtrn_handled;
@@ -221,6 +327,8 @@ int Script_Activate(NodeObj instance, MsgId message, NodeObj data)
 	lua_register(local->L, "oninput", l_oninput);
 	lua_register(local->L, "getprop", l_getprop);
 	lua_register(local->L, "setprop", l_setprop);
+	lua_register(local->L, "sibget",  l_sibget);
+	lua_register(local->L, "sibset",  l_sibset);
 	lua_register(local->L, "log",     l_log);
 
 	source = GetPropStr(instance, "Source");
@@ -238,6 +346,14 @@ int Script_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
+
+	{
+		char dbg[200];
+		snprintf(dbg, sizeof(dbg), "Script_Activate ran on '%s': onin_ref=%d (%s)",
+				 GetPropStr(instance, "Name"), local->onin_ref,
+				 local->onin_ref == LUA_NOREF ? "no oninput() registered" : "oninput() registered");
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	}
 
 	return rtrn_handled;
 }

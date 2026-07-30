@@ -244,7 +244,11 @@ long NSSearch(NSObj *Root, char *String)
 		}
 	}
 
-	DebugPrint ( "String not found.", __FILE__, __LINE__, PROG_FLOW);
+	{
+		char dbg[300];
+		snprintf(dbg, sizeof(dbg), "String not found: '%s'", (String && String[0]) ? String : "(empty)");
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	}
 	// Not Found
 	return 0;
 }

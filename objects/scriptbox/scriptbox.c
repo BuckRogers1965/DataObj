@@ -153,8 +153,16 @@ static void ScriptBox_SwapInner(NodeObj instance, char *lang)
 		local->inner = NULL;
 	}
 
-	/* the host belongs to this ScriptBox - created inside it */
-	local->inner = CreateObject(instance, lang);
+	/* the host belongs to this ScriptBox - created inside it. Named and
+	   path-registered (Widget_Create, not plain CreateObject) - without
+	   this it had a Container but no Name, so PathOfInstance failed for
+	   it forever: not just unfindable itself, but object.c's "Instance
+	   has no name" error firing on EVERY list-instances call system-wide,
+	   for any container, since that walk checks every registered
+	   instance everywhere before filtering by container. A stable
+	   role-based name ("Inner"), not the language name, since the class
+	   changes on every language swap but the role doesn't. */
+	local->inner = Widget_Create(instance, lang, "Inner");
 	if (!local->inner)
 	{
 		char buf[160];

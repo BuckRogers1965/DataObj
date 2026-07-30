@@ -18,6 +18,11 @@
 #include "node.h"
 #include "object.h"		/* HELP_W / HELP_H / HELP_*_OFF and the PROP_* set */
 
+/* where the Help icon sits on its parent panel (Widget_AddHelp): pinned to
+   the bottom-left corner, this far up from the panel's own H */
+#define HELP_ICON_X 15
+#define HELP_ICON_Y_OFF 80
+
 /* one control's placement in a widget panel table (legacy Widget_Build) */
 typedef struct
 {

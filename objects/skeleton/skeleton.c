@@ -101,12 +101,17 @@ int Skeleton_OnTrigger(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Enable: 1 allows operation, 0 gates it off. */
+/* Enable: 1 allows operation, 0 gates it off. Accept anything but msg_eof -
+   the panel's own Enable checkbox is a separate control whose Value change
+   fans out as msg_change, not msg_send (msg_send only happens when
+   something already-message-handled is written directly, e.g. a raw
+   set-property on this property from outside). Filtering to msg_send only
+   silently drops every click the checkbox itself sends. */
 int Skeleton_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	SkeletonData *local = (SkeletonData *)GetPropLong(instance, "local");
 
-	if (!local || message != msg_send)
+	if (!local || message == msg_eof)
 		return rtrn_dropped;
 
 	local->enabled = GetValueInt(data) ? 1 : 0;

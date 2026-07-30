@@ -115,6 +115,7 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 	name = GetPropStr(inst, "Name");
 	if (!name || !name[0]){
 		DebugPrint ( "Instance has no name.", __FILE__, __LINE__, ERROR);
+		PrintNode(inst);
 		return 0;
 	}
 
