@@ -1071,6 +1071,16 @@ def main():
             post_mortem(t)
             return None
 
+    def close_view(label):
+        """Delete a make_test_view's View once every test using it is done -
+        it stops occupying a name and can't leave anything on the shared
+        canvas for a later test (or a human looking at the session) to
+        trip over."""
+        try:
+            t.js("send({cmd:'delete-instance',instance:'/Root/%s'})" % label)
+        except Exception:
+            pass
+
     guarded("boot", lambda: test_boot(t, r))
     pair = guarded("clone", lambda: test_clone(t, r))
     slider, clone2 = pair if pair else (None, None)
@@ -1078,23 +1088,39 @@ def main():
     alias = guarded("alias", lambda: test_alias(t, r, slider), ("slider", slider))
     guarded("clone-of-alias", lambda: test_clone_of_alias(t, r, slider, alias), ("slider", slider), ("alias", alias))
     guarded("alias-of-clone", lambda: test_alias_of_clone(t, r, clone2, slider), ("clone2", clone2), ("slider", slider))
+    # CloneTest/AliasTest/CloneAliasTest/AliasCloneTest cross-reference each
+    # other (aliases targeting instances born in an earlier one) - one
+    # group, closed together only once every dependent above has run
+    for label in ("CloneTest", "AliasTest", "CloneAliasTest", "AliasCloneTest"):
+        close_view(label)
+
     guarded("options", lambda: test_options_internals(t, r))
+    close_view("OptionsTest")
     guarded("move", lambda: test_move(t, r))
+    close_view("MoveTest")
     guarded("open-close", lambda: test_open_close(t, r))
     guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
     guarded("rename-cascade-options-panel", lambda: test_rename_cascades_into_own_options_panel(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
     guarded("lua-pulse", lambda: test_lua_pulse(t, r))
+    close_view("luaPulseTest")
     guarded("js-pulse", lambda: test_js_pulse(t, r))
+    close_view("jsPulseTest")
     # keep this one LAST of the view-staging tests: its view takes a grid
     # slot, and inserting a slot ahead of lua-script shifted that test's
     # panel onto the palette icons it clicks
     guarded("connect-wires", lambda: test_connect_wires(t, r))
+    close_view("WireTest")
     guarded("textbox-any-size", lambda: test_textbox_any_size(t, r))
+    close_view("TextSizeTest")
     guarded("options-on-panel-control", lambda: test_options_on_panel_control(t, r))
+    close_view("CtlOptTest")
     guarded("gesture-checkbox-count", lambda: test_gesture_checkbox_counts(t, r))
+    close_view("GestureCount")
     guarded("markdown-renders", lambda: test_markdown_renders(t, r))
+    close_view("MarkdownTest")
     guarded("html-sandboxed", lambda: test_html_renders_sandboxed(t, r))
+    close_view("HtmlTest")
 
     # last step, every time, pass or fail: put the shared session back in
     # Operate mode so whoever opens a browser next gets a usable canvas

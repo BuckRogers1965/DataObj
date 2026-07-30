@@ -22,7 +22,7 @@ its sibling controls by path (Phase 1.5 addressing).
     python3 testharness/widgettest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 
 def make(raw, cls, alias, container, x, y, hidden=False):
@@ -153,8 +153,12 @@ def main():
 
     home = suite_view(raw, "WidgetTest")
 
-    view, slider, out = test_puppet(raw, r, home)
-    test_container_ports(raw, r, home, view, slider, out)
+    # test_container_ports depends on test_puppet's own widget (view/slider/
+    # out) - one dependency chain, one group view
+    g = group_view(raw, home, "PuppetAndContainerPorts")
+    view, slider, out = test_puppet(raw, r, g)
+    test_container_ports(raw, r, g, view, slider, out)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

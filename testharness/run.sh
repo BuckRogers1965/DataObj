@@ -115,15 +115,31 @@ sleep 2   # let chromium's debug endpoint come up too
 # passing report nobody reads is pure cost). Pass -v to any of them by
 # hand to watch every check.
 #
-# Raw-protocol suites first - the readme's harness rule: every mechanism
-# is proven through the raw JSON protocol (port 8091, no browser) before
-# the browser tests prove its presentation. Separate bridge, same engine.
+# Ordered simplest/foundational first, most complex/slowest last: a
+# failure in a simple suite means every suite built on top of it is
+# unreliable signal for the same root cause, so reading top-to-bottom
+# tells you where to look first. Whether to stop there is a call for
+# whoever is watching, not something this script decides for them - it
+# runs every suite through and reports the first failing exit code at
+# the end.
 VERBOSE="${VERBOSE:+-v}"
 
 # the verbs themselves: birth, naming, stamping, internals, save/load,
-# move, delete
+# move, delete - the readme's harness rule: every mechanism is proven
+# through the raw JSON protocol (port 8091, no browser) first
 python3 testharness/rawtest.py --host 127.0.0.1 --port 8091 $VERBOSE
 RAW_RC=$?
+
+# connections: every wire is listed, announced, disconnectable, scrubbed
+# on sink delete, and chains - what Connect mode draws and the "x" undoes.
+# Nearly everything below wires objects together, so this comes early.
+python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091 $VERBOSE
+CONN_RC=$?
+
+# allocation accounting: create/destroy and message-burst cycles must
+# come back to rest - a counter that grows and never shrinks is a leak
+python3 testharness/leaktest.py --host 127.0.0.1 --port 8091 $VERBOSE
+LEAK_RC=$?
 
 # the dataflow flows that used to boot inside main.c (cat, filter/gate,
 # queue/stack, tcp echo) - same wiring, built over the raw protocol,
@@ -137,16 +153,6 @@ FLOW_RC=$?
 python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091 $VERBOSE
 VC_RC=$?
 
-# connections: every wire is listed, announced, disconnectable, scrubbed
-# on sink delete, and chains - what Connect mode draws and the "x" undoes
-python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091 $VERBOSE
-CONN_RC=$?
-
-# allocation accounting: create/destroy and message-burst cycles must
-# come back to rest - a counter that grows and never shrinks is a leak
-python3 testharness/leaktest.py --host 127.0.0.1 --port 8091 $VERBOSE
-LEAK_RC=$?
-
 # the JS language host (QuickJS): a script as a dataflow object AND as a
 # bridge client speaking the JSON protocol - the second language proving
 # the "language host is a bridge" pattern
@@ -154,33 +160,44 @@ python3 testharness/jstest.py --host 127.0.0.1 --port 8091 $VERBOSE
 JS_RC=$?
 
 # the ScriptBox shell: discovers script hosts, runs code, collects output,
-# swaps languages - the script widget's engine behavior
+# swaps languages - depends on the language hosts above already working
 python3 testharness/scriptboxtest.py --host 127.0.0.1 --port 8091 $VERBOSE
 SB_RC=$?
 
+# scripted composite widgets (a Lua Runner reaching siblings by path,
+# sibget/sibset) through clone, alias, export/import, and save/load -
+# the MCPSource agent-widget pattern's own twin, self-contained
+python3 testharness/scriptedwidgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
+SW_RC=$?
+
 # the scripted composite widget: a View with container In/Out ports, inner
-# controls, and a script that puppets them - a coded widget coded in script
+# controls, and a script that puppets them - the most composed non-browser
+# suite (clone infra + connections + a language host all at once)
 python3 testharness/widgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
 WIDGET_RC=$?
 
 # the TCP instrument panel (ported from VNOS): a front end driving a
-# contained TCP engine, proven over a real socket
+# contained TCP engine, proven over a real socket - real I/O, so it goes
+# after everything that can be proven without one
 python3 testharness/tcpporttest.py --host 127.0.0.1 --port 8091 $VERBOSE
 TCPP_RC=$?
 
-# and the browser, proving presentation: gestures emit the right verb,
-# events paint the right pixels
+# and the browser last, proving presentation: gestures emit the right
+# verb, events paint the right pixels - the slowest and most fragile
+# suite (a real headless chromium), so nothing before it wastes those
+# minutes when there's already a simpler failure to fix first
 python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
 RC=$?
 
 echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localhost:$PORT (pid $SERVER_PID)"
 [ "$RAW_RC" != 0 ] && exit "$RAW_RC"
-[ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
-[ "$VC_RC" != 0 ] && exit "$VC_RC"
 [ "$CONN_RC" != 0 ] && exit "$CONN_RC"
 [ "$LEAK_RC" != 0 ] && exit "$LEAK_RC"
+[ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
+[ "$VC_RC" != 0 ] && exit "$VC_RC"
 [ "$JS_RC" != 0 ] && exit "$JS_RC"
 [ "$SB_RC" != 0 ] && exit "$SB_RC"
+[ "$SW_RC" != 0 ] && exit "$SW_RC"
 [ "$WIDGET_RC" != 0 ] && exit "$WIDGET_RC"
 [ "$TCPP_RC" != 0 ] && exit "$TCPP_RC"
 exit $RC

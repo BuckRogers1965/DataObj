@@ -32,7 +32,7 @@ Run through run.sh, or standalone against a running server:
     python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 
 def make_slider(raw, home, x, y):
@@ -243,12 +243,29 @@ def main():
 
     home = suite_view(raw, "ConnTest")
 
-    test_property_wire_listed(raw, r, home)
-    test_connect_event(raw, r, home, args.host, args.port)
-    test_disconnect(raw, r, home)
-    test_activate_wire_listed(raw, r, home)
-    test_delete_sink_scrubs(raw, r, home)
-    test_chained_wires(raw, r, home)
+    g = group_view(raw, home, "PropertyWireListed")
+    test_property_wire_listed(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "ConnectEvent")
+    test_connect_event(raw, r, g, args.host, args.port)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "Disconnect")
+    test_disconnect(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "ActivateWireListed")
+    test_activate_wire_listed(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "DeleteSinkScrubs")
+    test_delete_sink_scrubs(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "ChainedWires")
+    test_chained_wires(raw, r, g)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

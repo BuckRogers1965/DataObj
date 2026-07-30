@@ -220,11 +220,23 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 	char *src;
+	int firstCall;
 
-	(void) data;
+	(void) data; (void) message;
 
 	if (!local)
 		return rtrn_dropped;
+
+	/* ActivateInstance (object.c) always calls Activate(instance,
+	   msg_initialize, NULL) - every caller, every time, deferred-build's
+	   own auto-call included - so message can never tell "just came up"
+	   apart from "the user pressed Run"; every other object in this tree
+	   gates real behavior on its OWN state flag instead (Reader/Pulse:
+	   local->active), never on message. Here that flag is whether the
+	   inner host exists yet: it doesn't on the very first call (the
+	   deferred build coming up - build the panel and bring the host up,
+	   but do not run), and does on every call after. */
+	firstCall = !local->inner;
 
 	/* now the box has a path (deferred build / activation), build the panel and
 	   bring the inner host up - a sub-object needs the box's OWN path first, so
@@ -233,9 +245,7 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local->inner)
 		ScriptBox_SwapInner(instance, GetPropStr(instance, "Language"));
 
-	/* msg_initialize is placement / flow activation: come up ready, do NOT run.
-	   Run (the button) arrives as msg_send - only then hand Source to the host. */
-	if (message == msg_initialize || !local->inner)
+	if (firstCall || !local->inner)
 		return rtrn_handled;
 
 	local->active = 1;
@@ -326,8 +336,18 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	Widget_CancelBuild(instance);
 	if (local)
 	{
-		if (local->inner)
-			DeleteInstance(local->inner);
+		/* local->inner is NOT deleted here. It is a real, path-registered
+		   instance (Widget_Create) living under this ScriptBox's own path,
+		   so whenever THIS instance dies through the one path anything
+		   dies through (Bridge_Delete, bridge.c), that call has already
+		   snapshotted the whole subtree - this instance AND inner, as two
+		   independent entries - before deleting either. Deleting inner
+		   here too raced that same snapshot's own turn to reach inner's
+		   entry, calling DeleteInstance twice on the same freed node
+		   (confirmed: SIGABRT/core dump the first time any test deleted a
+		   ScriptBox). Swapping languages while this instance stays alive
+		   is the one time inner genuinely needs an explicit delete -
+		   ScriptBox_SwapInner already does exactly that, on its own. */
 		free(local);
 	}
 	return rtrn_handled;

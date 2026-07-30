@@ -208,7 +208,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, FilterPanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, FilterPanel);
+	/* NOT DeferBuild: Activate reads Mode exactly once (gated by
+	   local->active, above) - an auto-activate one tick after creation
+	   would read it before the client's own set-property Mode ever lands,
+	   locking in the default "all" permanently (the later, real activate
+	   is then a no-op). Same category as Pulse: activating this object
+	   has real behavioral consequences, so it waits to be told. */
+	Widget_DeferBuildQuiet(instance, FilterPanel);
 
 	return rtrn_handled;
 }

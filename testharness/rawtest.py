@@ -73,6 +73,55 @@ def suite_view(raw, name):
     return home
 
 
+def group_view(raw, home, name):
+    """A dedicated, uniquely-named child view for ONE group of tests inside
+    a suite - so whatever it builds (including clone-instance's own
+    auto-minted names; clone-instance never takes an "as") can't be
+    confused with another group's instances or events. Returns the view's
+    alias, already being viewed (see suite_view)."""
+    path = home + "/" + name
+    raw.send({"cmd": "create-instance", "class": "View", "as": path, "container": home})
+    raw.wait_event(lambda e: e.get("event") == "instance-created" and e.get("instance") == path)
+    raw.send({"cmd": "list-instances", "container": path})
+    raw.wait_event(lambda e: e.get("event") == "instances-done", timeout=4)
+    return path
+
+
+def close_group(raw, view):
+    """Delete a group's view once its checks are done - it stops occupying
+    a name and can't leave anything behind for a later group to collide
+    with or a browser suite sharing the session to trip over."""
+    raw.send({"cmd": "delete-instance", "instance": view})
+    raw.wait_event(lambda e: e.get("event") == "instance-removed" and e.get("instance") == view, timeout=4)
+
+
+def container_children(raw, container):
+    """The current children of `container`, freshly listed (this both views
+    it and answers "what's there right now")."""
+    raw.send({"cmd": "list-instances", "container": container})
+    out = []
+    while True:
+        e = raw.wait_event(lambda e: (e.get("event") == "instance-created"
+                                      and e.get("container") == container
+                                      and e.get("instance") not in [m[0] for m in out])
+                           or e.get("event") == "instances-done", timeout=4)
+        if not e or e.get("event") == "instances-done":
+            break
+        out.append((e.get("instance"), e.get("class")))
+    return out
+
+
+def close_new_children(raw, container, before):
+    """Delete every child of `container` that appeared after `before` (a
+    prior container_children() snapshot) - whatever a test left behind,
+    its own named group view and any incidental siblings alike, without
+    the caller having to know every path a test might have touched."""
+    for m, c in container_children(raw, container):
+        if m not in before:
+            raw.send({"cmd": "delete-instance", "instance": m})
+            raw.wait_event(lambda e: e.get("event") == "instance-removed" and e.get("instance") == m, timeout=4)
+
+
 # --------------------------------------------------------------------------
 # expected-vs-observed reporting - shared by every suite (flowtest,
 # viewclonetest; guitest keeps its own copy of the same contract)
@@ -93,6 +142,7 @@ class Report:
     def expect(self, name, expected, observed, ok):
         self.results.append((name, expected, observed, bool(ok)))
         if ok and not self.verbose:
+            print(".", end="", flush=True)
             return
         print("TEST     %s" % name)
         print("  expected: %s" % expected)
@@ -102,6 +152,8 @@ class Report:
 
     def summary(self):
         failed = [r for r in self.results if not r[3]]
+        if any(r[3] for r in self.results) and not self.verbose:
+            print()  # end the dot line before the summary
         print("%s: %d tests, %d passed, %d failed"
               % (self.label, len(self.results), len(self.results) - len(failed), len(failed)))
         return len(failed)
@@ -345,12 +397,20 @@ def test_clone_panel(raw, r, home, source):
         r.expect("clone panel: staging", "the internals view", "no view", False)
         return
 
-    raw.send({"cmd": "clone-instance", "of": view, "container": home, "x": "40", "y": "700"})
-    # clones of a View mint /Root/View_N - anything else (a replayed
-    # Palette event, say) is stale history, not our clone
+    # clone-instance always auto-mints its new name (no "as") - land it in
+    # a dest view that belongs to ONLY this test, not the shared suite
+    # home, so its auto-minted name can never be confused with another
+    # test's own clone-instance call landing in the same container.
+    raw.send({"cmd": "create-instance", "class": "View", "as": home + "/CPDest", "container": home})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == home + "/CPDest")
+    raw.send({"cmd": "list-instances", "container": home + "/CPDest"})  # view it, or its own clone never announces
+    raw.wait_event(lambda e: e.get("event") == "instances-done", timeout=4)
+
+    raw.send({"cmd": "clone-instance", "of": view, "container": home + "/CPDest", "x": "40", "y": "700"})
     ev2 = raw.wait_event(lambda e: e.get("event") == "instance-created"
                          and e.get("class") == "View"
-                         and str(e.get("instance", "")).startswith(home + "/View_"))
+                         and e.get("container") == home + "/CPDest")
     clone = ev2.get("instance") if ev2 else None
     if not clone:
         r.expect("clone panel: a view clone arrives", "instance-created for a View", "none", False)
@@ -505,11 +565,16 @@ def test_load_then_clone_binding(raw, r, home):
     fresh = [e.get("instance") for e in raw.events
              if e.get("event") == "instance-created" and e.get("class") == "View"]
 
-    # the replay rebuilds this suite's own view too, so the LrView copy is
-    # one level inside that copy - and a container's members are only
-    # announced once we list (start viewing) it
-    for v in list(fresh):
-        fresh += [m for m, c in members(v) if c == "View"]
+    # the replay rebuilds this suite's own view(s) too, so the LrView copy
+    # is some number of levels inside whatever came back at the top - and a
+    # container's members are only announced once we list (start viewing)
+    # it, so this has to walk down explicitly rather than assume one level
+    seen, frontier = set(fresh), list(fresh)
+    while frontier:
+        nxt = [m for v in frontier for m, c in members(v) if c == "View" and m not in seen]
+        seen.update(nxt)
+        fresh += nxt
+        frontier = nxt
 
     copy, mem, sl, tgt, live = None, [], None, None, False
     for v in fresh:
@@ -530,12 +595,24 @@ def test_load_then_clone_binding(raw, r, home):
              "%s" % [c for _, c in orig],
              len(orig) == 2 and sorted(c for _, c in orig) == ["Alias", "Slider"])
 
-    # and the reported gesture: clone the view, the clone binds to itself
+    # and the reported gesture: clone the view, the clone binds to itself.
+    # Land it in a dest view owned by ONLY this test - clone-instance always
+    # auto-mints its new name (no "as"), and matching a bare "View_" prefix
+    # in the shared suite home can pick up ANOTHER test's own clone-instance
+    # call (test_clone_panel does one too). A private, freshly-listed dest
+    # also sidesteps load-flow having just rebuilt `home` as a fresh node
+    # whose own viewed mark did not carry over.
+    raw.send({"cmd": "create-instance", "class": "View", "as": home + "/LrCloneDest", "container": home})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == home + "/LrCloneDest")
+    raw.send({"cmd": "list-instances", "container": home + "/LrCloneDest"})
+    raw.wait_event(lambda e: e.get("event") == "instances-done", timeout=4)
+
     raw.events = []
-    raw.send({"cmd": "clone-instance", "of": home + "/LrView", "container": home, "x": "500", "y": "500"})
+    raw.send({"cmd": "clone-instance", "of": home + "/LrView", "container": home + "/LrCloneDest", "x": "500", "y": "500"})
     ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
                         and e.get("class") == "View"
-                        and str(e.get("instance", "")).startswith(home + "/View_"))
+                        and e.get("container") == home + "/LrCloneDest")
     v4 = ev.get("instance") if ev else None
     mem, sl, tgt, live = bound_to_own_slider(v4) if v4 else ([], None, None, False)
     r.expect("clone after load: the clone's alias drives the clone's own slider",
@@ -640,17 +717,33 @@ def main():
             r.expect(fn.__name__, "no exception", "%s: %s" % (type(e).__name__, e), False)
             return None
 
-    home = suite_view(raw, "RawTests")   # everything this suite builds lives in here
+    home = suite_view(raw, "RawTests")   # the suite's own top-level view
 
-    source = guarded(test_atomic_birth, raw, r, home)
+    # atomic-birth/widget-stamp/internals/clone-panel all operate on the ONE
+    # instance born in the first - one dependency chain, one group view
+    birth = group_view(raw, home, "AtomicBirth")
+    source = guarded(test_atomic_birth, raw, r, birth)
     if source:
-        guarded(test_widget_stamp, raw, r, home, source)
-        guarded(test_internals_members_stamped, raw, r, home, source)
-        guarded(test_clone_panel, raw, r, home, source)
-    guarded(test_save_load, raw, r, home)
-    guarded(test_load_then_clone_binding, raw, r, home)
-    guarded(test_move, raw, r, home)
-    guarded(test_delete, raw, r, home)
+        guarded(test_widget_stamp, raw, r, birth, source)
+        guarded(test_internals_members_stamped, raw, r, birth, source)
+        guarded(test_clone_panel, raw, r, birth, source)
+    close_group(raw, birth)
+
+    g = group_view(raw, home, "SaveLoad")
+    guarded(test_save_load, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "LoadThenClone")
+    guarded(test_load_then_clone_binding, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "Move")
+    guarded(test_move, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "Delete")
+    guarded(test_delete, raw, r, g)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

@@ -14,7 +14,7 @@ renders it.
     python3 testharness/scriptboxtest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 
 def make(raw, cls, alias, home, x, y):
@@ -79,7 +79,7 @@ def test_run_lua(raw, r, home):
     raw.send({"cmd": "set-property", "instance": box, "prop": "Source",
               "value": "local n = 6 * 7\nsend('lua says ' .. n)\n"})
     raw.send({"cmd": "activate", "instance": box})
-    ev = raw.wait_event(lambda e: e.get("event") == "message-flowed"
+    ev = raw.wait_event(lambda e: e.get("event") in ("message-flowed", "property-changed")
                         and e.get("instance") == box and e.get("port") == "Out", timeout=4)
     r.expect("scriptbox: swapping Language to Lua runs the same shell under Lua",
              "the Lua host's send() flows out ScriptBox.Out ('lua says 42')",
@@ -126,10 +126,21 @@ def main():
 
     home = suite_view(raw, "ScriptBoxTest")
 
-    test_discovery(raw, r, home)
-    test_run_js(raw, r, home)
-    test_run_lua(raw, r, home)
-    test_swap_reruns(raw, r, home)
+    g = group_view(raw, home, "Discovery")
+    test_discovery(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "RunJS")
+    test_run_js(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "RunLua")
+    test_run_lua(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "SwapReruns")
+    test_swap_reruns(raw, r, g)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

@@ -17,7 +17,7 @@ is ~50 payload nodes), not with the constant command count.
     python3 testharness/leaktest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 COUNTERS = ["Nodes", "Datas", "Envelopes", "Tasks", "Buffs", "Queues"]
 
@@ -192,8 +192,13 @@ def main():
              "%s" % ok,
              ok["Nodes"] > 100 and ok["Datas"] > 100 and ok["Tasks"] >= 0)
 
-    test_structural(raw, r, stats, home)
-    test_message_burst(raw, r, stats, home)
+    g = group_view(raw, home, "Structural")
+    test_structural(raw, r, stats, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "MessageBurst")
+    test_message_burst(raw, r, stats, g)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

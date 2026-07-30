@@ -16,7 +16,7 @@ Two things to prove:
     python3 testharness/jstest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 
 def make(raw, cls, alias, home, x, y, hidden=False):
@@ -158,10 +158,21 @@ def main():
 
     home = suite_view(raw, "JSTest")
 
-    test_js_dataflow(raw, r, home)
-    test_js_print(raw, r, home)
-    test_js_error_loud(raw, r, home)
-    test_js_bridge_client(raw, r, home)
+    g = group_view(raw, home, "JSDataflow")
+    test_js_dataflow(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "JSPrint")
+    test_js_print(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "JSErrorLoud")
+    test_js_error_loud(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "JSBridgeClient")
+    test_js_bridge_client(raw, r, g)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

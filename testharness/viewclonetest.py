@@ -21,7 +21,7 @@ Run through run.sh, or standalone against a running server:
     python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091
 """
 import argparse, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, container_children, close_new_children
 
 
 def members(raw, view):
@@ -396,11 +396,11 @@ def main():
 
     home = suite_view(raw, "ViewCloneTests")   # everything this suite builds lives in here
 
-    guarded(test_view_clone_wiring, raw, r, home)
-    guarded(test_clone_of_clone, raw, r, home)
-    guarded(test_clone_into_self_refused, raw, r, home)
-    guarded(test_save_load_view_wiring, raw, r, home)
-    guarded(test_export_import_view_wiring, raw, r, home)
+    for fn in (test_view_clone_wiring, test_clone_of_clone, test_clone_into_self_refused,
+               test_save_load_view_wiring, test_export_import_view_wiring):
+        before = [m for m, _ in container_children(raw, home)]
+        guarded(fn, raw, r, home)
+        close_new_children(raw, home, before)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

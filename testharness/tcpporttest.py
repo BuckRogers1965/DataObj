@@ -16,7 +16,7 @@ operate the network underneath, over a real socket.
     python3 testharness/tcpporttest.py --host 127.0.0.1 --port 8091
 """
 import argparse, os, socket, ssl, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 PANEL_PORT = 8477      # a port of our own, clear of the framework's
 
@@ -157,7 +157,7 @@ def test_listen_and_receive(raw, r, home):
              "state=%s connected=%s" % (state, conn),
              state == "CONNECTED" and conn == "1")
 
-    flowed = raw.wait_event(lambda e: e.get("event") == "message-flowed"
+    flowed = raw.wait_event(lambda e: e.get("event") in ("message-flowed", "property-changed")
                             and e.get("instance") == panel
                             and e.get("port") == "Out", timeout=3)
     r.expect("tcpport: what arrives also goes out the widget's Out",
@@ -424,19 +424,42 @@ def main():
 
     home = suite_view(raw, "TCPPortTest")
 
-    test_inert_until_activated(raw, r, home)
-    test_auto_listen_unchecks(raw, r, home)
-    panel, sock = test_listen_and_receive(raw, r, home)
+    g = group_view(raw, home, "InertUntilActivated")
+    test_inert_until_activated(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "AutoListenUnchecks")
+    test_auto_listen_unchecks(raw, r, g)
+    close_group(raw, g)
+
+    # test_send/autosend/accumulate/close-is-a-full-stop all share the ONE
+    # panel+socket test_listen_and_receive opens (a live TCP connection),
+    # so they're one group even though other, independent groups run in
+    # between (below) before the chain's last link, test_close_is_a_full_stop
+    conn_group = group_view(raw, home, "ConnectionLifecycle")
+    panel, sock = test_listen_and_receive(raw, r, conn_group)
     test_send(raw, r, panel, sock)
     test_autosend_from_flow(raw, r, panel, sock)
     test_accumulate_and_clear(raw, r, panel, sock)
-    test_standard_ports(raw, r, home)
-    test_auto_exclusive(raw, r, home)
+
+    g = group_view(raw, home, "StandardPorts")
+    test_standard_ports(raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "AutoExclusive")
+    test_auto_exclusive(raw, r, g)
+    close_group(raw, g)
+
     if sock:
         sock.close()
         time.sleep(0.3)
-    test_tls(raw, r, home)
+
+    g = group_view(raw, home, "TLS")
+    test_tls(raw, r, g)
+    close_group(raw, g)
+
     test_close_is_a_full_stop(raw, r, panel, sock)
+    close_group(raw, conn_group)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)

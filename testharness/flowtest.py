@@ -21,7 +21,7 @@ server:
     python3 testharness/flowtest.py --host 127.0.0.1 --port 8091
 """
 import argparse, os, socket, sys, time
-from rawtest import Raw, Report, ensure_raw_bridge, suite_view
+from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
 
 LOGDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -34,13 +34,17 @@ def edges(values):
 
 
 def collect(raw, instance, port, seconds):
-    """Every message-flowed value the tap delivers for instance.port over
-    a fixed window."""
+    """Every value the tap delivers for instance.port over a fixed window.
+    Every property/port is one uniform subscribable node - "message-flowed"
+    vs "property-changed" is only which label Bridge_Subscribe picks for the
+    client's rendering (from the source class's published Direction for
+    that name), not a different delivery mechanism, so a tap's value
+    arrives correctly under either name."""
     out = []
     deadline = time.time() + seconds
     while time.time() < deadline:
         ev = raw.wait_event(
-            lambda e: e.get("event") == "message-flowed"
+            lambda e: e.get("event") in ("message-flowed", "property-changed")
             and e.get("instance") == instance and e.get("port") == port,
             timeout=min(1.0, max(0.1, deadline - time.time())))
         if ev is not None:
@@ -74,7 +78,7 @@ def test_cat(raw, r, home):
     raw.send({"cmd": "activate", "instance": home + "/CatWriter"})
     raw.send({"cmd": "activate", "instance": home + "/CatReader"})
 
-    ev = raw.wait_event(lambda e: e.get("event") == "message-flowed"
+    ev = raw.wait_event(lambda e: e.get("event") in ("message-flowed", "property-changed")
                         and e.get("instance") == home + "/CatReader"
                         and e.get("port") == "Out", timeout=6)
     time.sleep(1.5)   # let the writer drain and close
@@ -240,13 +244,27 @@ def main():
         except Exception as e:
             r.expect(fn.__name__, "no exception", "%s: %s" % (type(e).__name__, e), False)
 
-    home = suite_view(raw, "FlowTests")   # everything this suite builds lives in here
+    home = suite_view(raw, "FlowTests")   # the suite's own top-level view
 
-    guarded(test_cat, raw, r, home)
-    guarded(test_filter_gate, raw, r, home)
-    guarded(test_queue_clock, raw, r, home)
-    guarded(test_stack_clock, raw, r, home)
-    guarded(test_tcp_echo, raw, r, home, args.host)
+    g = group_view(raw, home, "Cat")
+    guarded(test_cat, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "FilterGate")
+    guarded(test_filter_gate, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "QueueClock")
+    guarded(test_queue_clock, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "StackClock")
+    guarded(test_stack_clock, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "TcpEcho")
+    guarded(test_tcp_echo, raw, r, g, args.host)
+    close_group(raw, g)
 
     raw.close()
     sys.exit(1 if r.summary() else 0)
