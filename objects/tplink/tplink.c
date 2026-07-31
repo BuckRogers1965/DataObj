@@ -494,7 +494,7 @@ static WidgetItem TPLinkPanel[] = {
 	/* cls          prop           def             panel  x    y   w    h  label        [handler] */
 	{ "View",     "TPLink",        "",              0,   0,   0, 310, 220, 0 },
 	{ "Help",     "objects/tplink/README.md", "",   0,   0,   0,   0,   0, 0 },
-	{ "View",     "Settings",      "",              0,  85, 100, 270, 160, 0 },
+	{ "View",     "Settings",      "",              0,  85, 140, 270, 160, 0 },
 
 	/* --- main panel: status + commands --- */
 	{ "Checkbox", "Enable",     "1",   0, 200,  12,  8,  8, LABEL_LEFT,  (void *)TPLink_OnEnable },

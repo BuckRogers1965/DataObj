@@ -89,6 +89,66 @@ everything after this is cheap.
    container is opened (the same visibility-scoped streaming
    list-instances already does), so "a million nodes deep" never has to
    materialize all at once.
+   *Landed July 2026, but in the WRONG LAYER — recorded here as debt.
+   `ExportView` (object.c) is right: it composes a Serializer → Writer
+   flow and lets objects do the work, exactly as this phase intends.
+   The inverse did not follow suit — `ImportView`/`LoadViewAsync` put a
+   hand-rolled JSON parser (`IJ_Ws`, `IJ_Str`, `ImportNode`), file I/O,
+   and import policy INSIDE object.c: ~700 lines with nothing to do
+   with the object layer's actual job, which is registration and
+   composition (CreateObject, Connect, SndMsg, DeleteInstance). It went
+   there because that is where `CreateObject` was in reach, not because
+   it belonged. The symmetric answer is a DESERIALIZER OBJECT — Reader
+   → Deserializer, the mirror of Serializer → Writer — with object.c
+   keeping only the verbs it already owns. Same rule main.c states for
+   the host: if a feature is tempting here, it's an object.*
+
+   *The shape to build (July 2026, user's direction), which is this
+   phase's own "format is a pluggable decorator" finally taken
+   literally: `Serializer` today does TWO jobs — it walks the tree AND
+   formats the JSON text. Split them. A **JSON object** and an **XML
+   object** each own one format, both directions, and nothing else;
+   the walk and the absorb stay format-blind. Export becomes
+   `Serializer → JSON → Writer`, import becomes
+   `Reader → JSON → Deserializer`, and swapping JSON for XML changes
+   the format with no other code touched — which is the decorator this
+   phase asked for, made real as objects instead of as a flag. A
+   **File object** belongs in this set too; its scope is still open,
+   pending the demo objects that define it (do not guess at it — note
+   that CLAUDE.md's "source and sink are two separate classes, not one
+   File object with a Mode" documents a DIFFERENT, older question, so
+   check before assuming they conflict).*
+
+   *And the XML object is QUERYABLE BY PATH — which is what makes it
+   more than a format decorator, and why it is not merely JSON's twin.
+   The engine already has exactly one addressing primitive: a path
+   resolved against the namespace trie (`ResolvePath`). XPath over a
+   document is that same operation against a different backing store,
+   so a real XML object is ANOTHER RESOLVER for the vocabulary that
+   already exists — joining the local trie and Phase 3's `data://`
+   connector as three resolvers under one addressing model, not three
+   subsystems. Nothing new is introduced; one more thing simply
+   answers "resolve this path."
+   The payoff is on import. A text blob has no addressable interior,
+   so parsing it is necessarily monolithic — read everything, walk
+   everything, construct everything, in one pass (which is exactly the
+   shape of the parser now sitting wrongly in object.c). A document
+   that answers path queries lets the Deserializer ASK for what it
+   needs, which is the only way 3b's lazy mount above is actually
+   buildable: "a huge tree loads lazily, one subtree absorbed per
+   mount as its container is opened" cannot be built on something you
+   must fully materialize first. JSON is a wire format with weak
+   interior addressing; XML with XPath is a queryable document store.
+   They are not symmetric — treating them as symmetric is how this
+   ends up a format FLAG instead of two objects that genuinely differ
+   in what they can do.*
+
+   *Layering, same direction: widget creation calls do not belong in
+   object.c. Three sites are wrong today — `BuildPalette` (object.c
+   500, 538) and `ExportView` (782, 783) both call `Widget_Create`.
+   widget.c is already a full layer (17 exports); the object layer's
+   job is registration and composition, so those calls move to
+   widget.c's side of the line.*
 4. **Interface publication**: at ClassStart each class registers a
    description of its ports and properties (name, direction, widget
    type, default value). This is the palette's data source and the
@@ -364,6 +424,43 @@ per-property or per-object opt-in.
    format for the resolver hop - noted here as where the user-nesting
    work and the federation work are really the same idea at different
    radii, so they should be designed together, not twice.*
+6. **Lifecycle events: the engine announces, translators project**
+   (July 2026 — designed, not built). Today `instance-created` is
+   hand-written into six bridge command handlers, each sitting a line
+   or two after that handler's own `RegisterPath` call (`Bridge_Create`:
+   bridge.c 479 → 481). But `RegisterPath` is called from THIRTEEN
+   sites across four files — `Widget_Create`, `ImportCreate`,
+   `ImportAliasesPass`, `BuildPalette`, `BuildChrome`, `CreateRoot`,
+   main.c — so any instance born by a route other than a bridge command
+   is born silently and no connected client ever hears about it. That
+   is why load and import left the GUI stale, papered over with a page
+   reload in app.js's `flow-loaded` handler — which works only because
+   a reload re-runs `list-instances` and re-derives everything from the
+   engine, i.e. the engine was right and only the notification was
+   missing.
+   The fix is one emission inside `RegisterPath` and one inside
+   `UnregisterPath`. That is the true funnel — it catches even clone,
+   which bypasses `CreateObject` entirely and calls `instanceStart`
+   directly — and it is exactly the moment an instance becomes
+   addressable, which is the only moment the outside world can
+   meaningfully be told about it. The core cannot call into a loadable
+   object, so the emission rides the message fabric rather than a
+   direct call: a well-known node carries `Created`/`Removed` ports,
+   and the Bridge `Connect()`s itself to them at InstanceStart like any
+   other object. Scoping is unchanged — `Bridge_SendEventScoped`
+   already filters by container against `connViews`.
+   What this buys: `Bridge_Create` stops announcing by hand;
+   import, load, palette build, clone, and a script creating an object
+   all announce for free; the reload hack and any post-hoc subtree walk
+   are deleted rather than fixed. It also closes a real gap — the
+   bridge frees its taps before deleting (`Bridge_FreeTaps`) but the
+   engine's own `DestroyContents` does not and cannot, so a `Removed`
+   event is how the bridge cleans up its own bookkeeping without the
+   engine needing to know bridge internals.
+   *One open design point: rename currently re-keys as `UnregisterPath`
+   + `RegisterPath` (bridge.c 1362, 1448), which would read as
+   remove+create. It wants its own engine verb (`RepathInstance`)
+   emitting `Renamed` — one verb per gesture, same as everywhere else.*
 
 ## Phase 4 — The browser client
 
