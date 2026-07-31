@@ -66,6 +66,13 @@ void BuildPalette(void);
 NodeObj GetChrome(void);
 void BuildChrome(void);
 
+/* true for the Palette view, FileMenu/ModeMenu, or anything living
+   inside the Palette - framework furniture rebuilt identically every
+   boot, never session content (never exported/destroyed by save/load,
+   never counted as "inside the view" for a relative-path reference to
+   it from real content). See the doc comment on the definition. */
+int IsSessionFurniture(NodeObj inst);
+
 /* remove an instance for good - UnRegisterInstance plus DelNode. Callers */
 /* that also track the instance by alias (Bridge) must drop their own      */
 /* reference too; this only unwinds the registry/tree side.                */
@@ -125,6 +132,24 @@ ActivateInstance(NodeObj instance);
 /* Export a view's subtree to a file by serializing its live node state
    (a Serializer -> Writer flow the core composes and activates). */
 void ExportView(NodeObj view, char * path);
+
+/* The inverse of ExportView, direct engine calls (no bridge required).
+   ImportView drops a saved view onto the canvas as a fresh copy - its
+   own top-level name mints fresh if taken, internals stay verbatim.
+   Returns the new top instance, NULL on failure. */
+NodeObj ImportView(NodeObj container, char * path, char * dropX, char * dropY);
+
+/* Restore `container` IN PLACE from a whole-session export: container's
+   current contents are destroyed, then the file's own top-level node
+   (container itself, as ExportView wrote it) is NOT re-created - its
+   children go straight into container, verbatim. Asynchronous: the
+   destroy is staggered through the scheduler one instance per task
+   (a large session's worth of DeleteInstance calls back-to-back in one
+   native call overran the scheduler's task-pool state), so this returns
+   immediately and onDone(container, ok, ctx) fires once the whole
+   restore - destroy AND rebuild - is actually complete. */
+void LoadViewAsync(NodeObj container, char * path,
+					void (*onDone)(NodeObj container, int ok, void *ctx), void *ctx);
 
 /* Write a named property on target the way something OUTSIDE the object */
 /* has to: if the name resolves to a port (an OnMsg handler is present,  */

@@ -40,9 +40,19 @@ def fresh(raw, panel, prop):
     consumes the OLDEST matching event, so with a backlog it returns
     stale history - purge first, and the value consumed is the fresh
     push the subscribe itself triggers (leaktest.py's read_counters
-    learned this the same way)."""
+    learned this the same way).
+
+    The purge is scoped to (panel, prop) - a blanket "every property-
+    changed event" purge would also discard a DIFFERENT property's
+    already-arrived, still-wanted event (e.g. a later check for Out
+    finding nothing because an earlier fresh() for RxData swept it up
+    too, since Out arrives as property-changed here just like RxData -
+    see design_stringly_typed_integration's sibling lesson: uniform
+    delivery means uniform accidents too)."""
     raw.pump()
-    raw.events = [e for e in raw.events if e.get("event") != "property-changed"]
+    raw.events = [e for e in raw.events
+                  if not (e.get("event") == "property-changed"
+                          and e.get("instance") == panel and e.get("port") == prop)]
     return raw.value_of(panel, prop)
 
 
@@ -157,9 +167,16 @@ def test_listen_and_receive(raw, r, home):
              "state=%s connected=%s" % (state, conn),
              state == "CONNECTED" and conn == "1")
 
+    # subscribing (way above, before Activate) pushed Out's THEN-current
+    # value ("0", property-changed's own truth-on-demand push) immediately -
+    # that stale event still sits in the queue, unconsumed by anything
+    # since fresh() only ever purges the specific prop it was asked for,
+    # never Out. Match the value too, or wait_event returns that first,
+    # stale match instead of the real one already sitting right after it.
     flowed = raw.wait_event(lambda e: e.get("event") in ("message-flowed", "property-changed")
                             and e.get("instance") == panel
-                            and e.get("port") == "Out", timeout=3)
+                            and e.get("port") == "Out"
+                            and e.get("value") == "hello panel", timeout=3)
     r.expect("tcpport: what arrives also goes out the widget's Out",
              "a message-flowed on Out carrying the received bytes "
              "(default output connection is Receive Data)",

@@ -38,11 +38,19 @@ RUNNER_SOURCE = (
 
 
 def members(raw, view):
+    # list-instances({"container": ""}) (root) announces its children with
+    # container "/Root", not "" - a fresh create-instance echoes the
+    # command's own literal "" instead, which is why suite_view()'s single
+    # event match never hit this: listing EXISTING children and announcing
+    # a JUST-CREATED one take different paths to the same field. Confirmed
+    # directly (a raw list-instances with container:"" reports every root
+    # child as container:"/Root"). Accept both spellings for root.
+    wanted = ("", "/Root") if view == "" else (view,)
     raw.send({"cmd": "list-instances", "container": view})
     out = []
     while True:
         e = raw.wait_event(lambda e: (e.get("event") == "instance-created"
-                                      and e.get("container") == view
+                                      and e.get("container") in wanted
                                       and e.get("instance") not in [m[0] for m in out])
                            or e.get("event") == "instances-done", timeout=4)
         if not e or e.get("event") == "instances-done":
@@ -231,7 +239,7 @@ def test_save_load(raw, r, home):
     second explicit activate the user has no reason to send), and
     sibget/sibset must resolve to the LOADED copy's own siblings."""
     view, inbox, outbox, runner = build_scripted_view(raw, home, "SW_SaveLoad")
-    known = [view]
+    known_tops = [m for m, c in members(raw, "") if c == "View"]
 
     raw.send({"cmd": "save-flow", "file": "sw_savetwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-saved", timeout=6)
@@ -240,34 +248,32 @@ def test_save_load(raw, r, home):
     raw.send({"cmd": "load-flow", "file": "sw_savetwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=10)
 
-    # load-flow rebuilds the whole tree - root's node survives the reload
-    # so root stays "viewed", but `home` (a suite view, itself a child of
-    # root) comes back as a brand-new node whose own "viewed" mark did NOT
-    # carry over. Re-list home's own children fresh, don't rely on
-    # passively-received events for anything below root.
-    #
-    # A fixed sleep after flow-loaded worked in isolation but is exactly
-    # the fragility a save/load test always risks: save-flow records the
-    # WHOLE session, so run through the full harness (many suites' worth
-    # of instances already live) the replay has far more to rebuild than
-    # it does standalone. Poll instead of guessing a delay.
+    # save-flow records the WHOLE session, and its very first relevant
+    # entry is `home` (the suite's own top-level view) being created - by
+    # replay time that name is still taken (home is still live), so the
+    # engine mints IT a fresh name too, same as everything else with a
+    # taken "as". Everything from the loaded copy - including SW_SaveLoad -
+    # therefore lands under that fresh SIBLING of home, not inside home
+    # itself. Search fresh top-level Views (anything under root that
+    # wasn't already there before this reload), same pattern rawtest.py's
+    # test_load_then_clone_binding already uses for exactly this.
     copy, cinbox, coutbox, crunner, out = None, None, None, None, None
     deadline = time.time() + 8.0
     while time.time() < deadline and out != "loadval_done":
-        kids = members(raw, home)
-        fresh = [m for m, c in kids if c == "View" and m not in known]
+        top = members(raw, "")
+        fresh_tops = [m for m, c in top if c == "View" and m not in known_tops]
 
-        # Only ONE fresh view will have all three parts AND actually work
-        # when triggered - matching by shape alone risks picking another
-        # suite's same-shaped-by-coincidence view, same caveat
-        # viewclonetest's own save/load test calls out.
-        for v in fresh:
-            ib, ob, rn = find_widget_parts(raw, v)
-            if ib and ob and rn:
-                result = run_widget(raw, rn, "loadval")
-                if result == "loadval_done":
-                    copy, cinbox, coutbox, crunner, out = v, ib, ob, rn, result
-                    break
+        for t in fresh_tops:
+            kids = members(raw, t)
+            for v in [m for m, c in kids if c == "View"]:
+                ib, ob, rn = find_widget_parts(raw, v)
+                if ib and ob and rn:
+                    result = run_widget(raw, rn, "loadval")
+                    if result == "loadval_done":
+                        copy, cinbox, coutbox, crunner, out = v, ib, ob, rn, result
+                        break
+            if out == "loadval_done":
+                break
         if out != "loadval_done":
             time.sleep(0.4)
 

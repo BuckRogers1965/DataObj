@@ -357,16 +357,12 @@ function handleEvent(msg) {
       closeFlowDialog();
       break;
     case 'flow-loaded':
+      /* Load/import no longer announce what changed (that mechanism is
+         what caused the 2026-07-30 crash - see git history). The server
+         knows the view is stale; the simplest correct fix is to just
+         refresh it. */
       log('loaded ' + msg.file, 'event');
-      closeFlowDialog();
-      /* No reload. The incremental events of the load already project the
-         correct display - the old subscribe/rename race this used to guard
-         against no longer happens (addressing is one engine index now, and
-         everything is created in its real container). A full location.reload()
-         on top of an already-correct screen was just a 3-second glitch that
-         threw the good render away and rebuilt it. If a load ever DOES leave
-         the display wrong, re-list from the engine's final state - do not
-         reload the page. */
+      window.location.reload();
       break;
     case 'error':
       log('error (' + msg.cmd + '): ' + msg.message, 'error');

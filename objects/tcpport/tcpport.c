@@ -157,8 +157,12 @@ static void TCPPort_DoListen(NodeObj instance)
 	if (local->inner)
 		DeleteInstance(local->inner);
 
-	/* the engine belongs to this panel - created inside it */
-	local->inner = CreateObject(instance, "TCP");
+	/* the engine belongs to this panel - created inside it. Named and
+	   path-registered (Widget_Create, not plain CreateObject) - without
+	   this it had a Container but no Name, so it dumped "Instance has no
+	   name" on every list-instances call system-wide (see scriptbox.c's
+	   Inner host, the same bug, fixed the same way). */
+	local->inner = Widget_Create(instance, "TCP", "Inner");
 	if (!local->inner)
 	{
 		DebugPrint("TCPPort: the TCP class is not loaded", __FILE__, __LINE__, ERROR);
@@ -281,8 +285,9 @@ int TCPPort_OnOpen(NodeObj instance, MsgId message, NodeObj data)
 	if (local->inner)
 		DeleteInstance(local->inner);
 
-	/* the engine belongs to this panel - created inside it */
-	local->inner = CreateObject(instance, "TCP");
+	/* the engine belongs to this panel - created inside it (Widget_Create,
+	   named/path-registered - see the Listen-side comment above) */
+	local->inner = Widget_Create(instance, "TCP", "Inner");
 	if (!local->inner)
 	{
 		DebugPrint("TCPPort: the TCP class is not loaded", __FILE__, __LINE__, ERROR);
@@ -792,12 +797,20 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 
+	/* local->inner is NOT deleted here - it is a real, path-registered
+	   instance (Widget_Create) living under this panel's own path, so
+	   whenever THIS instance dies through the one path anything dies
+	   through (Bridge_Delete, bridge.c), that call has already
+	   snapshotted the whole subtree - this instance AND inner, as two
+	   independent entries - before deleting either. Deleting inner here
+	   too would race that same snapshot's own turn to reach inner's
+	   entry (see scriptbox.c's InstanceEnd, the same bug, confirmed by a
+	   SIGABRT the first time anything deleted a ScriptBox). Re-Listen and
+	   re-Open swapping the engine while this panel stays alive are the
+	   one time inner genuinely needs an explicit delete - both already do
+	   exactly that, on their own. */
 	if (local)
-	{
-		if (local->inner)
-			DeleteInstance(local->inner);
 		free(local);
-	}
 
 	return rtrn_handled;
 }

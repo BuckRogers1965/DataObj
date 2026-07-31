@@ -424,6 +424,23 @@ NodeObj GetPaletteView(void){
 	return PaletteView;
 }
 
+/* ************************************************************************
+ * DO NOT revert this to `(void) className; return 0;` - it USED TO BE
+ * exactly that stub, doing nothing, for a long time, with this same
+ * comment already sitting above it describing Bridge/TCP as classes that
+ * were SUPPOSED to be excluded. Nobody had actually implemented the body.
+ * The visible, reported symptom was "every widget has a tiny panel with
+ * no controls" (2026-07-30) - it wasn't every widget, it was every
+ * palette-bootstrap instance of a class that was never meant to be
+ * independently draggable (MCPAgent, confirmed; Bridge/TCP were always
+ * intended too, per the comment below, just never wired up). If you're
+ * looking at this function wondering whether the body is safe to delete
+ * because it "looks like a one-off special case" - it is not: it is the
+ * fix for a real, reported, user-visible bug, and this is the ONE
+ * designated hook for it (the call site in BuildPalette already exists
+ * and always did). Add MORE excluded classes here as they're found;
+ * do not empty this out.
+ * ************************************************************************/
 /* Bridge and TCP are the transport carrying this very session, not      */
 /* something a user composing a dataflow should drag out and rewire -    */
 /* the same reason a web page builder doesn't let you drag out "an HTTP  */
@@ -431,10 +448,17 @@ NodeObj GetPaletteView(void){
 /* from being Connect()ed to or built into a flow file like anything     */
 /* else - just a curation choice about what belongs in the palette a     */
 /* user actually composes with.                                         */
+/* MCPAgent (mcpsource.c) is the SAME kind of case: it's the internal    */
+/* shape MCPSource_BuildAgentView constructs one of per discovered tool  */
+/* (input/output Textboxes, a Lua Runner, a Submit button, AgentName/    */
+/* ConnectorPath wired up) - never something a user creates bare. A      */
+/* palette-bootstrap MCPAgent (plain Widget_Create, none of that built)  */
+/* is just an empty panel with no controls - useless standalone.         */
 static int IsPaletteExcluded(char *className)
 {
-	(void) className;
-	return 0;
+	return className && (strcmp(className, "Bridge") == 0
+						  || strcmp(className, "TCP") == 0
+						  || strcmp(className, "MCPAgent") == 0);
 }
 
 /* ask an instance for the main view it built for itself: scan its        */
@@ -597,6 +621,50 @@ void BuildChrome(void){
 	}
 }
 
+/*
+ * True for the Palette view, FileMenu/ModeMenu, or anything living
+ * inside the Palette - framework furniture BuildPalette()/BuildChrome()
+ * rebuild identically from the currently-loaded object files every
+ * boot ("a restart rebuilds it, so nothing here is precious" -
+ * BuildPalette's own comment). Not session content: a save/load round
+ * trip must never destroy or re-serialize it (a stale saved snapshot
+ * would fight the live, freshly-scanned registry), and a reference TO
+ * it from real session content (e.g. MCPSource's own ConnectorPath)
+ * must stay an absolute path even when the export root nesting-wise
+ * happens to contain it - it's not "inside the view" being exported,
+ * it's the fixed furniture every session already has. Palette's own
+ * bootstrap instances (MCPSource et al) are deliberately NOT marked
+ * Deletable="0" themselves (BuildPalette: "everything in it deletes
+ * like anything else") - only the Palette view and the two Chrome
+ * menus carry that guard - so this checks containment under Palette,
+ * not a per-instance flag.
+ */
+int IsSessionFurniture(NodeObj inst)
+{
+	NodeObj chrome, palette;
+	char    path[300], palettePath[300];
+	int     n;
+
+	if (!inst)
+		return 0;
+
+	palette = GetPaletteView();
+	if (inst == palette)
+		return 1;
+
+	chrome = GetChrome();
+	if (chrome && (inst == (NodeObj) GetPropLong(chrome, "FileMenu")
+				|| inst == (NodeObj) GetPropLong(chrome, "ModeMenu")))
+		return 1;
+
+	if (!palette || !PathOfInstance(palette, palettePath, sizeof(palettePath))
+		|| !PathOfInstance(inst, path, sizeof(path)))
+		return 0;
+
+	n = (int) strlen(palettePath);
+	return strncmp(path, palettePath, n) == 0 && path[n] == '/';
+}
+
 /* walk the registry looking for a registered class by name */
 /* the registry is RegObjList -> libraries -> classes        */
 NodeObj
@@ -721,6 +789,1056 @@ void ExportView(NodeObj view, char *path)
 	Connect(ser, "Out", wr, "In");
 	ActivateInstance(wr);					/* open the file, then */
 	ActivateInstance(ser);					/* walk + stream into it */
+}
+
+/*
+ * Import: the inverse of ExportView - reconstruct a live subtree from
+ * what ExportView (the Serializer) wrote. The bridge used to hand-roll
+ * this parsing AND the reconstruction itself (Bridge_ImportNode et al,
+ * bridge.c), calling back into Bridge_Dispatch for every piece created -
+ * work the engine should be doing, reachable with no bridge attached at
+ * all, exactly like ExportView already is.
+ *
+ * Two verbs share this machinery:
+ *   ImportView  - a CLONE-DROP: the exported view's own top node is
+ *                 re-created (a taken name mints fresh), its children
+ *                 keep their recorded names verbatim (a fresh container
+ *                 can't collide with itself).
+ *   LoadView    - RESTORE IN PLACE: `container`'s CURRENT children are
+ *                 destroyed first, then the file's own top-level node is
+ *                 NOT re-created (container already exists in its place,
+ *                 same as ExportView(root,...) exported it) - its
+ *                 children are imported straight into container,
+ *                 verbatim (container was just cleared, nothing collides).
+ */
+
+/* ---- a parser for the Serializer's own {class,name,props,wires,
+   children} shape - NOT the shape TextToNode/NodeToText use (that's a
+   node's own type/value; this is a class + published-state snapshot) ---- */
+
+static void IJ_Ws(char **pp)
+{
+	char *p = *pp;
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+		p++;
+	*pp = p;
+}
+
+/* parse a JSON string token at *pp (must be on the opening quote); returns
+   the malloc'd, unescaped contents and advances *pp past the closing quote. */
+static char *IJ_Str(char **pp)
+{
+	char *p = *pp, *out, *o;
+
+	if (*p != '"')
+		return NULL;
+	p++;
+	out = malloc(strlen(p) + 1);
+	o = out;
+	while (*p && *p != '"')
+	{
+		if (*p == '\\')
+		{
+			p++;
+			switch (*p)
+			{
+				case 'n': *o++ = '\n'; break;
+				case 't': *o++ = '\t'; break;
+				case 'r': *o++ = '\r'; break;
+				case 'b': *o++ = '\b'; break;
+				case 'f': *o++ = '\f'; break;
+				case '/': *o++ = '/';  break;
+				case '"': *o++ = '"';  break;
+				case '\\': *o++ = '\\'; break;
+				case 'u':
+				{
+					int h = 0, i;
+					p++;
+					for (i = 0; i < 4 && *p; i++)
+					{
+						char c = *p;
+						h <<= 4;
+						if (c >= '0' && c <= '9') h |= c - '0';
+						else if (c >= 'a' && c <= 'f') h |= c - 'a' + 10;
+						else if (c >= 'A' && c <= 'F') h |= c - 'A' + 10;
+						p++;
+					}
+					p--;				/* the loop ++ below re-consumes one */
+					if (h < 0x80)
+						*o++ = (char) h;
+					else if (h < 0x800)
+					{
+						*o++ = 0xC0 | (h >> 6);
+						*o++ = 0x80 | (h & 0x3F);
+					}
+					else
+					{
+						*o++ = 0xE0 | (h >> 12);
+						*o++ = 0x80 | ((h >> 6) & 0x3F);
+						*o++ = 0x80 | (h & 0x3F);
+					}
+					break;
+				}
+				default: *o++ = *p; break;
+			}
+			if (*p)
+				p++;
+		}
+		else
+			*o++ = *p++;
+	}
+	if (*p != '"')
+	{
+		free(out);
+		return NULL;
+	}
+	p++;
+	*o = '\0';
+	*pp = p;
+	return out;
+}
+
+/* an unused path like <prefix>/<Base>_N - server-generated, since a deep
+   clone or an import names things no caller asked for individually */
+static void ImportFreshName(char *prefix, char *base, char *out, int outlen)
+{
+	int n;
+
+	for (n = 1; n < 100000; n++)
+	{
+		snprintf(out, outlen, "%s/%s_%d", (prefix && prefix[0]) ? prefix : "/Root", base, n);
+		if (!ResolvePath(out))
+			return;
+	}
+}
+
+/* create one instance the way a live create-instance would (naming,
+   placement, data properties) - direct engine calls, no bridge command
+   round trip. Returns its actual minted full path (caller frees), NULL
+   on failure. force=1: caller guarantees the name is free and it MUST be
+   kept verbatim (an internal node of a fresh container, or LoadView's
+   own just-cleared container - either way nothing can collide). */
+static char *ImportCreate(char *className, char *nodeName,
+						   NodeObj propbag, char *containerPath, int force)
+{
+	NodeObj home, inst;
+	char    desired[320], fresh[320], *x, *y, *ident, *alias, *slash, dbg[512];
+	char   *cpath = (containerPath && containerPath[0]) ? containerPath : "/Root";
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE enter: class='%s' name='%s' container='%s' force=%d",
+			 className ? className : "(null)", nodeName ? nodeName : "(null)", cpath, force);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	if (!className || !className[0])
+		return NULL;
+
+	/* the node's IDENTITY is its "Name" PROP (Slider_1), NOT the JSON
+	   "name" field (the class node's own name, "Slider", same for every
+	   instance) - relative links are stored by the Name prop
+	   (PathOfInstance uses it), so import must recreate each node under
+	   that same name or every link misses. */
+	ident = propbag ? GetPropStr(propbag, "Name") : NULL;
+	if (!ident || !ident[0])
+		ident = nodeName;
+
+	home = ResolvePath(cpath);
+	if (!home)
+	{
+		DebugPrint("IMPORT-CREATE: container path did not resolve, bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+	inst = CreateObject(home, className);
+	if (!inst)
+	{
+		DebugPrint("IMPORT-CREATE: CreateObject failed (unknown class?), bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: instance created at %p, placing", (void *) inst);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	x = propbag ? GetPropStr(propbag, "X") : NULL;
+	y = propbag ? GetPropStr(propbag, "Y") : NULL;
+	PlaceInstance(inst, cpath, (x && x[0]) ? x : "0", (y && y[0]) ? y : "0");
+
+	alias = NULL;
+	if (ident && ident[0])
+	{
+		snprintf(desired, sizeof(desired), "%s/%s", cpath, ident);
+		alias = desired;
+	}
+	if (!alias || !alias[0] || (ResolvePath(alias) && !force))
+	{
+		ImportFreshName(cpath, className, fresh, sizeof(fresh));
+		alias = fresh;
+	}
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: registering path '%s'", alias);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	RegisterPath(alias, inst);
+	slash = strrchr(alias, '/');
+	SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
+
+	/* the rest of the data props - restored the same way CloneObject
+	   snapshots them: walk the CLASS's published interface, only
+	   Direction=="data" (skips State, a runtime readout, and every
+	   "in" port - X/Y/Name/Container are already handled above and are
+	   skipped here too). Restoring a saved value is not a live command;
+	   replaying a port's own stale value through SetOrDeliverProp would
+	   fire its handler as if a fresh message had just arrived, and for a
+	   port whose handler mirrors its input into another property
+	   (MenuButton's In -> Selected, e.g.) that stomps the real saved
+	   value with whatever the port itself last happened to hold (this
+	   is exactly why Selected/Value-style properties were coming back
+	   as "0" on load - see menubutton.c). Interface-only iteration never
+	   touches "in" ports in the first place, so this can't happen. */
+	if (propbag)
+	{
+		NodeObj class = GetParent(inst);
+		NodeObj classInterface = class ? GetClassInterface(class) : NULL;
+		NodeObj ip;
+
+		for (ip = classInterface ? GetChild(classInterface) : NULL; ip; ip = GetNextSibling(ip))
+		{
+			char *pn  = GetPropStr(ip, "Name");
+			char *dir = GetPropStr(ip, "Direction");
+			char *val;
+
+			if (!pn || !dir || strcmp(dir, "data") != 0)
+				continue;
+			if (!strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
+				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
+				continue;
+
+			val = GetPropStr(propbag, pn);
+			if (val)
+				SetOrDeliverProp(inst, pn, val);
+		}
+	}
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE done: '%s' -> path '%s'", className, alias);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	return strdup(alias);
+}
+
+/* an Alias is a LINK, not a data snapshot - creating it as a plain
+   instance and copying its Target string leaves a dead control pointing
+   at the original. So aliases are not created in the build pass; they
+   are remembered here and remade afterwards (ImportAliasesPass), once
+   every target exists, via a real LinkPropertyAs onto the resolved
+   target. `containerPath` is the parent's ACTUAL new path. */
+static void ImportDeferAlias(NodeObj propbag, char *containerPath, NodeObj deferred)
+{
+	NodeObj c = NewNode(INTEGER);
+	char   *v;
+
+	SetName(c, "alias");
+	v = propbag ? GetPropStr(propbag, "Target") : NULL;
+	SetPropStr(c, "of_old", v ? v : "");
+	v = propbag ? GetPropStr(propbag, "TargetProp") : NULL;
+	SetPropStr(c, "prop", v ? v : "");
+	SetPropStr(c, "container", (containerPath && containerPath[0]) ? containerPath : "/Root");
+	v = propbag ? GetPropStr(propbag, "X") : NULL;
+	SetPropStr(c, "x", v ? v : "0");
+	v = propbag ? GetPropStr(propbag, "Y") : NULL;
+	SetPropStr(c, "y", v ? v : "0");
+	v = propbag ? GetPropStr(propbag, "Widget") : NULL;
+	SetPropStr(c, "Widget", v ? v : "");
+	v = propbag ? GetPropStr(propbag, "Label") : NULL;
+	SetPropStr(c, "Label", v ? v : "");
+	AppendChild(deferred, c);
+}
+
+/* create a node if it is a concrete instance, or defer it if it is an
+   Alias. Returns the new path for concrete nodes (so children parent
+   onto it), "" for aliases (they hold no children), NULL on failure. */
+static char *ImportPlace(char *className, char *nodeName, NodeObj propbag,
+						  char *containerPath, NodeObj deferred, int force)
+{
+	if (className && strcmp(className, "Alias") == 0)
+	{
+		ImportDeferAlias(propbag, containerPath, deferred);
+		return strdup("");
+	}
+	return ImportCreate(className, nodeName, propbag, containerPath, force);
+}
+
+/* parse one {class,name,props,wires,children} object at *pp and recreate
+   it (and, recursively, its children) under containerPath. Returns the
+   node's actual minted path (caller frees), "" for an alias, NULL on a
+   malformed object.
+
+   skipSelf: parse this node's own fields (advancing the cursor, and
+   validating the file) but do NOT create it - its "children" (and any
+   of its own "wires", though a container itself rarely has any) are
+   processed with containerPath as their own container directly. This is
+   LoadView's own top-level node: container already exists in its place
+   (ExportView(root,...) is what wrote this entry), so nothing about it
+   is re-created - only its contents are (re)built. */
+static char *ImportNode(char **pp, char *containerPath, NodeObj deferred,
+						 NodeObj wires, int isTop, int skipSelf)
+{
+	char   *key, *className = NULL, *nodeName = NULL, *actualPath = NULL;
+	NodeObj propbag = NULL;
+	int     force = !isTop;		/* only a fresh drop's own top re-mints */
+	char    dbg[400];
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-NODE enter: container='%s' isTop=%d skipSelf=%d force=%d",
+			 containerPath ? containerPath : "(null)", isTop, skipSelf, force);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	IJ_Ws(pp);
+	if (**pp != '{')
+	{
+		DebugPrint("IMPORT-NODE: expected '{', malformed input, bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+	(*pp)++;
+
+	for (;;)
+	{
+		IJ_Ws(pp);
+		if (**pp == '}')
+		{
+			(*pp)++;
+			break;
+		}
+		key = IJ_Str(pp);
+		if (!key)
+			goto fail;
+		IJ_Ws(pp);
+		if (**pp != ':')
+		{
+			free(key);
+			goto fail;
+		}
+		(*pp)++;
+		IJ_Ws(pp);
+
+		if (strcmp(key, "class") == 0)
+			className = IJ_Str(pp);
+		else if (strcmp(key, "name") == 0)
+			nodeName = IJ_Str(pp);
+		else if (strcmp(key, "props") == 0)
+		{
+			if (**pp != '{')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			propbag = NewNode(INTEGER);
+			for (;;)
+			{
+				char *pk, *pv;
+
+				IJ_Ws(pp);
+				if (**pp == '}')
+				{
+					(*pp)++;
+					break;
+				}
+				pk = IJ_Str(pp);
+				if (!pk)
+				{
+					free(key);
+					goto fail;
+				}
+				IJ_Ws(pp);
+				if (**pp != ':')
+				{
+					free(pk);
+					free(key);
+					goto fail;
+				}
+				(*pp)++;
+				IJ_Ws(pp);
+				pv = IJ_Str(pp);
+				if (!pv)
+				{
+					free(pk);
+					free(key);
+					goto fail;
+				}
+				SetPropStr(propbag, pk, pv);
+				free(pk);
+				free(pv);
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+		}
+		else if (strcmp(key, "wires") == 0)
+		{
+			/* this node's outgoing connections. It must exist to be the
+			   wire's `from`; the sink `to` is an original path, remapped
+			   in the wire pass once every instance exists. */
+			if (!skipSelf && !actualPath)
+			{
+				actualPath = ImportPlace(className, nodeName, propbag, containerPath, deferred, force);
+				snprintf(dbg, sizeof(dbg), "IMPORT-NODE (wires-branch) placed -> %s",
+						 actualPath ? actualPath : "(null/failed)");
+				DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+			}
+			IJ_Ws(pp);
+			if (**pp != '[')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			for (;;)
+			{
+				char *wf = NULL, *wt = NULL, *wp = NULL, *wk;
+
+				IJ_Ws(pp);
+				if (**pp == ']')
+				{
+					(*pp)++;
+					break;
+				}
+				if (**pp != '{')
+				{
+					free(key);
+					goto fail;
+				}
+				(*pp)++;
+				for (;;)
+				{
+					char *wv;
+
+					IJ_Ws(pp);
+					if (**pp == '}')
+					{
+						(*pp)++;
+						break;
+					}
+					wk = IJ_Str(pp);
+					if (!wk)
+					{
+						free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					IJ_Ws(pp);
+					if (**pp != ':')
+					{
+						free(wk); free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					(*pp)++;
+					IJ_Ws(pp);
+					wv = IJ_Str(pp);
+					if (!wv)
+					{
+						free(wk); free(wf); free(wt); free(wp); free(key);
+						goto fail;
+					}
+					if (!strcmp(wk, "from"))      { free(wf); wf = wv; }
+					else if (!strcmp(wk, "to"))   { free(wt); wt = wv; }
+					else if (!strcmp(wk, "port")) { free(wp); wp = wv; }
+					else free(wv);
+					free(wk);
+					IJ_Ws(pp);
+					if (**pp == ',')
+						(*pp)++;
+				}
+				/* record from OUR new path -> the sink's ORIGINAL path
+				   (resolved once every instance exists, ImportWiresPass) -
+				   an alias/skipped node carries no path, wires nothing */
+				if (actualPath && actualPath[0] && wf && wt)
+				{
+					NodeObj w = NewNode(INTEGER);
+					SetPropStr(w, "from", actualPath);
+					SetPropStr(w, "fromPort", wf);
+					SetPropStr(w, "to_old", wt);
+					SetPropStr(w, "toPort", wp ? wp : "");
+					AppendChild(wires, w);
+				}
+				free(wf); free(wt); free(wp);
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+		}
+		else if (strcmp(key, "children") == 0)
+		{
+			/* the parent must exist before its children can name it as
+			   their container - class/name/props are all in by now */
+			if (!skipSelf && !actualPath)
+			{
+				actualPath = ImportPlace(className, nodeName, propbag, containerPath, deferred, force);
+				snprintf(dbg, sizeof(dbg), "IMPORT-NODE (children-branch) placed -> %s",
+						 actualPath ? actualPath : "(null/failed)");
+				DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+			}
+			IJ_Ws(pp);
+			if (**pp != '[')
+			{
+				free(key);
+				goto fail;
+			}
+			(*pp)++;
+			for (;;)
+			{
+				char *cp;
+
+				IJ_Ws(pp);
+				if (**pp == ']')
+				{
+					(*pp)++;
+					break;
+				}
+				/* children: verbatim, own X/Y (isTop=0, force=1) - a
+				   skipped top's own children are container's TOP-LEVEL
+				   entries instead, and ALSO force=1: container was just
+				   destroyed (LoadView), so every recorded name is
+				   guaranteed free - use it exactly, never mint an
+				   approximation */
+				snprintf(dbg, sizeof(dbg), "IMPORT-NODE recursing into child under '%s'",
+						 skipSelf ? containerPath : (actualPath ? actualPath : containerPath));
+				DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+				cp = ImportNode(pp, skipSelf ? containerPath : (actualPath ? actualPath : containerPath),
+								deferred, wires, 0, 0);
+				if (cp)
+					free(cp);
+				else
+				{
+					DebugPrint("IMPORT-NODE: child failed, bail", __FILE__, __LINE__, IMPORT);
+					goto childfail;
+				}
+				IJ_Ws(pp);
+				if (**pp == ',')
+					(*pp)++;
+			}
+		}
+		else
+		{
+			char *sk = IJ_Str(pp);		/* unknown key: skip its string value */
+			if (sk)
+				free(sk);
+		}
+		free(key);
+		IJ_Ws(pp);
+		if (**pp == ',')
+			(*pp)++;
+	}
+
+	/* a childless, wireless node was never created above - do it now */
+	if (!skipSelf && !actualPath)
+	{
+		actualPath = ImportPlace(className, nodeName, propbag, containerPath, deferred, force);
+		snprintf(dbg, sizeof(dbg), "IMPORT-NODE (fallback) placed -> %s",
+				 actualPath ? actualPath : "(null/failed)");
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	}
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-NODE exit OK: -> '%s'", actualPath ? actualPath : "");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	if (className) free(className);
+	if (nodeName)  free(nodeName);
+	if (propbag)   DelNode(propbag);
+	return actualPath ? actualPath : strdup("");
+
+childfail:
+	free(key);
+fail:
+	DebugPrint("IMPORT-NODE exit FAIL: malformed input", __FILE__, __LINE__, IMPORT);
+	if (className) free(className);
+	if (nodeName)  free(nodeName);
+	if (propbag)   DelNode(propbag);
+	if (actualPath) free(actualPath);
+	return NULL;
+}
+
+/* resolve a saved link target against the imported root. A RELATIVE
+   target (no leading '/') pointed inside the exported subtree - prepend
+   `importRoot` (the container everything was imported under), and
+   because a fresh container keeps its children's names it lands on the
+   copy. An ABSOLUTE target pointed OUTSIDE the exported subtree - leave
+   it, it still names the live original. An EMPTY-BUT-PRESENT target is
+   RelTo's own "the root itself" convention (serializer.c: a wire or
+   link pointing at the exported subtree's own top node collapses to ""
+   rather than a relative path, since there's nothing to strip a prefix
+   off of) - that resolves to importRoot itself, NOT "no target": a
+   member wired back to its own container (a composite widget's inner
+   logic Connect()'d to the container's own port, e.g.) was silently
+   never reconnected on import before this, with no error - the wire
+   just quietly didn't exist. A genuinely absent field (saved == NULL,
+   never written at all) is still "no target". Writes into `out`,
+   returns it. */
+static char *ImportResolveTarget(char *importRoot, char *saved, char *out, int len)
+{
+	if (!saved)
+	{
+		out[0] = '\0';
+		return out;
+	}
+	if (!saved[0])
+	{
+		snprintf(out, len, "%s", (importRoot && importRoot[0]) ? importRoot : "/Root");
+		return out;
+	}
+	if (saved[0] == '/')
+		snprintf(out, len, "%s", saved);
+	else
+		snprintf(out, len, "%s/%s", (importRoot && importRoot[0]) ? importRoot : "/Root", saved);
+	return out;
+}
+
+/* second pass: every alias remembered during the build, now remade as a
+   real link (direct engine calls: CreateObject + LinkPropertyAs, not a
+   bridge command round trip). */
+static void ImportAliasesPass(char *importRoot, NodeObj deferred)
+{
+	NodeObj d;
+	char    dbg[512];
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-ALIASES-PASS enter: importRoot='%s'", importRoot ? importRoot : "(null)");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	for (d = GetChild(deferred); d; d = GetNextSibling(d))
+	{
+		char    of[320], fresh[320];
+		char   *container, *prop, *w, *lb, *alias, *slash;
+		NodeObj target, home, inst, owner, node, pub;
+
+		ImportResolveTarget(importRoot, GetPropStr(d, "of_old"), of, sizeof(of));
+		target = of[0] ? ResolvePath(of) : NULL;
+		prop = GetPropStr(d, "prop");
+		container = GetPropStr(d, "container");
+		snprintf(dbg, sizeof(dbg), "IMPORT-ALIASES-PASS: of='%s' target=%p prop='%s' container='%s'",
+				 of, (void *) target, prop ? prop : "(null)", container ? container : "(null)");
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+		if (!target || !prop || !prop[0] || !container)
+		{
+			DebugPrint("IMPORT-ALIASES-PASS: unresolved target/prop/container, skip", __FILE__, __LINE__, IMPORT);
+			continue;
+		}
+
+		home = ResolvePath(container);
+		if (!home)
+		{
+			DebugPrint("IMPORT-ALIASES-PASS: container path did not resolve, skip", __FILE__, __LINE__, IMPORT);
+			continue;
+		}
+		inst = CreateObject(home, "Alias");
+		if (!inst)
+		{
+			DebugPrint("IMPORT-ALIASES-PASS: CreateObject(Alias) failed, skip", __FILE__, __LINE__, IMPORT);
+			continue;
+		}
+
+		if (!LinkPropertyAs(inst, "Value", target, prop))
+		{
+			DeleteInstance(inst);
+			continue;
+		}
+
+		/* record the FINAL original, not whatever happened to be linked -
+		   aliasing an alias collapses to the original at the link level */
+		owner = target;
+		node = ResolvePort(&owner, prop);
+		if (node)
+			prop = GetNameStr(node);
+		if (owner != target && PathOfInstance(owner, of, sizeof(of)))
+			target = owner;
+
+		pub = InterfacePropForInstance(owner, prop);
+		if (pub)
+		{
+			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
+			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
+		}
+
+		SetPropStr(inst, "Target", of);
+		SetPropStr(inst, "TargetProp", prop);
+
+		PlaceInstance(inst, container, GetPropStr(d, "x"), GetPropStr(d, "y"));
+
+		ImportFreshName(container, "Alias", fresh, sizeof(fresh));
+		alias = fresh;
+		RegisterPath(alias, inst);
+		slash = strrchr(alias, '/');
+		SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
+
+		/* restore the alias's own look (create-alias stamps the target's
+		   published default; the saved alias may have been restyled) */
+		w  = GetPropStr(d, "Widget");
+		lb = GetPropStr(d, "Label");
+		if (w && w[0])
+			SetOrDeliverProp(inst, "Widget", w);
+		if (lb && lb[0])
+			SetOrDeliverProp(inst, "Label", lb);
+
+		snprintf(dbg, sizeof(dbg), "IMPORT-ALIASES-PASS: alias '%s' -> ('%s','%s') done", alias, of, prop);
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	}
+	DebugPrint("IMPORT-ALIASES-PASS done", __FILE__, __LINE__, IMPORT);
+}
+
+/* third pass: the wires. from is already OUR minted path; to is the saved
+   sink (relative inside the import -> resolved under importRoot, absolute
+   outside -> left alone), connected directly (Connect(), not a bridge
+   command) once every instance and alias exists. */
+static void ImportWiresPass(char *importRoot, NodeObj wires)
+{
+	NodeObj w;
+	char    dbg[512];
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-WIRES-PASS enter: importRoot='%s'", importRoot ? importRoot : "(null)");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	for (w = GetChild(wires); w; w = GetNextSibling(w))
+	{
+		char    to[320];
+		char   *from = GetPropStr(w, "from");
+		NodeObj fromInst, toInst;
+
+		ImportResolveTarget(importRoot, GetPropStr(w, "to_old"), to, sizeof(to));
+		fromInst = (from && from[0]) ? ResolvePath(from) : NULL;
+		toInst = to[0] ? ResolvePath(to) : NULL;
+		snprintf(dbg, sizeof(dbg), "IMPORT-WIRES-PASS: from='%s'(%p) to='%s'(%p) port='%s'/'%s'",
+				 from ? from : "(null)", (void *) fromInst, to, (void *) toInst,
+				 GetPropStr(w, "fromPort") ? GetPropStr(w, "fromPort") : "", GetPropStr(w, "toPort") ? GetPropStr(w, "toPort") : "");
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+		if (fromInst && toInst)
+			Connect(fromInst, GetPropStr(w, "fromPort"), toInst, GetPropStr(w, "toPort"));
+		else
+			DebugPrint("IMPORT-WIRES-PASS: endpoint missing, skipped", __FILE__, __LINE__, IMPORT);
+	}
+	DebugPrint("IMPORT-WIRES-PASS done", __FILE__, __LINE__, IMPORT);
+}
+
+/*
+ * The "destroy" half of LoadView's restore-in-place, staggered through
+ * the scheduler exactly the way the cat flow's Reader parses a file -
+ * one unit of work per re-armed task, emitted as its own top-level
+ * ExecTasks call, never a native C loop calling DeleteInstance (and
+ * everything DeleteInstance itself fans out - ScrubRegistrySubscriptions,
+ * CancelPendingSends, the removal SndMsg a bridge sends per victim)
+ * hundreds of times back to back inside one call stack. That tight-loop
+ * shape is exactly what "queued through the scheduler... never nests
+ * inside the sender's call stack" (SndMsg's own doc comment) exists to
+ * prevent, and a full-session load is the first thing in this codebase
+ * large enough (hundreds of instances) to actually hit the case: a
+ * synchronous burst that size corrupted scheduler task-pool state and
+ * crashed AddTaskDelay a few hundred calls later (confirmed from a core
+ * dump: task->owner read back as a stomped 0x559a00000001, a classic
+ * heap-corruption signature, not a null or a logic bug tied to any one
+ * instance). VNOS's own file object is the reference for this shape:
+ * parse a chunk, emit a message, let the scheduler bring you back for
+ * the next chunk - never the whole file in one call.
+ *
+ * The snapshot walk itself (registry-wide, but read-only - no
+ * DeleteInstance, no SndMsg) stays a single synchronous pass; only the
+ * deletions are staggered, one per task.
+ */
+typedef struct
+{
+	NodeObj  victims;			/* scratch: children are path -> long(NodeObj) */
+	NodeObj  cursor;			/* next victim to process */
+	NodeObj  container;
+	TaskObj  task;
+	void   (*onDone)(NodeObj container, void *ctx);
+	void    *ctx;
+} DestroyCtx;
+
+static int DestroyContentsStep(NodeObj arg, NodeObj unused, int reason)
+{
+	DestroyCtx *dc = (DestroyCtx *) arg;
+	NodeObj     entry, victim;
+	char        dbg[400];
+
+	(void) unused;
+
+	if (reason != task_callback)
+	{
+		DebugPrint("DESTROY-CONTENTS-STEP: deactivated mid-batch, cleaning up without finishing", __FILE__, __LINE__, IMPORT);
+		DelNode(dc->victims);
+		free(dc);
+		return rtrn_handled;
+	}
+
+	entry = dc->cursor;
+	if (!entry)
+	{
+		NodeObj container = dc->container;
+		void  (*onDone)(NodeObj, void *) = dc->onDone;
+		void   *ctx = dc->ctx;
+
+		DebugPrint("DESTROY-CONTENTS-STEP: batch done, calling onDone", __FILE__, __LINE__, IMPORT);
+		DelNode(dc->victims);
+		RemoveTask(dc->task);
+		free(dc);
+		if (onDone)
+			onDone(container, ctx);
+		return rtrn_handled;
+	}
+
+	dc->cursor = GetNextSibling(entry);
+	victim = (NodeObj) GetValueLong(entry);
+	if (victim)
+	{
+		snprintf(dbg, sizeof(dbg), "DESTROY-CONTENTS-STEP: deleting '%s' (%p)", GetNameStr(entry), (void *) victim);
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+		UnregisterPath(GetNameStr(entry));
+		DeleteInstance(victim);
+	}
+
+	/* re-arm the SAME task for the next victim - a fresh top-level      */
+	/* ExecTasks entry, never nested inside this call                     */
+	AddTaskNow(dc->task, (FuncPtr) DestroyContentsStep, 0, (NodeObj) dc);
+	return rtrn_handled;
+}
+
+static void DestroyContentsAsync(NodeObj container, void (*onDone)(NodeObj container, void *ctx), void *ctx)
+{
+	char       ownPath[300], prefix[320], pbuf[300], dbg[512];
+	int        preLen, n = 0;
+	NodeObj    lib, cls, mem, snap;
+	DestroyCtx *dc;
+
+	DebugPrint("DESTROY-CONTENTS-ASYNC enter", __FILE__, __LINE__, IMPORT);
+
+	if (!container || !PathOfInstance(container, ownPath, sizeof(ownPath)))
+	{
+		DebugPrint("DESTROY-CONTENTS-ASYNC: container missing/unpathable, bail", __FILE__, __LINE__, IMPORT);
+		if (onDone)
+			onDone(container, ctx);
+		return;
+	}
+	snprintf(prefix, sizeof(prefix), "%s/", ownPath);
+	preLen = (int) strlen(prefix);
+	snprintf(dbg, sizeof(dbg), "DESTROY-CONTENTS-ASYNC: scanning under '%s'", prefix);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	snap = NewNode(INTEGER);
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	  for (mem = GetChild(cls); mem; mem = GetNextSibling(mem))
+	  {
+		if (!PathOfInstance(mem, pbuf, sizeof(pbuf)))
+			continue;
+		if (strncmp(pbuf, prefix, preLen) != 0)
+			continue;
+		if (IsSessionFurniture(mem))
+			continue;	/* Palette/Chrome - rebuilt at boot, not session content */
+		SetPropLong(snap, pbuf, (long) mem);
+		n++;
+	  }
+	snprintf(dbg, sizeof(dbg), "DESTROY-CONTENTS-ASYNC: snapshot done, %d victims - staggering deletes", n);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	dc = malloc(sizeof(DestroyCtx));
+	dc->victims = snap;
+	dc->cursor = GetNextProp(snap);
+	dc->container = container;
+	dc->onDone = onDone;
+	dc->ctx = ctx;
+	dc->task = GetTask(ObjGetTaskList());
+	AddTaskNow(dc->task, (FuncPtr) DestroyContentsStep, 0, (NodeObj) dc);
+}
+
+/*
+ * {"cmd":"import-flow"} - drop a saved view onto the canvas as a fresh
+ * copy (a clone with a side trip to disk). container/dropX/dropY are
+ * where it lands; its own top-level name mints fresh if taken, its
+ * internals keep their recorded names verbatim.
+ */
+NodeObj ImportView(NodeObj container, char *path, char *dropX, char *dropY)
+{
+	char    containerPath[300], dbg[512];
+	FILE   *f;
+	long    size;
+	char   *text, *cursor, *ap;
+	NodeObj deferred, wires;
+	NodeObj result = NULL;
+
+	DebugPrint("IMPORT-VIEW enter", __FILE__, __LINE__, IMPORT);
+
+	if (!container || !path || !path[0]
+		|| !PathOfInstance(container, containerPath, sizeof(containerPath)))
+	{
+		DebugPrint("IMPORT-VIEW: bad args or unpathable container, bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+
+	f = fopen(path, "r");
+	if (!f)
+	{
+		DebugPrint("IMPORT-VIEW: fopen failed, bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+	fseek(f, 0, SEEK_END);
+	size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	text = malloc(size + 1);
+	if (!text)
+	{
+		fclose(f);
+		DebugPrint("IMPORT-VIEW: malloc failed, bail", __FILE__, __LINE__, IMPORT);
+		return NULL;
+	}
+	fread(text, 1, size, f);
+	text[size] = '\0';
+	fclose(f);
+
+	snprintf(dbg, sizeof(dbg), "IMPORT-VIEW: container='%s' path='%s' size=%ld - parsing", containerPath, path, size);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	cursor = text;
+	deferred = NewNode(INTEGER);
+	wires = NewNode(INTEGER);
+
+	ap = ImportNode(&cursor, containerPath, deferred, wires, 1, 0);
+	snprintf(dbg, sizeof(dbg), "IMPORT-VIEW: ImportNode returned ap=%s", ap ? (ap[0] ? ap : "\"\"") : "(null)");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	if (ap && ap[0])
+	{
+		/* the dropped-in view is born where it was dropped, not at its
+		   saved canvas spot - reposition the top node after creation
+		   (only the top; a child's X/Y from the file stay relative to
+		   its own view, untouched) */
+		if (dropX && dropX[0])
+		{
+			DebugPrint("IMPORT-VIEW: repositioning top to drop point", __FILE__, __LINE__, IMPORT);
+			PlaceInstance(ResolvePath(ap), containerPath, dropX, (dropY && dropY[0]) ? dropY : "0");
+		}
+		DebugPrint("IMPORT-VIEW: running aliases pass", __FILE__, __LINE__, IMPORT);
+		ImportAliasesPass(ap, deferred);
+		DebugPrint("IMPORT-VIEW: running wires pass", __FILE__, __LINE__, IMPORT);
+		ImportWiresPass(ap, wires);
+		result = ResolvePath(ap);
+	}
+	if (ap)
+		free(ap);
+
+	DelNode(wires);
+	DelNode(deferred);
+	free(text);
+	snprintf(dbg, sizeof(dbg), "IMPORT-VIEW done: result=%p", (void *) result);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	return result;
+}
+
+typedef struct
+{
+	NodeObj container;
+	char    containerPath[300];
+	char   *text;
+	void  (*onDone)(NodeObj container, int ok, void *ctx);
+	void   *ctx;
+} LoadViewCtx;
+
+static void LoadView_AfterDestroy(NodeObj container, void *rawCtx)
+{
+	LoadViewCtx *lv = (LoadViewCtx *) rawCtx;
+	char        *cursor, *ap, dbg[512];
+	NodeObj      deferred, wires;
+
+	DebugPrint("LOAD-VIEW: destroy done, parsing file into container", __FILE__, __LINE__, IMPORT);
+
+	cursor = lv->text;
+	deferred = NewNode(INTEGER);
+	wires = NewNode(INTEGER);
+
+	ap = ImportNode(&cursor, lv->containerPath, deferred, wires, 1, 1);	/* skipSelf=1 */
+	snprintf(dbg, sizeof(dbg), "LOAD-VIEW: ImportNode(skipSelf) returned ap=%s", ap ? (ap[0] ? ap : "\"\"") : "(null)");
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	if (ap)
+		free(ap);
+	DebugPrint("LOAD-VIEW: running aliases pass", __FILE__, __LINE__, IMPORT);
+	ImportAliasesPass(lv->containerPath, deferred);
+	DebugPrint("LOAD-VIEW: running wires pass", __FILE__, __LINE__, IMPORT);
+	ImportWiresPass(lv->containerPath, wires);
+
+	DelNode(wires);
+	DelNode(deferred);
+	free(lv->text);
+	DebugPrint("LOAD-VIEW done OK", __FILE__, __LINE__, IMPORT);
+
+	{
+		void (*onDone)(NodeObj, int, void *) = lv->onDone;
+		void  *ctx = lv->ctx;
+
+		free(lv);
+		if (onDone)
+			onDone(container, 1, ctx);
+	}
+}
+
+/*
+ * {"cmd":"load-flow"} - restore `container` IN PLACE from a whole-session
+ * export (ExportView(root, path)): container's current contents are
+ * destroyed, then the file's own top-level node (container itself, as
+ * ExportView wrote it) is NOT re-created - its children go straight into
+ * container, verbatim, since container was just cleared and nothing can
+ * collide. This is the "you destroy root and load root in its place"
+ * verb - container is not "imported into", it IS what gets restored.
+ *
+ * Asynchronous (see DestroyContentsAsync's doc comment for why): the
+ * destroy runs staggered through the scheduler first, and onDone(container,
+ * ok, ctx) fires once the whole restore - destroy AND rebuild - is
+ * actually complete. Rebuild itself stays one synchronous recursive-
+ * descent pass (LoadView_AfterDestroy) - it's the destroy loop's
+ * hundreds of individual DeleteInstance/SndMsg calls that overran the
+ * scheduler in one native call, not a single parse of one file.
+ */
+void LoadViewAsync(NodeObj container, char *path,
+					void (*onDone)(NodeObj container, int ok, void *ctx), void *ctx)
+{
+	char    containerPath[300], dbg[512];
+	FILE   *f;
+	long    size;
+	char   *text;
+	LoadViewCtx *lv;
+
+	DebugPrint("LOAD-VIEW-ASYNC enter", __FILE__, __LINE__, IMPORT);
+
+	if (!container || !path || !path[0]
+		|| !PathOfInstance(container, containerPath, sizeof(containerPath)))
+	{
+		DebugPrint("LOAD-VIEW-ASYNC: bad args or unpathable container, bail", __FILE__, __LINE__, IMPORT);
+		if (onDone)
+			onDone(container, 0, ctx);
+		return;
+	}
+
+	f = fopen(path, "r");
+	if (!f)
+	{
+		DebugPrint("LOAD-VIEW-ASYNC: fopen failed, bail", __FILE__, __LINE__, IMPORT);
+		if (onDone)
+			onDone(container, 0, ctx);
+		return;
+	}
+	fseek(f, 0, SEEK_END);
+	size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	text = malloc(size + 1);
+	if (!text)
+	{
+		fclose(f);
+		DebugPrint("LOAD-VIEW-ASYNC: malloc failed, bail", __FILE__, __LINE__, IMPORT);
+		if (onDone)
+			onDone(container, 0, ctx);
+		return;
+	}
+	fread(text, 1, size, f);
+	text[size] = '\0';
+	fclose(f);
+
+	snprintf(dbg, sizeof(dbg), "LOAD-VIEW-ASYNC: container='%s' path='%s' size=%ld - staggering destroy", containerPath, path, size);
+	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+
+	lv = malloc(sizeof(LoadViewCtx));
+	lv->container = container;
+	strncpy(lv->containerPath, containerPath, sizeof(lv->containerPath) - 1);
+	lv->containerPath[sizeof(lv->containerPath) - 1] = 0;
+	lv->text = text;
+	lv->onDone = onDone;
+	lv->ctx = ctx;
+
+	DestroyContentsAsync(container, LoadView_AfterDestroy, (void *) lv);
 }
 
 /*

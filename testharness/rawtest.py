@@ -97,12 +97,19 @@ def close_group(raw, view):
 
 def container_children(raw, container):
     """The current children of `container`, freshly listed (this both views
-    it and answers "what's there right now")."""
+    it and answers "what's there right now").
+
+    list-instances({"container": ""}) (root) announces its children with
+    container "/Root", not "" - a fresh create-instance echoes the
+    command's own literal "" instead, so listing EXISTING children and
+    announcing a JUST-CREATED one take different paths to the same field.
+    Confirmed directly. Accept both spellings for root."""
+    wanted = ("", "/Root") if container == "" else (container,)
     raw.send({"cmd": "list-instances", "container": container})
     out = []
     while True:
         e = raw.wait_event(lambda e: (e.get("event") == "instance-created"
-                                      and e.get("container") == container
+                                      and e.get("container") in wanted
                                       and e.get("instance") not in [m[0] for m in out])
                            or e.get("event") == "instances-done", timeout=4)
         if not e or e.get("event") == "instances-done":
@@ -486,12 +493,44 @@ def test_save_load(raw, r, home):
     raw.send({"cmd": "delete-instance", "instance": home + "/SaveMe"})
     raw.wait_event(lambda e: e.get("event") == "instance-removed"
                    and e.get("instance") == home + "/SaveMe")
+
+    # save-flow records the WHOLE session - its own top-level suite home
+    # (the ancestor two levels up from SaveMe) is still live at replay
+    # time, so it mints itself a fresh name too, same as any other taken
+    # "as", and SaveMe's own recorded path follows that rename (correctly,
+    # since bridge.c's Bridge_RemapField now rewrites a descendant's
+    # prefix, not just an exact-match reference). The loaded copy of
+    # SaveMe therefore lands under a fresh SIBLING of the suite home, not
+    # back at `home` itself - search for it the same way
+    # test_load_then_clone_binding already does.
+    known_tops = [m for m, c in container_children(raw, "") if c == "View"]
     raw.send({"cmd": "load-flow", "file": "rawtwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=6)
-    v = raw.value_of(home + "/SaveMe", "Value")
+
+    v, found = None, None
+    deadline = time.time() + 8.0
+    while time.time() < deadline and v != "88":
+        fresh_tops = [m for m, c in container_children(raw, "") if c == "View" and m not in known_tops]
+        for t in fresh_tops:
+            for g, gc in container_children(raw, t):
+                if gc != "View":
+                    continue
+                for m, mc in container_children(raw, g):
+                    if mc == "Slider" and m.endswith("/SaveMe"):
+                        found = m
+                        v = raw.value_of(m, "Value")
+                        if v == "88":
+                            break
+                if v == "88":
+                    break
+            if v == "88":
+                break
+        if v != "88":
+            time.sleep(0.4)
+
     r.expect("load: the member-made edit replays as the original's fact",
-             "%s/SaveMe is back with Value=88 (recorded resolved, not by its doorway)" % home,
-             "Value=%s" % v, v == "88")
+             "some loaded copy's SaveMe is back with Value=88 (recorded resolved, not by its doorway)",
+             "found=%s Value=%s" % (found, v), v == "88")
 
 
 def test_load_then_clone_binding(raw, r, home):
@@ -686,6 +725,31 @@ def test_delete(raw, r, home):
              bool(err) and still == "RawKeeper")
 
 
+# Regression guard (2026-07-30): IsPaletteExcluded (object.c) sat as an
+# unimplemented `(void) className; return 0;` stub - despite ALREADY having
+# a comment above it describing Bridge/TCP as classes that were supposed to
+# be excluded - for long enough that it got "fixed" and silently reverted
+# back to the no-op stub something like six times before this test existed.
+# Each regression showed up as "every widget has a tiny panel with no
+# controls": a bare palette-bootstrap instance of a class that's only ever
+# meant to be built programmatically (MCPAgent by MCPSource_BuildAgentView;
+# Bridge/TCP are this very session's own transport) has none of the real
+# construction that gives it controls. If this test starts failing, the fix
+# is almost always that IsPaletteExcluded's body got emptied out again -
+# see the huge warning comment sitting directly above its definition.
+def test_palette_excludes_internals(raw, r):
+    """The palette (session-global, always at /Root/Palette - not something
+    a test builds or tears down) must never offer a bootstrap icon for a
+    class that only makes sense built programmatically by something else."""
+    children = container_children(raw, "/Root/Palette")
+    found_bad = [cls for name, cls in children
+                 if cls in ("Bridge", "TCP", "MCPAgent")]
+    r.expect("palette excludes internal-only classes",
+             "no Bridge/TCP/MCPAgent bootstrap icon under /Root/Palette",
+             "found: %s (of %d palette entries)" % (found_bad or "none", len(children)),
+             not found_bad)
+
+
 # --------------------------------------------------------------------------
 
 def main():
@@ -716,6 +780,8 @@ def main():
         except Exception as e:
             r.expect(fn.__name__, "no exception", "%s: %s" % (type(e).__name__, e), False)
             return None
+
+    guarded(test_palette_excludes_internals, raw, r)
 
     home = suite_view(raw, "RawTests")   # the suite's own top-level view
 
