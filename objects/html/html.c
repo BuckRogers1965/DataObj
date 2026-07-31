@@ -137,10 +137,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Value",  "data", PROP_HTML, "");
-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "Value", PROP_HTML, "");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

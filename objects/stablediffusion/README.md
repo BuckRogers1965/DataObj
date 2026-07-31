@@ -28,8 +28,8 @@ The main panel holds everyday controls (Prompt, Negative, Generate, Progress, St
 - **CfgScale** — Classifier Free Guidance scale intensity (default `7`).
 - **Timeout** — seconds before giving up on a render task (default `36000`).
 
-### Ports
-- **In** — a wire input port. Receiving a string prompt here sets **Prompt** and immediately starts a render, allowing automated workflows (e.g. LLM/Ollama output nodes) to drive image generation.
+### Properties
+- **In** — a property things write into. Receiving a string prompt here sets **Prompt** and immediately starts a render, allowing automated workflows (e.g. LLM/Ollama output nodes) to drive image generation.
 
 ## Notes
 - Requires the Stable Diffusion WebUI server to be started with the `--api` flag enabled (e.g. `./webui.sh --api`).

@@ -21,5 +21,5 @@ disabled buffer still accepts pushes but ignores its Clock.
 
 - **Enable** - gates the Clock; any source can drive it.
 - **State** - the lifecycle LED.
-- **In** / **Clock** / **Out** - the three ports; the panel shows the last
+- **In** / **Clock** / **Out** - the three properties; the panel shows the last
   message on each.

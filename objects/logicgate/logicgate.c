@@ -244,9 +244,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, LogicGatePanel);
 
 	/* the wire input, the dropdown's backing list, and the lifecycle state */
-	PublishProp(ClassSelf, "In",           "data", PROP_NULL, "0");
-	PublishProp(ClassSelf, "GateModeList", "data", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
-	PublishProp(ClassSelf, "State",        "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "In", PROP_NULL, "0");
+	PublishProp(ClassSelf, "GateModeList", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

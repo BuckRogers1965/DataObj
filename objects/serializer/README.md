@@ -2,7 +2,7 @@
 
 A **task-driven node-tree walker**. Point `Root` at a node by path and, when
 activated, it walks that subtree and emits the **portable state** as JSON chunks
-out its `Out` port. Each node is written as
+out its `Out` property. Each node is written as
 `{"name":..,"type":..,"value":..,"props":[..],"children":[..]}`; the runtime
 pointer properties (`local`, `Activate`, `OnMsg`, task handles - all LONG-typed,
 per-process addresses) are **skipped**, since a load re-creates each instance
@@ -22,4 +22,4 @@ anything; it walks only when a flow activates it.
 - **Root** - the path of the node to walk (default `/Root`).
 - **Enable** - gates the walk.
 - **State** - the lifecycle LED.
-- **Out** - the emit port; the panel shows the last chunk sent.
+- **Out** - the emit property; the panel shows the last chunk sent.

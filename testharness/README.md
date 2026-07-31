@@ -64,7 +64,7 @@ Browser (presentation):
 - **lazy** — a fresh page load knows nothing about a closed view's contents;
   opening it streams them in.
 - **lua** — a Script object's Lua callback counts pulses and speaks out its
-  Out port.
+  Out property.
 
 ## Reading the output
 

@@ -60,7 +60,7 @@ Do the rest by editing `counter.c`:
 
 ## 3. Wiring: everything is a property
 
-There are **no in/out ports**. A control drives, or reflects, one of the
+Everything is a property. A control drives, or reflects, one of the
 widget's ordinary properties:
 
 | control kind | wiring in `Skeleton_Ctl` |
@@ -87,21 +87,18 @@ Every one of these cost real debugging time. The skeleton already does them
 right — don't undo them.
 
 1. **Never name a data property with a reserved VIEW name.** A widget renders
-   as a View, and the View owns these: **`ReservedViewMode`**,
-   **`ReservedViewOpen`**, `ReservedViewPanelX`, `ReservedViewPanelY`,
-   `ReservedViewResizeable`. They were once `Mode`/`Open`/… and a widget with
-   its own `Mode` property (a logic gate) pinned the whole panel's interaction
-   mode to `"OR Gate"` — every control went dead, no JS error. They are now
-   namespaced so you're safe, but do not use the `ReservedView*` names, and
-   know that the view's open state is `ReservedViewOpen` (that's what you hook
-   for Help-on-open). Freely usable: `X`, `Y`, `W`, `H`, `Container`, `Name`,
-   `State`.
+   as a View, and the View owns these: **`ReservedViewOpen`**,
+   `ReservedViewPanelX`, `ReservedViewPanelY`, `ReservedViewResizeable`. They
+   were once `Open`/… and a widget with a property of the same name collided
+   with the view's own, which is why they are namespaced. Do not use the
+   `ReservedView*` names, and know that the view's open state is
+   `ReservedViewOpen` (that's what you hook for Help-on-open). Freely usable:
+   `X`, `Y`, `W`, `H`, `Container`, `Name`, `State`.
 
-2. **There are no in/out ports.** Everything is a property. `In`/`Out` are
-   ordinary properties named `In`/`Out`. Publishing an `"in"`/`"out"`
-   *direction* makes the bridge treat the value as a message and never push it
-   to the client, so the on-screen control disagrees with the object — publish
-   `"data"`.
+2. **There are no ports and no directions.** Everything is a property, and
+   `In`/`Out` are just properties that happen to be named that. A property
+   changes and whatever subscribed to it is told — that is the whole rule, the
+   same for every property whatever it is called.
 
 3. **Set the view's W/H in `InstanceStart`, before any client subscribes.** A
    size set later (in the deferred build) *shadows* the W/H node the client's
@@ -130,10 +127,9 @@ right — don't undo them.
    declared `W`/`H`. Content scrolls inside a fixed size — nothing resizes to
    its content.
 
-9. **Never `SetProp*` a port's own name after it's created** — it prepends a
-   shadowing node and `Connect`/delivery find the shadow. Update a port's
-   mirrored value with `SetValueStr(GetPropNode(inst,name), …)`, as
-   `_OnEnable` does.
+9. **Updating a property's own mirrored value from inside its handler** —
+   use `SetValueStr(GetPropNode(inst,name), …)`, as `_OnEnable` does, so the
+   write does not fan back out to whoever just wrote it.
 
 10. **Stop your tasks in `InstanceEnd`.** A still-scheduled task fires later
     with a freed instance pointer. `RemoveTask`/`DeleteTask` before `free`.
@@ -149,7 +145,7 @@ right — don't undo them.
     as an ordinary property change, `msg_change`. `msg_send` only happens
     when something already carrying an `OnMsg` handler is written to
     directly (a raw `set-property` from outside, or another object's
-    `Connect`'d port). A handler that filters `message != msg_send` silently
+    `Connect`'d property). A handler that filters `message != msg_send` silently
     swallows every click the real on-screen checkbox sends — it looked
     enabled, took the click, and never turned anything off. Filter only
     `message == msg_eof`, like every handler here now does.

@@ -691,6 +691,12 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropInt(instance, "Out", 0);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)TCPPort_Activate);
+
+	/* which control stands in for this panel at each end of a wire: what
+	   you send is TxData, what arrives is RxData. Declared here and read
+	   by nothing yet - no engine behaviour hangs off them. */
+	SetPropStr(instance, "ReservedIn",  "TxData");
+	SetPropStr(instance, "ReservedOut", "RxData");
 	Widget_Port(instance, "In",      "", (void *)TCPPort_OnIn);
 	Widget_Port(instance, "InnerRx", "", (void *)TCPPort_OnInnerRx);
 	Widget_Port(instance, "InnerUp", "", (void *)TCPPort_OnInnerUp);
@@ -833,9 +839,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	/* the three with no on-screen control: the two dataflow ports and the
 	   dropdown's backing list */
-	PublishProp(ClassSelf, "In",               "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",              "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "StandardPortList", "data", PROP_NULL, "");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "Out", PROP_NULL, "");
+	PublishProp(ClassSelf, "StandardPortList", PROP_NULL, "");
 
 	return rtrn_handled;
 }

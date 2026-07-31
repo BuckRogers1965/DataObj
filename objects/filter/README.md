@@ -10,7 +10,7 @@ stream can always finish downstream.
 - **ones** - pass only `1`.
 - **zeros** - pass only `0`.
 
-Wire a source into `In` and `Out` into a sink. It schedules no task and never
+Wire a source into `In` and `Out` into a consumer. It schedules no task and never
 holds the program open.
 
 ## Controls
@@ -18,4 +18,4 @@ holds the program open.
 - **Mode** - the pass rule (above).
 - **Enable** - gates the filter; any source can drive it.
 - **State** - the lifecycle LED.
-- **In** / **Out** - the flow ports; the panel shows the last message on each.
+- **In** / **Out** - the flow properties; the panel shows the last message on each.

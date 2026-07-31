@@ -403,11 +403,14 @@ typedef enum {
 /* object) needs to know about a class without creating an instance -    */
 /* its properties and ports, direction, widget, and default value. Each  */
 /* class declares this itself in ClassStart, right after RegisterClass.  */
-/* direction is "data" for a plain property, "in"/"out" for a port.      */
-NodeObj PublishProp(NodeObj class, char * name, char * direction, int widget, char * defaultValue);
+/* There is no direction and no port. Every published property is the    */
+/* same kind of thing: a node. If it changes and something subscribed to */
+/* it, that change is sent out - the same rule whether the property is   */
+/* named In, Out, Enable or Value. Those are names, not kinds.           */
+NodeObj PublishProp(NodeObj class, char * name, int widget, char * defaultValue);
 
 /* One instance property's published metadata - the Interface "Property" */
-/* entry (Name/Direction/Widget/Default) on the instance's class, NULL   */
+/* entry (Name/Widget/Default) on the instance's class, NULL             */
 /* if unpublished. What a translator stamping presentation defaults onto */
 /* an alias (create-alias, internals) reads: the engine decides what a   */
 /* property's control looks like, clients render it, never deduce it.    */

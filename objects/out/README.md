@@ -1,6 +1,6 @@
 # Out
 
-A **debug probe**. Subscribe its `In` port to any source port and it prints
+A **debug probe**. Subscribe its `In` property to any property and it prints
 every message that flows past to standard out, tagged with its `Label`, the
 message id, and the payload size. On EOF it prints the message and byte totals.
 

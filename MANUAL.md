@@ -57,7 +57,7 @@ everything else).
 | Clone   | click, then click | pick up a copy, place an independent snapshot |
 | Alias   | click, then click | pick up a doorway, place a live link |
 | Move    | press-drag-release | reposition; crossing into a view moves it there |
-| Connect | click port, click port | wire two ports together |
+| Connect | click a property, click another | wire two properties together |
 | Delete  | click | remove a thing (red outline warns you first) |
 | Options | click | open the thing's internals — the dissection table |
 
@@ -117,9 +117,10 @@ on the titlebar or off the panel just repositions at the root.
 
 ## Connect — wiring
 
-In Connect mode, port dots appear. Click one port, then another (either
-order) and they are wired: messages flow from source to sink through the
-engine. Any property is a valid endpoint — a compiled port (`In`,
+In Connect mode, wiring dots appear. Click one, then another (either
+order) and they are wired: a change to the first is delivered to the
+second through the engine. Any property is a valid endpoint — one with a
+compiled handler (`In`,
 `Enable`), a plain data property (`Value`, `Filename`), or `Activate`
 (a Button wired there presses the target). Wiring **to or from an
 alias wires the original** — that's what doorways are for. Existing
@@ -142,7 +143,7 @@ In Options mode, click **anything** and its **internals view** opens:
 the whole of the object's state laid out like a frog on a dissection
 table — one live control per published property. Not a curated subset:
 Value, State, Name, X, Y, W, H, Container, Deletable, Open, PanelX,
-PanelY, ports — all of it.
+PanelY, every property — all of it.
 
 Each row is a real **Alias** bound to that property, and the table is a
 real **View** — which means everything above applies *to the table
@@ -230,7 +231,7 @@ reposition, rename; the engine refuses to move a view into itself or a
 descendant. Aliases are stamped at birth with the target property's
 published `Widget` type (and `Direction`) — a client renders what the
 alias says, it never has to look the type up. `connect` reaches **any**
-property (compiled port, plain data property, or `Activate`) — one verb
+property (one with a compiled handler, a plain data property, or `Activate`) — one verb
 for every wire — and `disconnect` is its exact inverse; both are
 announced to every connection viewing the endpoints (`connected` /
 `disconnected` events), which is the only thing a client draws from.
@@ -247,7 +248,7 @@ The **Script** class in the palette is a Lua interpreter as an ordinary
 dataflow object. Its `Source` property holds the script (edit it on the
 dissection table); **Activate runs it** — and re-activating re-runs the
 current Source, which is the whole development loop. A script has real
-`In`/`Out` ports, so it sits in a flow like any compiled object.
+`In`/`Out` properties, so it sits in a flow like any compiled object.
 
 Subscribing to updates is just wiring: connect anything's `Out` to the
 script's `In`, and the function you register with `oninput` is called on
@@ -263,7 +264,7 @@ every message — directly, inside the engine. A pulse counter:
     end)
 
 Wire `Pulse.Out -> Script.In`, activate both, and the count flows out
-the script's `Out` port for anything downstream — a Label, a wire, a
+the script's `Out` property for anything downstream — a Label, a wire, a
 subscriber. The script's API: `oninput(fn)`, `send(value)`,
 `getprop(name)`, `setprop(name, value)`, `log(text)`. Callbacks run
 inside message delivery like any compiled handler — keep them short and

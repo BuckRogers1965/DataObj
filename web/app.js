@@ -54,7 +54,7 @@ const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PR
 const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
 
 let ws = null;
-let classes = {};          // className -> [{Name,Direction,Widget,Default}, ...]
+let classes = {};          // className -> [{Name,Widget,Default}, ...]
 let instances = {};        // alias -> {className, el, ports: {name: dotEl}}
 let selfDisplays = {};     // "alias.propName" -> {el,widgetClass}, for a widget class's own State shown on itself
 let liveControls = {};     // "alias.propName" -> {el,widgetClass}, an editable control synced from its own property-changed events
@@ -87,6 +87,7 @@ let currentMode = 'Operate';
    client-local one-shot (like the file dialog, it collects intent, then sends
    ONE verb, export-flow). Cleared by the click that consumes it or by Escape. */
 let pendingExport = false;
+let pendingWholeLoad = false;  // a whole-session load is in flight - rebuild the page when it lands
 
 function $(id) { return document.getElementById(id); }
 
@@ -178,13 +179,32 @@ function flushPendingContainer(viewAlias) {
 /* PanelY are shared properties (where the panel sits, for everyone),      */
 /* Open's stored value is only the INITIAL presentation, and whether this   */
 /* window currently shows the panel is its own business after that.         */
+/* Two rules, one counter: anything NEW goes on top, anything CLICKED goes
+   on top. Starts above the CSS baselines (panels 5, menus 20) and below the
+   modal/ghost layers (300+), and only ever counts up. */
+let topZ = 100;
+
+function toTop(el) {
+  if (el) el.style.zIndex = String(++topZ);
+}
+
+document.addEventListener('pointerdown', (ev) => {
+  for (let el = ev.target; el && el.classList; el = el.parentElement) {
+    if (el.classList.contains('view-panel') || el.classList.contains('instance-wrap')
+        || el.classList.contains('widget-atom') || el.classList.contains('menu-dropdown')
+        || el.classList.contains('menu-button-wrap'))
+      toTop(el);
+  }
+}, true);
+
 function registerPanel(alias, panelEl, display, onToggle) {
   panelEl.style.position = 'absolute';
   panelEl.style.left = '240px';
   panelEl.style.top = '60px';
   panelEl.style.display = 'none';
-  panelEl.style.zIndex = '40';
   $('canvas').appendChild(panelEl);
+  toTop(panelEl);
+
 
   const rec = {
     el: panelEl,
@@ -236,23 +256,8 @@ function modeMenuAlias() {
   return null;
 }
 
+/* The mode is the session's mode, full stop. There is one. */
 function effectiveMode(el) {
-
-  /* A VIEW CAN PIN ITS MODE. Mode is an ordinary published property on
-     an ordinary View (view.c), so any view may declare that things in it
-     are always operated - or always cloned, which is what the palette
-     used it for. Nothing is special-cased here: this walks up to the
-     nearest containing view and asks it.
-
-     It is also what keeps the session escapable: the menu that CHANGES
-     the mode sits in a view pinned to Operate, so Delete mode cannot
-     eat the control you need to leave Delete mode. */
-  for (let e = el; e; e = e.parentElement) {
-    if (!e.classList || !e.classList.contains('view-inner')) continue;
-    const owner = e.dataset && e.dataset.viewAlias;
-    const pinned = owner && propertyValues[owner + '.ReservedViewMode'];
-    if (pinned) return pinned;
-  }
   return currentMode;
 }
 
@@ -275,7 +280,15 @@ function log(text, cls) {
 }
 
 function send(cmd) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd));
+  /* every command this client issues, traced. Without this a gesture that
+     silently fails to send is indistinguishable from one the engine
+     ignored, which cost a whole debugging session. */
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn('[send DROPPED - socket not open]', cmd);
+    return;
+  }
+  console.debug('[send]', cmd);
+  ws.send(JSON.stringify(cmd));
 }
 
 /* the "interface" field is a full node-tree (NodeToText's own shape),
@@ -357,12 +370,24 @@ function handleEvent(msg) {
       closeFlowDialog();
       break;
     case 'flow-loaded':
-      /* Load/import no longer announce what changed (that mechanism is
-         what caused the 2026-07-30 crash - see git history). The server
-         knows the view is stale; the simplest correct fix is to just
-         refresh it. */
+      /* Re-list, never reload. A reload destroys the whole session - every
+         panel, every position in the stack - and rebuilds it in whatever
+         order the bridge announces, so an imported view came back buried.
+         Re-listing adds only what is new: registerView bails on aliases it
+         already has, so existing panels are untouched and the new ones
+         arrive as ordinary instance-created events and land on top. */
       log('loaded ' + msg.file, 'event');
-      window.location.reload();
+      closeFlowDialog();
+      if (pendingWholeLoad) {
+        /* the session it was showing no longer exists - start clean */
+        pendingWholeLoad = false;
+        window.location.reload();
+        break;
+      }
+      /* an import only ADDS: re-list so the new content appears, and leave
+         everything already on screen exactly where it is */
+      send({ cmd: 'list-instances' });
+      if (currentMode === 'Connect') send({ cmd: 'list-connections' });
       break;
     case 'error':
       log('error (' + msg.cmd + '): ' + msg.message, 'error');
@@ -375,7 +400,6 @@ function handleEvent(msg) {
 function parseInterface(interfaceNode) {
   return (interfaceNode && interfaceNode.children || []).map((p) => ({
     Name: nodeProp(p, 'Name'),
-    Direction: nodeProp(p, 'Direction'),
     Widget: parseInt(nodeProp(p, 'Widget'), 10),
     Default: nodeProp(p, 'Default'),
     /* an object can declare its own box size on the published entry       */
@@ -596,6 +620,7 @@ function makeMenuButtonEl(alias) {
 
     ev.stopPropagation();
     dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    /* an open menu belongs on top of whatever it hangs over */
   };
 
   wrap.appendChild(btn);
@@ -680,6 +705,11 @@ function openFlowDialog(kind, opts) {
       return;
     }
     const verb = kind === 'Save' ? 'save-flow' : 'load-flow';
+    /* a whole-session LOAD replaces everything that is on screen, so the
+       page is rebuilt from scratch when it lands. An IMPORT never gets
+       here (it is a drop gesture above) and must NOT reload - it only
+       adds, and reloading would throw away the session around it. */
+    if (verb === 'load-flow') pendingWholeLoad = true;
     send({ cmd: verb, file: name });
     /* stays open until flow-saved/flow-loaded confirms (handleEvent) -   */
     /* the engine is the one that knows whether it happened               */
@@ -840,10 +870,10 @@ function makeMoButtonEl(alias) {
   btn.className = 'mo-button';
   btn.textContent = 'Press';
 
-  const press = (v) => send({ cmd: 'set-property', instance: alias, prop: 'Press', value: v });
+  const press = (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v });
   let held = false;
   btn.addEventListener('pointerdown', (ev) => {
-    if (effectiveMode(btn) !== 'Operate') return;
+    /* a button just presses - that is what it is for */
     ev.stopPropagation();
     held = true;
     btn.classList.add('pressed');
@@ -890,6 +920,7 @@ function makeSelfActivateButton(alias) {
 function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   const el = document.createElement('div');
   el.className = 'widget-atom';
+  toTop(el);
   el.style.left = pos.x + 'px';
   el.style.top = pos.y + 'px';
 
@@ -1024,6 +1055,7 @@ function registerView(alias, props, pos, hidden, container) {
   /* presence on the canvas is the object's own icon.                        */
   const wrap = document.createElement('div');
   wrap.className = 'instance-wrap';
+  toTop(wrap);
   wrap.style.left = pos.x + 'px';
   wrap.style.top = pos.y + 'px';
   if (hidden) wrap.style.display = 'none';
@@ -1121,7 +1153,6 @@ function registerView(alias, props, pos, hidden, container) {
   send({ cmd: 'subscribe', instance: alias, port: 'Y' });
   send({ cmd: 'subscribe', instance: alias, port: 'W' });
   send({ cmd: 'subscribe', instance: alias, port: 'H' });
-  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewMode' });	/* a view may pin its mode */
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewResizeable' });
 
@@ -1304,13 +1335,13 @@ function onPropertyChanged(alias, port, value) {
   }
 
   /* an Alias atom assembles itself from its own properties as they arrive  */
-  /* (Target/TargetProp say what it stands for, Widget/Direction are the    */
+  /* (Target/TargetProp say what it stands for, Widget is the engine's      */
   /* engine's stamped presentation, Label its own) - see registerAliasAtom.  */
   /* An internals-view member additionally becomes a row on its owner's      */
   /* card panel (maybeBuildCardRow) - same member, second projection.         */
   const aliasAtom = aliasAtoms[alias];
   if (aliasAtom) {
-    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Direction' || port === 'Label') {
+    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Label') {
       aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
       renderAliasControl(alias);
     } else if (port === 'Container') {
@@ -1735,11 +1766,10 @@ function registerAliasAtom(alias, pos, container) {
 
   /* what it stands for + its own presentation - the atom assembles itself  */
   /* as these arrive (onPropertyChanged's aliasAtoms branch). Widget and     */
-  /* Direction are the engine's stamps (create-alias/internals, bridge.c).   */
+  /* Widget is the engine's stamp (create-alias/internals, bridge.c).        */
   send({ cmd: 'subscribe', instance: alias, port: 'Target' });
   send({ cmd: 'subscribe', instance: alias, port: 'TargetProp' });
   send({ cmd: 'subscribe', instance: alias, port: 'Widget' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Direction' });
   send({ cmd: 'subscribe', instance: alias, port: 'Label' });
 
   log('created ' + alias + ' (Alias)', 'event');

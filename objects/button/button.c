@@ -64,7 +64,11 @@ int Button_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 int Button_Activate(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
-	NodeObj chunk;
+	char dbg[300];
+
+	snprintf(dbg, sizeof(dbg), "Button_Activate on '%s': local=%p enabled=%d",
+			 GetPropStr(instance, "Name"), (void *)local, local ? local->enabled : -1);
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 
 	if (!local || !local->enabled)
 		return rtrn_dropped;
@@ -72,10 +76,11 @@ int Button_Activate(NodeObj instance, MsgId message, NodeObj data)
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
 
-	chunk = NewNode(STRING);
-	SetName(chunk, "Press");
-	SetValueStr(chunk, "1");
-	SndMsg(instance, "Out", msg_send, chunk);
+	/* same shape as Checkbox: the control has a Value and that is all.
+	   Writing it fans out to whoever subscribed. A press is 1 then back
+	   to 0, so every press is a real change and gets through. */
+	SetPropStr(instance, "Value", "1");
+	SetPropStr(instance, "Value", "0");
 
 	return rtrn_handled;
 }
@@ -93,7 +98,12 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "Label", "");
 	SetPropInt(instance, "State", Starting);
 	WatchableProp(instance, "State");
-	SetPropInt(instance, "Out", 0);		/* fires once per press */
+	/* Value IS the button, both directions: writing it presses it (the
+	   handler below runs), and the same write fans out to whoever is
+	   listening. Same shape as MoButton and Checkbox. */
+	SetPropStr(instance, "Value", "0");
+	port = GetPropNode(instance, "Value");
+	SetPropLong(port, "OnMsg", (long)Button_Activate);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Button_Activate);
 
@@ -130,10 +140,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Label",  "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "Value", PROP_NULL, "0");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

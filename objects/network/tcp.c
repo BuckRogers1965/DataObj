@@ -967,19 +967,19 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
-	PublishProp(ClassSelf, "LocalPort", "data", PROP_TEXTBOX, "8080");
-	PublishProp(ClassSelf, "RemoteAddr", "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "RemotePort", "data", PROP_TEXTBOX, "0");
-	PublishProp(ClassSelf, "Connected",  "data", PROP_LED, "0");
-	PublishProp(ClassSelf, "Secure",    "data", PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "SslCert",   "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "SslKey",    "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "SslPass",   "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Secured",   "data", PROP_LED, "0");
-	PublishProp(ClassSelf, "Enable",    "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In",        "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",       "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "State",     "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "LocalPort", PROP_TEXTBOX, "8080");
+	PublishProp(ClassSelf, "RemoteAddr", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "RemotePort", PROP_TEXTBOX, "0");
+	PublishProp(ClassSelf, "Connected", PROP_LED, "0");
+	PublishProp(ClassSelf, "Secure", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "SslCert", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "SslKey", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "SslPass", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Secured", PROP_LED, "0");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "Out", PROP_NULL, "");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

@@ -54,7 +54,7 @@ Initiates a comparison operation now.
 ---
 
 > **Note on multiple inputs.** This framework delivers one value at a time
-> and does not yet expose a port's sources, so OR/AND/XOR here operate on the
+> and does not yet expose a property's sources, so OR/AND/XOR here operate on the
 > single arriving value
 > (identity for one input) and Parity toggles per event — faithful for the
 > inverter/buffer use above. True N-input combination waits on the

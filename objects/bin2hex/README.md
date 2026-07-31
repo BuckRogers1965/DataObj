@@ -19,7 +19,7 @@ Default output connection is from **Output**.
 Bin2Hex is one-way: it always renders bytes *to* hex, never back. It is useful
 for **preventing** an automatic hex-to-text translation downstream - feed a
 binary stream (e.g. serial or socket bytes) through Bin2Hex and what arrives at
-a text sink is the stable hex representation, not bytes that a text control
+a text consumer is the stable hex representation, not bytes that a text control
 might reinterpret.
 
 ## Notes

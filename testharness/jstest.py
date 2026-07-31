@@ -57,7 +57,8 @@ def test_js_dataflow(raw, r, home):
     got = []
     raw.pump()
     for e in raw.events:
-        if e.get("event") == "message-flowed" and e.get("instance") == js and e.get("port") == "Out":
+        if e.get("event") in ("property-changed", "message-flowed") \
+           and e.get("instance") == js and e.get("port") == "Out":
             got.append(e.get("value"))
     r.expect("js dataflow: the script counts pulses and speaks",
              "oninput fires per rising edge; Out carries 1,2,3",
@@ -75,9 +76,9 @@ def test_js_print(raw, r, home):
     time.sleep(0.2)
     raw.events = []
     raw.send({"cmd": "activate", "instance": js})
-    ev = raw.wait_event(lambda e: e.get("event") == "message-flowed"
+    ev = raw.wait_event(lambda e: e.get("event") in ("property-changed", "message-flowed")
                         and e.get("instance") == js and e.get("port") == "Print", timeout=4)
-    r.expect("js print: output reaches the Print port",
+    r.expect("js print: output reaches Print",
              "print('hello from js 5') emerges on Print",
              "Print value: %s" % (ev.get("value") if ev else None),
              bool(ev) and ev.get("value") == "hello from js 5")
@@ -93,7 +94,7 @@ def test_js_error_loud(raw, r, home):
     time.sleep(0.2)
     raw.events = []
     raw.send({"cmd": "activate", "instance": js})
-    ev = raw.wait_event(lambda e: e.get("event") == "message-flowed"
+    ev = raw.wait_event(lambda e: e.get("event") in ("property-changed", "message-flowed")
                         and e.get("instance") == js and e.get("port") == "Print", timeout=4)
     r.expect("js error: a broken script is never silent",
              "the syntax error surfaces on Print",
@@ -135,8 +136,8 @@ def test_js_bridge_client(raw, r, home):
 
     raw.pump()
     seen = [e.get("value") for e in raw.events
-            if e.get("event") == "message-flowed" and e.get("instance") == js
-            and e.get("port") == "Print"]
+            if e.get("event") in ("property-changed", "message-flowed")
+            and e.get("instance") == js and e.get("port") == "Print"]
     r.expect("js bridge client: a script drives the JSON protocol",
              "cmd({cmd:'list-instances'}) round-trips; onevent sees an instances-done event",
              "events echoed: %s" % seen,

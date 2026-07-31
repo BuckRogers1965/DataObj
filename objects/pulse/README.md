@@ -1,7 +1,7 @@
 # Pulse
 
 A pure **clock** source - no file, no socket, just timing. It sends `1` out its
-`Out` port, then `0` one `Interval` (milliseconds) later, and repeats.
+`Out` property, then `0` one `Interval` (milliseconds) later, and repeats.
 
 `Count` is the number of complete pulses (a 1 then a 0) to send; `0` means pulse
 forever (and intentionally holds the program open). A finite train ends like any

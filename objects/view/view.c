@@ -96,7 +96,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropLong(port, "OnMsg", (long)View_OnEnable);
 
 	SetPropStr(instance, "ReservedViewResizeable", "1");
-	SetPropStr(instance, "ReservedViewMode", "");
 
 	/* Open/PanelX/PanelY come from InitPosition like every other class - */
 	/* a View's panel is not special, every thing's panel works the same   */
@@ -132,10 +131,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
-	PublishProp(ClassSelf, "Enable",     "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
-	PublishProp(ClassSelf, "ReservedViewResizeable", "data", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "ReservedViewMode",       "data", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
+	PublishProp(ClassSelf, "ReservedViewResizeable", PROP_CHECKBOX, "1");
 	PublishPosition(ClassSelf);
 
 	return rtrn_handled;

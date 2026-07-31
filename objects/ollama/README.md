@@ -27,6 +27,6 @@ freezes anything else.
   cancels it.
 
 ## Notes
-Plain HTTP only (no TLS). Both **Send** and **Refresh** are ordinary ports, so a
+Plain HTTP only (no TLS). Both **Send** and **Refresh** are ordinary properties, so a
 Pulse or a script can drive them like the on-screen buttons. `Model`, `Payload`,
 and the rest are ordinary properties - wire them from a flow to feed the request.

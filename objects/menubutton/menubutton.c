@@ -112,8 +112,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)MenuButton_Activate);
 
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
+	/* Selected IS the menu: writing it picks an item, and the same write
+	   fans out to whatever is listening. No separate way in. */
+	port = GetPropNode(instance, "Selected");
 	SetPropLong(port, "OnMsg", (long)MenuButton_OnIn);
 
 	SetPropStr(instance, "Enable", "1");
@@ -149,12 +150,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Label",    "data", PROP_LABEL, "Menu");
-	PublishProp(ClassSelf, "Items",    "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Selected", "data", PROP_MENU, "");
-	PublishProp(ClassSelf, "In",       "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "Label", PROP_LABEL, "Menu");
+	PublishProp(ClassSelf, "Items", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Selected", PROP_MENU, "");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

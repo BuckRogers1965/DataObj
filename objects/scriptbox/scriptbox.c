@@ -368,7 +368,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	/* every control, from the table (Language menu, Source/Output boxes, the
 	   visible In toggle, Out readout - widget type from each control's class) */
 	Widget_Publish(ClassSelf, ScriptBoxPanel);
-	PublishProp(ClassSelf, "LanguageList", "data", PROP_NULL, "");	/* menu options, no control */
+	PublishProp(ClassSelf, "LanguageList", PROP_NULL, "");	/* menu options, no control */
 
 	return rtrn_handled;
 }

@@ -358,8 +358,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, RegExpPanel);
 
 	/* the Action menu's backing list and the lifecycle state - no control */
-	PublishProp(ClassSelf, "ActionList", "data", PROP_NULL, "Match,Reject,Replace,Replace Line");
-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "ActionList", PROP_NULL, "Match,Reject,Replace,Replace Line");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

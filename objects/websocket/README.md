@@ -14,5 +14,5 @@ transport only; the data model keeps the raw bytes.
 
 - **Enable** - gates the translator; any source can drive it.
 - **State** - the lifecycle LED.
-- **In** / **Out** / **Wire** / **Send** - the four ports; the panel shows the
+- **In** / **Out** / **Wire** / **Send** - the four properties; the panel shows the
   last message on each.

@@ -23,7 +23,7 @@ a refused connection, a timeout, or the device refusing the command).
 
 **On / Off / Toggle**
 Sends the plug the matching command. Toggle sends the opposite of the last
-known Status. Every press is also an ordinary in port, so a Pulse or a
+known Status. Every press is also an ordinary property, so a Pulse or a
 script can drive the plug the same way the buttons do.
 
 **Refresh**

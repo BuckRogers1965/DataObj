@@ -921,7 +921,7 @@ static void ImportFreshName(char *prefix, char *base, char *out, int outlen)
 static char *ImportCreate(char *className, char *nodeName,
 						   NodeObj propbag, char *containerPath, int force)
 {
-	NodeObj home, inst;
+	NodeObj home, inst, p;
 	char    desired[320], fresh[320], *x, *y, *ident, *alias, *slash, dbg[512];
 	char   *cpath = (containerPath && containerPath[0]) ? containerPath : "/Root";
 
@@ -978,42 +978,29 @@ static char *ImportCreate(char *className, char *nodeName,
 	slash = strrchr(alias, '/');
 	SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
 
-	/* the rest of the data props - restored the same way CloneObject
-	   snapshots them: walk the CLASS's published interface, only
-	   Direction=="data" (skips State, a runtime readout, and every
-	   "in" port - X/Y/Name/Container are already handled above and are
-	   skipped here too). Restoring a saved value is not a live command;
-	   replaying a port's own stale value through SetOrDeliverProp would
-	   fire its handler as if a fresh message had just arrived, and for a
-	   port whose handler mirrors its input into another property
-	   (MenuButton's In -> Selected, e.g.) that stomps the real saved
-	   value with whatever the port itself last happened to hold (this
-	   is exactly why Selected/Value-style properties were coming back
-	   as "0" on load - see menubutton.c). Interface-only iteration never
-	   touches "in" ports in the first place, so this can't happen. */
+	/* the rest of the saved properties - skip identity/geometry (set
+	   above) and State (a runtime readout, not portable state).
+
+	   SetPropStr, never SetOrDeliverProp: restoring saved state is not the
+	   same act as sending a message. SetPropStr updates the value in place
+	   and fans out to whatever subscribed to it - it changed, subscribers
+	   are told - without invoking the property's OWN handler.
+	   SetOrDeliverProp does invoke it, and that is what made restore
+	   destroy the values it was restoring: writing a saved MenuButton "In"
+	   ran MenuButton_OnIn, which mirrors its input into "Selected",
+	   overwriting the real saved Selected with whatever stale thing In
+	   happened to hold ("0"). Delivering was the error - nothing about the
+	   property's name, and no annotation on it would have prevented it. */
 	if (propbag)
-	{
-		NodeObj class = GetParent(inst);
-		NodeObj classInterface = class ? GetClassInterface(class) : NULL;
-		NodeObj ip;
-
-		for (ip = classInterface ? GetChild(classInterface) : NULL; ip; ip = GetNextSibling(ip))
+		for (p = GetNextProp(propbag); p; p = GetNextSibling(p))
 		{
-			char *pn  = GetPropStr(ip, "Name");
-			char *dir = GetPropStr(ip, "Direction");
-			char *val;
+			char *pn = GetNameStr(p);
 
-			if (!pn || !dir || strcmp(dir, "data") != 0)
-				continue;
-			if (!strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
+			if (!pn || !strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
 				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
 				continue;
-
-			val = GetPropStr(propbag, pn);
-			if (val)
-				SetOrDeliverProp(inst, pn, val);
+			SetPropStr(inst, pn, GetValueStr(p));
 		}
-	}
 
 	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE done: '%s' -> path '%s'", className, alias);
 	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
@@ -1444,10 +1431,7 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 
 		pub = InterfacePropForInstance(owner, prop);
 		if (pub)
-		{
 			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
-			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
-		}
 
 		SetPropStr(inst, "Target", of);
 		SetPropStr(inst, "TargetProp", prop);
@@ -1932,7 +1916,7 @@ static NodeObj CloneObject(NodeObj source)
 {
 	NodeObj class, inst, interface, prop, valnode, owner;
 	msgobj instanceStart;
-	char *name, *dir, *val;
+	char *name, *val;
 
 	if (!source)
 		return NULL;
@@ -1954,8 +1938,7 @@ static NodeObj CloneObject(NodeObj source)
 	for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
 	{
 		name = GetPropStr(prop, "Name");
-		dir  = GetPropStr(prop, "Direction");
-		if (!name || !dir || strcmp(dir, "data") != 0)
+		if (!name)
 			continue;
 		if (strcmp(name, "State") == 0)	/* lifecycle, not data */
 			continue;
@@ -2150,7 +2133,7 @@ static NodeObj CloneAliasNode(NodeObj src, char *container, NodeObj map)
 	NodeObj linknode, targetInst, mapped, inst;
 	char *v;
 	int i;
-	char *carry[] = { "Widget", "Direction", "Label", "X", "Y" };
+	char *carry[] = { "Widget", "Label", "X", "Y" };
 
 	if (!propname || !propname[0])
 		return NULL;
@@ -2360,7 +2343,13 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	toOwner = toNode;
 	toPort = ResolvePort(&toOwner, to);
 	if (!toPort) {
-		DebugPrint ( "Connect could not find the input port on the sink.", __FILE__, __LINE__, ERROR);
+		char dbg[400], tpath[300];
+
+		snprintf(dbg, sizeof(dbg), "Connect: '%s' has no property '%s'",
+				 PathOfInstance(toNode, tpath, sizeof(tpath)) ? tpath
+					: (GetPropStr(toNode, "Name") ? GetPropStr(toNode, "Name") : "(unnamed)"),
+				 to);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 		return 0;
 	}
 
@@ -2848,10 +2837,10 @@ void WatchableProp(NodeObj instance, char *propname)
 /* any class publishing its own property                                 */
 void PublishPosition(NodeObj class)
 {
-	PublishProp(class, "X", "data", PROP_NULL, "0");
-	PublishProp(class, "Y", "data", PROP_NULL, "0");
-	PublishProp(class, "W", "data", PROP_NULL, "120");
-	PublishProp(class, "H", "data", PROP_NULL, "60");
+	PublishProp(class, "X", PROP_NULL, "0");
+	PublishProp(class, "Y", PROP_NULL, "0");
+	PublishProp(class, "W", PROP_NULL, "120");
+	PublishProp(class, "H", PROP_NULL, "60");
 
 	/* where something lives is the same kind of fact as where it sits -   */
 	/* an ordinary property, not a Slot/membership structure. Empty means   */
@@ -2859,13 +2848,13 @@ void PublishPosition(NodeObj class)
 	/* alias, the same way a wire names an instance - a client renders an   */
 	/* instance inside whichever View's Container it currently reads as,    */
 	/* correcting late exactly like X/Y already does.                       */
-	PublishProp(class, "Container", "data", PROP_NULL, "");
+	PublishProp(class, "Container", PROP_NULL, "");
 
 	/* what a thing is CALLED is just one of its properties - writing it   */
 	/* renames the instance (the Bridge keys its alias table off it, see   */
 	/* Bridge_Set/Bridge_RenameName). Shown as an editable textbox on the  */
 	/* dissection table like anything else.                                 */
-	PublishProp(class, "Name",   "data", PROP_TEXTBOX, "");
+	PublishProp(class, "Name", PROP_TEXTBOX, "");
 
 	/* every thing is a view: its icon lives wherever Container says, and  */
 	/* its open panel is a peer of every other panel at the root, with a   */
@@ -2875,15 +2864,15 @@ void PublishPosition(NodeObj class)
 	/* like: another icon for the same thing, a doorway to its one panel -   */
 	/* the client renders the stamped Widget instead of special-casing the   */
 	/* property name.                                                         */
-	PublishProp(class, "ReservedViewOpen",   "data", PROP_ICON, "0");
-	PublishProp(class, "ReservedViewPanelX", "data", PROP_NULL, "240");
-	PublishProp(class, "ReservedViewPanelY", "data", PROP_NULL, "60");
+	PublishProp(class, "ReservedViewOpen", PROP_ICON, "0");
+	PublishProp(class, "ReservedViewPanelX", PROP_NULL, "240");
+	PublishProp(class, "ReservedViewPanelY", PROP_NULL, "60");
 
 	/* generic, not View-specific - anything CAN be marked undeletable      */
 	/* this way, the Palette's own bootstrap instances are just the first    */
 	/* thing that actually uses it (BuildPalette). Bridge_Delete is what     */
 	/* enforces it.                                                          */
-	PublishProp(class, "Deletable", "data", PROP_CHECKBOX, "1");
+	PublishProp(class, "Deletable", PROP_CHECKBOX, "1");
 }
 
 void InitPosition(NodeObj instance)
@@ -3226,9 +3215,8 @@ void InterfaceTest(){
 
 		prop = GetChild(interface);
 		while (prop) {
-			printf("  %-10s %-6s widget=%d default=%s\n",
+			printf("  %-10s widget=%d default=%s\n",
 				GetPropStr(prop, "Name"),
-				GetPropStr(prop, "Direction"),
 				GetPropInt(prop, "Widget"),
 				GetPropStr(prop, "Default"));
 			prop = GetNextSibling(prop);
@@ -3414,7 +3402,7 @@ NodeObj InterfacePropForInstance(NodeObj inst, char *propname)
 	return NULL;
 }
 
-NodeObj PublishProp(NodeObj class, char *name, char *direction, int widget, char *defaultValue){
+NodeObj PublishProp(NodeObj class, char *name, int widget, char *defaultValue){
 
 	NodeObj interface, entry;
 
@@ -3431,7 +3419,6 @@ NodeObj PublishProp(NodeObj class, char *name, char *direction, int widget, char
 	entry = NewNode(INTEGER);
 	SetName(entry, "Property");
 	SetPropStr(entry, "Name", name);
-	SetPropStr(entry, "Direction", direction ? direction : "data");
 	SetPropInt(entry, "Widget", widget);
 	SetPropStr(entry, "Default", defaultValue ? defaultValue : "");
 

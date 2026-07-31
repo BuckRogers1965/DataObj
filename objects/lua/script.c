@@ -426,11 +426,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
-	PublishProp(ClassSelf, "Source", "data", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "Source", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "Out", PROP_NULL, "");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

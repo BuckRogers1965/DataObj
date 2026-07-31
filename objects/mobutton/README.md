@@ -9,12 +9,12 @@ genuinely different things:
 
 Pressing sends `1` out `Out`, releasing sends `0` — the same
 rising-then-falling convention a Pulse emits, so a MoButton is a
-hand-driven Pulse and every sink already knows what to do with it.
+hand-driven Pulse and everything downstream already knows what to do with it.
 
-## Ports and properties
+## Properties
 
 - **Out** — the edges: `1` on press, `0` on release.
-- **Press** — the gesture as an ordinary in port (`1` down, `0` up).
+- **Press** — the gesture as an ordinary property (`1` down, `0` up).
   The projector writes it on pointerdown/up, and so can anything else:
   a script or a Pulse can press this button exactly as a finger does.
 - **Label** — the button's caption. Engine state, subscribed like any
@@ -23,12 +23,12 @@ hand-driven Pulse and every sink already knows what to do with it.
 - **Interval** — auto-repeat in milliseconds while held, for jog/scroll
   behavior. `0` (the default) means no repeat.
 - **Enable** — the standard enable line. A button disabled mid-press
-  releases first, so a sink is never left latched on.
+  releases first, so nothing downstream is left latched on.
 - **State** — the standard lifecycle LED.
 
 ## Uses
 
 Wire `Out` to an `Enable` to hold something on only while pressed; to a
-command port (a TCPPort's `Send`) to invoke it; to a Queue's `Clock` to
+command property (a TCPPort's `Send`) to invoke it; to a Queue's `Clock` to
 step a flow by hand. Releasing outside the button counts as a release
 without a click.

@@ -27,7 +27,7 @@ once - Server, Port, Timeout, Randomize, Workflow.
 - **Randomize** - checked, every `seed` / `noise_seed` in the workflow is set
   to a fresh random number on each render; unchecked, the workflow's seeds are
   used as written.
-- **In** - a prompt arriving on this port sets Prompt and starts a render, so a
+- **In** - a prompt arriving on this property sets Prompt and starts a render, so a
   flow (e.g. an Ollama Output) can drive image generation.
 - **Generate** - render from the current Prompt.
 - **Workflow** - the ComfyUI **API-format** JSON (Save > API Format in ComfyUI).
@@ -40,7 +40,7 @@ once - Server, Port, Timeout, Randomize, Workflow.
 - **Enable** - unchecked, Generate/In do nothing; unchecking mid-render cancels.
 
 ## Notes
-Plain HTTP only. **In** and **Generate** are ordinary ports, so a Pulse or
+Plain HTTP only. **In** and **Generate** are ordinary properties, so a Pulse or
 script can trigger a render like the button. Every `%%prompt%%` / `%%negative%%`
 occurrence is replaced. The image URL omits `&type=` (ComfyUI defaults to
 `output`, which is what a browser can fetch - a workflow's own type such as

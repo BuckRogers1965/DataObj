@@ -1,6 +1,6 @@
 # Writer
 
-A data **sink**. It subscribes to a source through its `In` port, buffers the
+A data **consumer**. It subscribes to a source through its `In` property, buffers the
 chunks that arrive, and drains them to the file named by `Filename` via a task.
 When it has received `msg_eof` and drained its buffer it closes the file and
 stops.
@@ -13,4 +13,4 @@ opens nothing.
 - **Filename** - the file to write.
 - **Enable** - gates the writer; any source can drive it.
 - **State** - the lifecycle LED (Running once open).
-- **In** - the input port; the panel shows the last chunk received.
+- **In** - the input property; the panel shows the last chunk received.

@@ -41,7 +41,7 @@ because the tests checked *behavior*, not *where the behavior lives*.
 
 2. **The node-box card panel.** `registerCard` builds a parallel,
    client-coded answer to "what is an object's panel?" — property rows,
-   port rows, a footer — out of the class Interface. The engine's answer
+   property rows, a footer — out of the class Interface. The engine's answer
    is the internals view. There must be exactly one answer. The card's
    panel should BE the engine's internals view, presented; the client-side
    panel builder should be deleted.
@@ -246,10 +246,10 @@ fixes are worth reading before touching clone, rename, or load:
    = subtle, invisible breakage. Both `Bridge_Rename` (move) and
    `Bridge_RenameName` (rename) call it.
 
-3. **A property-to-property wire has an ADAPTER as its sink, not the
+3. **A property-to-property wire has an ADAPTER as its target, not the
    instance.** Connecting a Slider's `Value` to another's `Value` (a
    property with no message handler) routes through a `PropertyBinding`
-   adapter (object.c) — so the source port's Subscriber points at the
+   adapter (object.c) — so the source property's Subscriber points at the
    nameless adapter, and the real target lives on the adapter's
    `Target`/`TargetProp`. Anything walking subscribers (CloneConnections,
    and by the same token any future scrub) must recognise the adapter and
@@ -287,16 +287,16 @@ fix retired an interim mechanism the roadmap had already sentenced
 (Phase 2.3):
 
 1. **The engine had two kinds of wire, and the walkers could only see
-   one.** A wire into a compiled port recorded the real sink; a wire
+   one.** A wire into a property with a handler recorded the real target; a wire
    into a plain property (the GUI's own Value→Value gesture, always)
    hid behind a nameless `PropertyBinding` adapter — invisible to
    `list-connections`' graph walk, special-cased in `CloneConnections`,
-   invisible to the delete scrub (a freed sink left the adapter's
+   invisible to the delete scrub (a freed target left the adapter's
    `Target` dangling — a live use-after-free), and leaked besides.
    Now a Subscriber records `{Instance, Port, Callback}` and delivery
    with no Callback applies the universal default — store what arrived
    (`DeliverToSubscriber`, node.c, shared by both fan-out walkers).
-   `Activate` is an ordinary port (`ActivateOnMsg`, stamped by
+   `Activate` is an ordinary property (`ActivateOnMsg`, stamped by
    `RegisterInstance`). The adapters are deleted; every graph walker
    reads the same records; bind-property/bind-activate are dispatch
    synonyms for `connect` kept only for flow replay.
@@ -344,7 +344,7 @@ Name + Container, verified by resolving back. Lessons paid for:
    session mints constantly (`_8`/`_9`). Rewritten as walk-down/unwind:
    free only nodes carrying no other key, re-link the sibling level.
 3. **One namespace is a semantic upgrade that tests can trip over:**
-   instances created over the raw port are now addressable from the
+   instances created over the raw TCP surface are now addressable from the
    GUI (before, each bridge's private table hid them — a split-brain
    nobody had noticed). GUI tests that grabbed "any /Root/View_N"
    started grabbing the raw suites' leftovers; they now snapshot

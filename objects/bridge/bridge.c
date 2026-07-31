@@ -139,8 +139,8 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
  * One self-contained event per instance: alias, class name, which group
  * it belongs to ("Palette", the one-instance-per-class catalog, or
  * "Root", a live session object - see GetPalette/BuildPalette in
- * object.c), and the class's published Interface (Widget/Direction/
- * Default for every property and port) embedded inline. A client never
+ * object.c), and the class's published Interface (Widget/Default for
+ * every property) embedded inline. A client never
  * needs a separate "what does this class look like" round trip - the
  * same reasoning that made the palette real instances instead of a
  * class-description protocol in the first place means an instance's own
@@ -554,18 +554,15 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 		if (node)
 			prop = GetNameStr(node);
 
-		/* presentation default, stamped by the ENGINE at birth: what the  */
-		/* final owner's class published for this property (Widget type and */
-		/* Direction). The client renders the alias's Widget property - it  */
+		/* presentation default, stamped by the ENGINE at birth: the Widget */
+		/* type the final owner's class published for this property. The    */
+		/* client renders the alias's Widget property - it                   */
 		/* never consults the class Interface to deduce a control            */
 		/* (readmefirst repair #2). Unpublished properties stay unstamped    */
 		/* and render as the plain-textbox fallback.                          */
 		pub = InterfacePropForInstance(owner, prop);
 		if (pub)
-		{
 			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
-			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
-		}
 	}
 
 	SetPropStr(inst, "Target", of);
@@ -756,7 +753,6 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			/* from the member's own properties, never from the class        */
 			/* Interface (readmefirst repair #2)                              */
 			SetPropInt(member, "Widget", GetPropInt(prop, "Widget"));
-			SetPropStr(member, "Direction", GetPropStr(prop, "Direction"));
 
 			SetPropStr(member, "Container", viewAlias);
 			{
@@ -1034,7 +1030,7 @@ void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!fromInst || !toInst || !fromPort || !toPort)
 	{
-		Bridge_Error(instance, "connect", "unknown instance or missing port");
+		Bridge_Error(instance, "connect", "unknown instance or missing property name");
 		return;
 	}
 
@@ -1073,7 +1069,7 @@ void Bridge_BindPort(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!cont || !target || !port || !port[0] || !targetProp || !targetProp[0])
 	{
-		Bridge_Error(instance, "bind-port", "container/port/target/targetProp required");
+		Bridge_Error(instance, "bind-port", "container/property/target/targetProp required");
 		return;
 	}
 
@@ -1103,7 +1099,7 @@ void Bridge_Disconnect(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!fromInst || !toInst || !fromPort || !toPort)
 	{
-		Bridge_Error(instance, "disconnect", "unknown instance or missing port");
+		Bridge_Error(instance, "disconnect", "unknown instance or missing property name");
 		return;
 	}
 
@@ -1136,7 +1132,7 @@ void Bridge_BindProperty(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!fromInst || !toInst || !fromPort || !toProp)
 	{
-		Bridge_Error(instance, "bind-property", "unknown instance or missing port/prop");
+		Bridge_Error(instance, "bind-property", "unknown instance or missing property name");
 		return;
 	}
 
@@ -1158,7 +1154,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
 
 	if (!fromInst || !toInst || !fromPort)
 	{
-		Bridge_Error(instance, "bind-activate", "unknown instance or missing port");
+		Bridge_Error(instance, "bind-activate", "unknown instance or missing property name");
 		return;
 	}
 
@@ -1575,6 +1571,8 @@ void Bridge_DoActivate(NodeObj instance, InstanceData *local, NodeObj command)
 	char *alias;
 	NodeObj inst;
 
+	char dbg[300];
+
 	alias = GetPropStr(command, "instance");
 	inst  = Bridge_ResolveAlias(local, alias);
 
@@ -1584,6 +1582,8 @@ void Bridge_DoActivate(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
+	snprintf(dbg, sizeof(dbg), "activate '%s'", alias ? alias : "(none)");
+	DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
 	ActivateInstance(inst);
 }
 
@@ -1893,8 +1893,8 @@ NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char
 
 void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 {
-	char *alias, *port, *eventType, *name;
-	NodeObj inst, class, interface, prop, tap;
+	char *alias, *port, *eventType;
+	NodeObj inst, tap;
 
 	alias = GetPropStr(command, "instance");
 	port  = GetPropStr(command, "port");
@@ -1929,28 +1929,12 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 		}
 	}
 
-	/* the source class already published what this property is (Phase */
-	/* 1.4) - a "data" property is watched as property-changed, an     */
-	/* "in"/"out" port as message-flowed, so the client never has to    */
-	/* tell the bridge which kind it is asking for                      */
-	eventType = "message-flowed";
-	class = GetParent(inst);
-	interface = class ? GetClassInterface(class) : NULL;
-	prop = interface ? GetChild(interface) : NULL;
-	while (prop)
-	{
-		char *direction;
-
-		name = GetPropStr(prop, "Name");
-		if (name && strcmp(name, port) == 0)
-		{
-			direction = GetPropStr(prop, "Direction");
-			if (direction && strcmp(direction, "data") == 0)
-				eventType = "property-changed";
-			break;
-		}
-		prop = GetNextSibling(prop);
-	}
+	/* One kind of event, because there is one kind of thing. Every
+	   property is a node; if it changes and something subscribed to it,
+	   that change is sent out. There is no "data property" vs "in/out
+	   port" distinction to look up - naming a property In or Out never
+	   made it a different species. */
+	eventType = "property-changed";
 
 	/* reconnects re-subscribe to everything they can see, so without    */
 	/* this check every page load stacked another identical tap on the   */
@@ -2699,11 +2683,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
-	PublishProp(ClassSelf, "Enable",      "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In",          "in",   PROP_NULL, "");
-	PublishProp(ClassSelf, "Out",         "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "State",       "data", PROP_LED, "1");
-	PublishProp(ClassSelf, "RequireAuth", "data", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "Out", PROP_NULL, "");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
+	PublishProp(ClassSelf, "RequireAuth", PROP_CHECKBOX, "0");
 
 	return rtrn_handled;
 }

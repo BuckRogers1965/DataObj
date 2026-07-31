@@ -1,0 +1,1806 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index cf5a239..dd746ba 100755
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -21,8 +21,15 @@ joins when TCP client mode does).
+ Three governing principles:
+ - **Everything is a node**: one tree structure holds the registry, configuration,
+   and wiring; properties are nodes, so anything can be annotated.
++  **There is no such thing as a port.** There is no port type, no "in"/"out"
++  species, no distinction between a "compiled port" and a "plain property" —
++  every one of them is a node, and any node is subscribable. `In`, `Out`,
++  `Enable`, `Clock` are just *names* objects happen to give properties; naming
++  a property `Out` does not make it special in any way. Anything that reads
++  like "wire the Out port to the In port" is describing two ordinary
++  properties that happen to be named that.
+ - **Everything is a message**: objects interact only by messages routed through
+-  subscriptions between ports. Delivery is in-process pointer-passing (function
++  subscriptions on nodes. Delivery is in-process pointer-passing (function
+   pointer call with a node handle — no copies, no serialization, no thread
+   handoffs) **queued through the scheduler**: `SndMsg` costs one task insert,
+   and each hop is dispatched breadth-first from `ExecTasks`, so downstream work
+@@ -95,7 +102,7 @@ Deactivated modules: `objects/pulse` (Makefile renamed to `.back`/`.bak`) and
+ `objects/out`, `objects/msg`, `objects/pulse`, `objects/reader`, `objects/writer`
+ are the active ones (`pulse` was reactivated July 2026 with a rewritten
+ `pulseobj.c` on the working lifecycle: Interval/Count properties, emits "1"/"0"
+-edges out its `Out` port, finite trains end with `msg_eof`, Count=0 pulses
++edges out its `Out` property, finite trains end with `msg_eof`, Count=0 pulses
+ forever and intentionally holds the program open).
+ 
+ `objects/network/TCPObject.c` deserves special mention: it is **the reference
+@@ -279,7 +286,7 @@ Two hosts exist: `objects/script` (Lua, the first) and `objects/jsscript`
+ (QuickJS/JavaScript, `objects/jsscript/quickjs/` vendored — MUST include
+ libbf.c or `dlopen` fails on `bf_context_init`). A host: one interpreter
+ per instance; `Activate` (re)runs the `Source` property in a fresh
+-context; ports `In`/`Out` (dataflow), `Print` (output + loud errors),
++context; properties `In`/`Out` (dataflow), `Print` (output + loud errors),
+ `Cmd`/`Evt` (wire to a Bridge = full protocol: create/connect/subscribe/…
+ with session naming and events, a script is a peer of the browser); a
+ runaway guard (QuickJS interrupt handler with a wall-clock budget — Lua
+diff --git a/object.c b/object.c
+index ed0000b..b90b33a 100755
+--- a/object.c
++++ b/object.c
+@@ -921,7 +921,7 @@ static void ImportFreshName(char *prefix, char *base, char *out, int outlen)
+ static char *ImportCreate(char *className, char *nodeName,
+ 						   NodeObj propbag, char *containerPath, int force)
+ {
+-	NodeObj home, inst;
++	NodeObj home, inst, p;
+ 	char    desired[320], fresh[320], *x, *y, *ident, *alias, *slash, dbg[512];
+ 	char   *cpath = (containerPath && containerPath[0]) ? containerPath : "/Root";
+ 
+@@ -978,42 +978,30 @@ static char *ImportCreate(char *className, char *nodeName,
+ 	slash = strrchr(alias, '/');
+ 	SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
+ 
+-	/* the rest of the data props - restored the same way CloneObject
+-	   snapshots them: walk the CLASS's published interface, only
+-	   Direction=="data" (skips State, a runtime readout, and every
+-	   "in" port - X/Y/Name/Container are already handled above and are
+-	   skipped here too). Restoring a saved value is not a live command;
+-	   replaying a port's own stale value through SetOrDeliverProp would
+-	   fire its handler as if a fresh message had just arrived, and for a
+-	   port whose handler mirrors its input into another property
+-	   (MenuButton's In -> Selected, e.g.) that stomps the real saved
+-	   value with whatever the port itself last happened to hold (this
+-	   is exactly why Selected/Value-style properties were coming back
+-	   as "0" on load - see menubutton.c). Interface-only iteration never
+-	   touches "in" ports in the first place, so this can't happen. */
++	/* the rest of the saved properties - skip identity/geometry (set
++	   above) and State (a runtime readout, not portable state).
++
++	   SetPropStr, never SetOrDeliverProp: restoring saved state is not
++	   the same act as sending a message. SetPropStr updates the value in
++	   place and fans out to whatever subscribed to it - which is exactly
++	   the rule (it changed, subscribers are told) - without invoking the
++	   property's OWN handler. SetOrDeliverProp does invoke it, and that
++	   is what made restore destroy the values it was restoring: writing
++	   a saved MenuButton "In" ran MenuButton_OnIn, which mirrors its
++	   input into "Selected", overwriting the real saved Selected with
++	   whatever stale thing In happened to hold ("0"). Nothing about the
++	   property's NAME caused that and no annotation on it would have
++	   prevented it - delivering was the error. */
+ 	if (propbag)
+-	{
+-		NodeObj class = GetParent(inst);
+-		NodeObj classInterface = class ? GetClassInterface(class) : NULL;
+-		NodeObj ip;
+-
+-		for (ip = classInterface ? GetChild(classInterface) : NULL; ip; ip = GetNextSibling(ip))
++		for (p = GetNextProp(propbag); p; p = GetNextSibling(p))
+ 		{
+-			char *pn  = GetPropStr(ip, "Name");
+-			char *dir = GetPropStr(ip, "Direction");
+-			char *val;
++			char *pn = GetNameStr(p);
+ 
+-			if (!pn || !dir || strcmp(dir, "data") != 0)
+-				continue;
+-			if (!strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
++			if (!pn || !strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
+ 				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
+ 				continue;
+-
+-			val = GetPropStr(propbag, pn);
+-			if (val)
+-				SetOrDeliverProp(inst, pn, val);
++			SetPropStr(inst, pn, GetValueStr(p));
+ 		}
+-	}
+ 
+ 	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE done: '%s' -> path '%s'", className, alias);
+ 	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+@@ -1444,10 +1432,7 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
+ 
+ 		pub = InterfacePropForInstance(owner, prop);
+ 		if (pub)
+-		{
+ 			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
+-			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
+-		}
+ 
+ 		SetPropStr(inst, "Target", of);
+ 		SetPropStr(inst, "TargetProp", prop);
+@@ -1932,7 +1917,7 @@ static NodeObj CloneObject(NodeObj source)
+ {
+ 	NodeObj class, inst, interface, prop, valnode, owner;
+ 	msgobj instanceStart;
+-	char *name, *dir, *val;
++	char *name, *val;
+ 
+ 	if (!source)
+ 		return NULL;
+@@ -1954,8 +1939,7 @@ static NodeObj CloneObject(NodeObj source)
+ 	for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
+ 	{
+ 		name = GetPropStr(prop, "Name");
+-		dir  = GetPropStr(prop, "Direction");
+-		if (!name || !dir || strcmp(dir, "data") != 0)
++		if (!name)
+ 			continue;
+ 		if (strcmp(name, "State") == 0)	/* lifecycle, not data */
+ 			continue;
+@@ -1964,7 +1948,7 @@ static NodeObj CloneObject(NodeObj source)
+ 		valnode = ResolvePort(&owner, name);
+ 		val = valnode ? GetValueStr(valnode) : NULL;
+ 		if (val)
+-			SetOrDeliverProp(inst, name, val);
++			SetPropStr(inst, name, val);
+ 	}
+ 
+ 	return inst;
+@@ -2150,7 +2134,7 @@ static NodeObj CloneAliasNode(NodeObj src, char *container, NodeObj map)
+ 	NodeObj linknode, targetInst, mapped, inst;
+ 	char *v;
+ 	int i;
+-	char *carry[] = { "Widget", "Direction", "Label", "X", "Y" };
++	char *carry[] = { "Widget", "Label", "X", "Y" };
+ 
+ 	if (!propname || !propname[0])
+ 		return NULL;
+@@ -2335,15 +2319,90 @@ NodeObj CloneInstance(NodeObj source, char *containerPath, NodeObj map)
+ 	return top;
+ }
+ 
++/*
++ * A View can stand in for one of the things inside it, so a wire can be
++ * dropped on its closed icon instead of opening the panel and hunting for
++ * the right control. Two ordinary properties say which: ReservedIn when
++ * the View is a wire's SINK, ReservedOut when it is the SOURCE. Nothing
++ * about this is a direction ON a property - it answers "which of my
++ * internals stands in for me at each end of a wire", which is a fact
++ * about the View's composition. Views only; no other class looks at it.
++ *
++ * The value is one property naming the inner target. It resolves as a
++ * path (absolute, or relative to the View); if the whole string names an
++ * instance, the caller's own property name passes through to it,
++ * otherwise the last segment is taken as the property and the rest as
++ * the instance. Unset or unresolvable means no redirect - the wire lands
++ * on the View itself, exactly as before.
++ */
++static NodeObj ViewRedirect(NodeObj view, char *which, char **prop,
++							 char *propBuf, int propLen)
++{
++	char *spec, vpath[300], full[640], *slash;
++	NodeObj inst;
++
++	/* "is this a view" is GetMainView's question, not a class-name test:
++	   a view is a container for controls, and Reader/Writer/TCPPort are
++	   exactly that - they took on the view machinery (X/Y, a panel, rows
++	   of controls) even though their class is named for what they do. */
++	if (!view || !GetMainView(view))
++		return NULL;
++
++	spec = GetPropStr(view, which);
++	if (!spec || !spec[0])
++		return NULL;
++
++	if (spec[0] == '/')
++		snprintf(full, sizeof(full), "%s", spec);
++	else if (PathOfInstance(view, vpath, sizeof(vpath)))
++		snprintf(full, sizeof(full), "%s/%s", vpath, spec);
++	else
++		return NULL;
++
++	/* the whole thing names an instance - keep the caller's property */
++	inst = ResolvePath(full);
++	if (inst)
++		return inst;
++
++	/* otherwise the last segment is the property on the instance before it */
++	slash = strrchr(full, '/');
++	if (!slash || slash == full)
++		return NULL;
++	*slash = '\0';
++	inst = ResolvePath(full);
++	if (!inst)
++		return NULL;
++	/* the property name is copied out: `full` is this frame's own buffer  */
++	/* and dies on return, so handing back a pointer into it would dangle  */
++	if (prop && propBuf)
++	{
++		snprintf(propBuf, propLen, "%s", slash + 1);
++		*prop = propBuf;
++	}
++	return inst;
++}
++
+ int
+ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
+ 
+-	NodeObj fromPort, toPort, fromOwner, toOwner;
++	NodeObj fromPort, toPort, fromOwner, toOwner, redirect;
++	char fromPropBuf[128], toPropBuf[128];
+ 	long handler;
+ 
+ 	if (!fromNode || !from || !toNode || !to)
+ 		return 0;
+ 
++	/* stand-in resolution happens before anything else, so everything    */
++	/* downstream - the Subscriber record, the graph walkers, Disconnect  */
++	/* - sees the real endpoints and nothing has to know a View was ever  */
++	/* involved                                                            */
++	redirect = ViewRedirect(fromNode, "ReservedOut", &from, fromPropBuf, sizeof(fromPropBuf));
++	if (redirect)
++		fromNode = redirect;
++	redirect = ViewRedirect(toNode, "ReservedIn", &to, toPropBuf, sizeof(toPropBuf));
++	if (redirect)
++		toNode = redirect;
++
+ 	/* both ends resolve through links: wiring to or from an alias IS   */
+ 	/* wiring to or from the original - the Subscriber entry lands on    */
+ 	/* the original's port and carries the original instance, so the     */
+@@ -2360,7 +2419,13 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
+ 	toOwner = toNode;
+ 	toPort = ResolvePort(&toOwner, to);
+ 	if (!toPort) {
+-		DebugPrint ( "Connect could not find the input port on the sink.", __FILE__, __LINE__, ERROR);
++		char dbg[400], tpath[300];
++
++		snprintf(dbg, sizeof(dbg), "Connect: '%s' has no property '%s'",
++				 PathOfInstance(toNode, tpath, sizeof(tpath)) ? tpath
++					: (GetPropStr(toNode, "Name") ? GetPropStr(toNode, "Name") : "(unnamed)"),
++				 to);
++		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+ 		return 0;
+ 	}
+ 
+@@ -2848,10 +2913,10 @@ void WatchableProp(NodeObj instance, char *propname)
+ /* any class publishing its own property                                 */
+ void PublishPosition(NodeObj class)
+ {
+-	PublishProp(class, "X", "data", PROP_NULL, "0");
+-	PublishProp(class, "Y", "data", PROP_NULL, "0");
+-	PublishProp(class, "W", "data", PROP_NULL, "120");
+-	PublishProp(class, "H", "data", PROP_NULL, "60");
++	PublishProp(class, "X", PROP_NULL, "0");
++	PublishProp(class, "Y", PROP_NULL, "0");
++	PublishProp(class, "W", PROP_NULL, "120");
++	PublishProp(class, "H", PROP_NULL, "60");
+ 
+ 	/* where something lives is the same kind of fact as where it sits -   */
+ 	/* an ordinary property, not a Slot/membership structure. Empty means   */
+@@ -2859,13 +2924,13 @@ void PublishPosition(NodeObj class)
+ 	/* alias, the same way a wire names an instance - a client renders an   */
+ 	/* instance inside whichever View's Container it currently reads as,    */
+ 	/* correcting late exactly like X/Y already does.                       */
+-	PublishProp(class, "Container", "data", PROP_NULL, "");
++	PublishProp(class, "Container", PROP_NULL, "");
+ 
+ 	/* what a thing is CALLED is just one of its properties - writing it   */
+ 	/* renames the instance (the Bridge keys its alias table off it, see   */
+ 	/* Bridge_Set/Bridge_RenameName). Shown as an editable textbox on the  */
+ 	/* dissection table like anything else.                                 */
+-	PublishProp(class, "Name",   "data", PROP_TEXTBOX, "");
++	PublishProp(class, "Name", PROP_TEXTBOX, "");
+ 
+ 	/* every thing is a view: its icon lives wherever Container says, and  */
+ 	/* its open panel is a peer of every other panel at the root, with a   */
+@@ -2875,15 +2940,15 @@ void PublishPosition(NodeObj class)
+ 	/* like: another icon for the same thing, a doorway to its one panel -   */
+ 	/* the client renders the stamped Widget instead of special-casing the   */
+ 	/* property name.                                                         */
+-	PublishProp(class, "ReservedViewOpen",   "data", PROP_ICON, "0");
+-	PublishProp(class, "ReservedViewPanelX", "data", PROP_NULL, "240");
+-	PublishProp(class, "ReservedViewPanelY", "data", PROP_NULL, "60");
++	PublishProp(class, "ReservedViewOpen", PROP_ICON, "0");
++	PublishProp(class, "ReservedViewPanelX", PROP_NULL, "240");
++	PublishProp(class, "ReservedViewPanelY", PROP_NULL, "60");
+ 
+ 	/* generic, not View-specific - anything CAN be marked undeletable      */
+ 	/* this way, the Palette's own bootstrap instances are just the first    */
+ 	/* thing that actually uses it (BuildPalette). Bridge_Delete is what     */
+ 	/* enforces it.                                                          */
+-	PublishProp(class, "Deletable", "data", PROP_CHECKBOX, "1");
++	PublishProp(class, "Deletable", PROP_CHECKBOX, "1");
+ }
+ 
+ void InitPosition(NodeObj instance)
+@@ -3226,9 +3291,8 @@ void InterfaceTest(){
+ 
+ 		prop = GetChild(interface);
+ 		while (prop) {
+-			printf("  %-10s %-6s widget=%d default=%s\n",
++			printf("  %-10s widget=%d default=%s\n",
+ 				GetPropStr(prop, "Name"),
+-				GetPropStr(prop, "Direction"),
+ 				GetPropInt(prop, "Widget"),
+ 				GetPropStr(prop, "Default"));
+ 			prop = GetNextSibling(prop);
+@@ -3414,7 +3478,7 @@ NodeObj InterfacePropForInstance(NodeObj inst, char *propname)
+ 	return NULL;
+ }
+ 
+-NodeObj PublishProp(NodeObj class, char *name, char *direction, int widget, char *defaultValue){
++NodeObj PublishProp(NodeObj class, char *name, int widget, char *defaultValue){
+ 
+ 	NodeObj interface, entry;
+ 
+@@ -3431,7 +3495,6 @@ NodeObj PublishProp(NodeObj class, char *name, char *direction, int widget, char
+ 	entry = NewNode(INTEGER);
+ 	SetName(entry, "Property");
+ 	SetPropStr(entry, "Name", name);
+-	SetPropStr(entry, "Direction", direction ? direction : "data");
+ 	SetPropInt(entry, "Widget", widget);
+ 	SetPropStr(entry, "Default", defaultValue ? defaultValue : "");
+ 
+diff --git a/object.h b/object.h
+index 39a2a7c..ac1b342 100755
+--- a/object.h
++++ b/object.h
+@@ -403,11 +403,15 @@ typedef enum {
+ /* object) needs to know about a class without creating an instance -    */
+ /* its properties and ports, direction, widget, and default value. Each  */
+ /* class declares this itself in ClassStart, right after RegisterClass.  */
+-/* direction is "data" for a plain property, "in"/"out" for a port.      */
+-NodeObj PublishProp(NodeObj class, char * name, char * direction, int widget, char * defaultValue);
++/* There is no direction. Every published property is the same kind of   */
++/* thing: a node. If it changes and something subscribed to it, that     */
++/* change is sent out - that is the whole rule, and it is the same rule  */
++/* whether the property is named In, Out, Enable, Value or anything      */
++/* else. Those are names, not kinds.                                     */
++NodeObj PublishProp(NodeObj class, char * name, int widget, char * defaultValue);
+ 
+ /* One instance property's published metadata - the Interface "Property" */
+-/* entry (Name/Direction/Widget/Default) on the instance's class, NULL   */
++/* entry (Name/Widget/Default) on the instance's class, NULL             */
+ /* if unpublished. What a translator stamping presentation defaults onto */
+ /* an alias (create-alias, internals) reads: the engine decides what a   */
+ /* property's control looks like, clients render it, never deduce it.    */
+diff --git a/objects/alias/alias.c b/objects/alias/alias.c
+index e3156c9..985bd11 100644
+--- a/objects/alias/alias.c
++++ b/objects/alias/alias.c
+@@ -97,13 +97,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
+ 	WatchableProp(instance, "TargetProp");
+ 
+ 	/* the alias's OWN presentation - restyling an alias never touches   */
+-	/* the original. Widget and Direction are stamped at birth by the     */
+-	/* engine (create-alias / internals, bridge.c) from what the target's  */
+-	/* class published; clients render them and deduce nothing.            */
++	/* the original. Widget is stamped at birth by the engine (create-    */
++	/* alias / internals, bridge.c) from what the target's class           */
++	/* published; clients render it and deduce nothing.                    */
+ 	SetPropStr(instance, "Widget", "");
+ 	WatchableProp(instance, "Widget");
+-	SetPropStr(instance, "Direction", "");
+-	WatchableProp(instance, "Direction");
+ 	SetPropStr(instance, "Label", "");
+ 	WatchableProp(instance, "Label");
+ 
+@@ -149,13 +147,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Target",     "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "TargetProp", "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Widget",     "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Direction",  "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Label",      "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Enable",     "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Target", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "TargetProp", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Widget", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/base64/base64.c b/objects/base64/base64.c
+index a7f81df..c84364a 100644
+--- a/objects/base64/base64.c
++++ b/objects/base64/base64.c
+@@ -273,7 +273,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	/* every control, straight from the table (widget type from the class) */
+ 	Widget_Publish(ClassSelf, Base64Panel);
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");	/* lifecycle, no control */
++	PublishProp(ClassSelf, "State", PROP_LED, "1");	/* lifecycle, no control */
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/bin2hex/bin2hex.c b/objects/bin2hex/bin2hex.c
+index 3261e72..3c2b618 100644
+--- a/objects/bin2hex/bin2hex.c
++++ b/objects/bin2hex/bin2hex.c
+@@ -193,7 +193,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	/* every control, straight from the table (widget type from the class) */
+ 	Widget_Publish(ClassSelf, Bin2HexPanel);
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");	/* lifecycle, no control */
++	PublishProp(ClassSelf, "State", PROP_LED, "1");	/* lifecycle, no control */
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/bridge/bridge.c b/objects/bridge/bridge.c
+index 2bbf9d7..6dc8c8e 100644
+--- a/objects/bridge/bridge.c
++++ b/objects/bridge/bridge.c
+@@ -139,8 +139,8 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
+  * One self-contained event per instance: alias, class name, which group
+  * it belongs to ("Palette", the one-instance-per-class catalog, or
+  * "Root", a live session object - see GetPalette/BuildPalette in
+- * object.c), and the class's published Interface (Widget/Direction/
+- * Default for every property and port) embedded inline. A client never
++ * object.c), and the class's published Interface (Widget/Default for
++ * every property) embedded inline. A client never
+  * needs a separate "what does this class look like" round trip - the
+  * same reasoning that made the palette real instances instead of a
+  * class-description protocol in the first place means an instance's own
+@@ -235,27 +235,42 @@ static void Bridge_SendEventScoped(NodeObj instance, InstanceData *local, char *
+ 
+ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, char *className, NodeObj classNode, char *parent, char *container, int hidden, long connId)
+ {
+-	NodeObj interface, chunk;
++	NodeObj interface, chunk, self;
+ 	char *escAlias, *escClass, *escParent, *escContainer, *interfaceText, *buf;
++	char *escIn, *escOut, *sIn, *sOut;
+ 	int bufLen;
+ 
+ 	interface = classNode ? GetClassInterface(classNode) : NULL;
+ 	interfaceText = interface ? NodeToText(interface) : strdup("null");
+ 
++	/* does this thing name a control that stands in for it at either end of
++	   a wire? The bridge is in-process, so it just ASKS the instance while
++	   it is already describing it - no round trip, nothing subscribes, and
++	   nothing is created by the asking. Empty for anything that declared
++	   neither, which is most things. */
++	self = alias ? ResolvePath(alias) : NULL;
++	sIn  = self ? GetPropStr(self, "ReservedIn")  : NULL;
++	sOut = self ? GetPropStr(self, "ReservedOut") : NULL;
++	escIn  = JsonEscapeStr(sIn  ? sIn  : "");
++	escOut = JsonEscapeStr(sOut ? sOut : "");
++
+ 	escAlias     = JsonEscapeStr(alias ? alias : "");
+ 	escClass     = JsonEscapeStr(className ? className : "");
+ 	escParent    = JsonEscapeStr(parent ? parent : "");
+ 	escContainer = JsonEscapeStr(container ? container : "");
+ 
+-	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer) + (int) strlen(interfaceText) + 160;
++	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
++			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + 220;
+ 	buf = malloc(bufLen);
+-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"interface\":%s}",
+-			 escAlias, escClass, escParent, escContainer, hidden ? "true" : "false", interfaceText);
++	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"interface\":%s}",
++			 escAlias, escClass, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, interfaceText);
+ 
+ 	free(escAlias);
+ 	free(escClass);
+ 	free(escParent);
+ 	free(escContainer);
++	free(escIn);
++	free(escOut);
+ 	free(interfaceText);
+ 
+ 	if (connId)
+@@ -554,18 +569,15 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
+ 		if (node)
+ 			prop = GetNameStr(node);
+ 
+-		/* presentation default, stamped by the ENGINE at birth: what the  */
+-		/* final owner's class published for this property (Widget type and */
+-		/* Direction). The client renders the alias's Widget property - it  */
+-		/* never consults the class Interface to deduce a control            */
+-		/* (readmefirst repair #2). Unpublished properties stay unstamped    */
+-		/* and render as the plain-textbox fallback.                          */
++		/* presentation default, stamped by the ENGINE at birth: the Widget */
++		/* type the final owner's class published for this property. The    */
++		/* client renders the alias's Widget property - it never consults    */
++		/* the class Interface to deduce a control (readmefirst repair #2).  */
++		/* Unpublished properties stay unstamped and render as the plain-    */
++		/* textbox fallback.                                                  */
+ 		pub = InterfacePropForInstance(owner, prop);
+ 		if (pub)
+-		{
+ 			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
+-			SetPropStr(inst, "Direction", GetPropStr(pub, "Direction"));
+-		}
+ 	}
+ 
+ 	SetPropStr(inst, "Target", of);
+@@ -756,7 +768,6 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
+ 			/* from the member's own properties, never from the class        */
+ 			/* Interface (readmefirst repair #2)                              */
+ 			SetPropInt(member, "Widget", GetPropInt(prop, "Widget"));
+-			SetPropStr(member, "Direction", GetPropStr(prop, "Direction"));
+ 
+ 			SetPropStr(member, "Container", viewAlias);
+ 			{
+@@ -1034,7 +1045,7 @@ void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	if (!fromInst || !toInst || !fromPort || !toPort)
+ 	{
+-		Bridge_Error(instance, "connect", "unknown instance or missing port");
++		Bridge_Error(instance, "connect", "unknown instance or missing property name");
+ 		return;
+ 	}
+ 
+@@ -1073,7 +1084,7 @@ void Bridge_BindPort(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	if (!cont || !target || !port || !port[0] || !targetProp || !targetProp[0])
+ 	{
+-		Bridge_Error(instance, "bind-port", "container/port/target/targetProp required");
++		Bridge_Error(instance, "bind-port", "container/property/target/targetProp required");
+ 		return;
+ 	}
+ 
+@@ -1103,7 +1114,7 @@ void Bridge_Disconnect(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	if (!fromInst || !toInst || !fromPort || !toPort)
+ 	{
+-		Bridge_Error(instance, "disconnect", "unknown instance or missing port");
++		Bridge_Error(instance, "disconnect", "unknown instance or missing property name");
+ 		return;
+ 	}
+ 
+@@ -1136,7 +1147,7 @@ void Bridge_BindProperty(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	if (!fromInst || !toInst || !fromPort || !toProp)
+ 	{
+-		Bridge_Error(instance, "bind-property", "unknown instance or missing port/prop");
++		Bridge_Error(instance, "bind-property", "unknown instance or missing property name");
+ 		return;
+ 	}
+ 
+@@ -1158,7 +1169,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	if (!fromInst || !toInst || !fromPort)
+ 	{
+-		Bridge_Error(instance, "bind-activate", "unknown instance or missing port");
++		Bridge_Error(instance, "bind-activate", "unknown instance or missing property name");
+ 		return;
+ 	}
+ 
+@@ -1893,8 +1904,8 @@ NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char
+ 
+ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
+ {
+-	char *alias, *port, *eventType, *name;
+-	NodeObj inst, class, interface, prop, tap;
++	char *alias, *port, *eventType;
++	NodeObj inst, tap;
+ 
+ 	alias = GetPropStr(command, "instance");
+ 	port  = GetPropStr(command, "port");
+@@ -1929,28 +1940,13 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
+ 		}
+ 	}
+ 
+-	/* the source class already published what this property is (Phase */
+-	/* 1.4) - a "data" property is watched as property-changed, an     */
+-	/* "in"/"out" port as message-flowed, so the client never has to    */
+-	/* tell the bridge which kind it is asking for                      */
+-	eventType = "message-flowed";
+-	class = GetParent(inst);
+-	interface = class ? GetClassInterface(class) : NULL;
+-	prop = interface ? GetChild(interface) : NULL;
+-	while (prop)
+-	{
+-		char *direction;
+-
+-		name = GetPropStr(prop, "Name");
+-		if (name && strcmp(name, port) == 0)
+-		{
+-			direction = GetPropStr(prop, "Direction");
+-			if (direction && strcmp(direction, "data") == 0)
+-				eventType = "property-changed";
+-			break;
+-		}
+-		prop = GetNextSibling(prop);
+-	}
++	/* One kind of event, because there is one kind of thing. Every       */
++	/* property is a node; if it changes and something subscribed to it,  */
++	/* that change is sent out. There is no "data property" vs "in/out    */
++	/* port" distinction to look up - naming a property In or Out never   */
++	/* made it a different species, and the class Interface no longer      */
++	/* claims otherwise.                                                   */
++	eventType = "property-changed";
+ 
+ 	/* reconnects re-subscribe to everything they can see, so without    */
+ 	/* this check every page load stacked another identical tap on the   */
+@@ -2006,14 +2002,11 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
+ 		SetConnState(conns, local->replyConn, 1);
+ 	}
+ 
+-	/* subscribing is truth-on-demand, not just a promise of future deltas -  */
+-	/* a data property already has a current value sitting right there, so   */
+-	/* hand it over immediately instead of leaving the client showing        */
+-	/* nothing (or a stale default) until the next unrelated write happens   */
+-	/* to touch it. A port has no such resting value, so this only applies   */
+-	/* to "data" properties.                                                  */
+-	if (strcmp(eventType, "property-changed") == 0)
+-		Bridge_TapOnIn(tap, msg_change, GetPropNode(inst, port));
++	/* the client renders FROM this: a MenuButton draws itself when Label/
++	   Items/Selected arrive, a view's resize handle is hidden until
++	   Resizeable arrives as "1". Removing this push left both waiting
++	   forever - no menus, no resize. */
++	Bridge_TapOnIn(tap, msg_change, GetPropNode(inst, port));
+ }
+ 
+ /* targeted - only the client that logged in needs to see it */
+@@ -2699,11 +2692,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	ClassSelf = RegisterClass(library, class);
+ 
+-	PublishProp(ClassSelf, "Enable",      "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "In",          "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Out",         "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "State",       "data", PROP_LED, "1");
+-	PublishProp(ClassSelf, "RequireAuth", "data", PROP_CHECKBOX, "0");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
++	PublishProp(ClassSelf, "RequireAuth", PROP_CHECKBOX, "0");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/button/button.c b/objects/button/button.c
+index 71b5e8c..3bf9866 100644
+--- a/objects/button/button.c
++++ b/objects/button/button.c
+@@ -130,10 +130,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Label",  "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/charactermap/charactermap.c b/objects/charactermap/charactermap.c
+index 9a92914..884cde4 100644
+--- a/objects/charactermap/charactermap.c
++++ b/objects/charactermap/charactermap.c
+@@ -441,14 +441,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, CharMapPanel);
+ 
+ 	/* the preset menu's backing list and the lifecycle state - no control */
+-	PublishProp(ClassSelf, "PresetList", "data", PROP_NULL,
++	PublishProp(ClassSelf, "PresetList", PROP_NULL,
+ 				"default,Upper Case,Lower Case,"
+ 				"Strip CR (Win->Unix),CR->LF (Mac->Unix),LF->CR (Unix->Mac),"
+ 				"Backslash->Slash,Slash->Backslash,ROT13,"
+ 				"Comma->Tab (CSV->TSV),Tab->Comma (TSV->CSV),"
+ 				"Swap Quotes,Swap Brackets,Strip Tabs,"
+ 				"ASCII to EBCDIC,EBCDIC to ASCII");
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/checkbox/checkbox.c b/objects/checkbox/checkbox.c
+index b02243f..bb9d454 100644
+--- a/objects/checkbox/checkbox.c
++++ b/objects/checkbox/checkbox.c
+@@ -140,10 +140,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_CHECKBOX, "0");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_CHECKBOX, "0");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/comfyui/comfyui.c b/objects/comfyui/comfyui.c
+index 240af64..b86b06f 100644
+--- a/objects/comfyui/comfyui.c
++++ b/objects/comfyui/comfyui.c
+@@ -950,8 +950,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, ComfyPanel);
+ 
+ 	/* the wire input and the lifecycle state - no on-screen control */
+-	PublishProp(ClassSelf, "In",    "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/dropdown/dropdown.c b/objects/dropdown/dropdown.c
+index 16f55b0..a58ac50 100644
+--- a/objects/dropdown/dropdown.c
++++ b/objects/dropdown/dropdown.c
+@@ -143,11 +143,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_MENU, "");
+-	PublishProp(ClassSelf, "Items",  "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_MENU, "");
++	PublishProp(ClassSelf, "Items", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/html/html.c b/objects/html/html.c
+index 9567629..ee6072d 100644
+--- a/objects/html/html.c
++++ b/objects/html/html.c
+@@ -137,10 +137,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_HTML, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_HTML, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/image/image.c b/objects/image/image.c
+index f3ff31c..b0809d9 100644
+--- a/objects/image/image.c
++++ b/objects/image/image.c
+@@ -124,10 +124,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_IMAGE, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_IMAGE, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/jsscript/jsscript.c b/objects/jsscript/jsscript.c
+index 249152b..b8e24f8 100644
+--- a/objects/jsscript/jsscript.c
++++ b/objects/jsscript/jsscript.c
+@@ -453,14 +453,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	ClassSelf = RegisterClass(library, class);
+ 
+-	PublishProp(ClassSelf, "Source", "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "Print",  "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "Cmd",    "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "Evt",    "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Source", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "Print", PROP_NULL, "");
++	PublishProp(ClassSelf, "Cmd", PROP_NULL, "");
++	PublishProp(ClassSelf, "Evt", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/knob/knob.c b/objects/knob/knob.c
+index b2ca7d8..3902865 100644
+--- a/objects/knob/knob.c
++++ b/objects/knob/knob.c
+@@ -139,10 +139,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_KNOB, "0");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_KNOB, "0");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/label/label.c b/objects/label/label.c
+index 63f22df..575933a 100644
+--- a/objects/label/label.c
++++ b/objects/label/label.c
+@@ -139,10 +139,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_LABEL, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_LABEL, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/led/led.c b/objects/led/led.c
+index 63bda9b..5eaf675 100644
+--- a/objects/led/led.c
++++ b/objects/led/led.c
+@@ -143,10 +143,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_LED, "0");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_LED, "0");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/logicgate/logicgate.c b/objects/logicgate/logicgate.c
+index 0c1842c..a237722 100644
+--- a/objects/logicgate/logicgate.c
++++ b/objects/logicgate/logicgate.c
+@@ -244,9 +244,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, LogicGatePanel);
+ 
+ 	/* the wire input, the dropdown's backing list, and the lifecycle state */
+-	PublishProp(ClassSelf, "In",           "data", PROP_NULL, "0");
+-	PublishProp(ClassSelf, "GateModeList", "data", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
+-	PublishProp(ClassSelf, "State",        "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "0");
++	PublishProp(ClassSelf, "GateModeList", PROP_NULL, "OR Gate,AND Gate,XOR Gate,Parity Gate");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/lua/script.c b/objects/lua/script.c
+index b4ecc1a..58247ef 100644
+--- a/objects/lua/script.c
++++ b/objects/lua/script.c
+@@ -426,11 +426,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	ClassSelf = RegisterClass(library, class);
+ 
+-	PublishProp(ClassSelf, "Source", "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Out",    "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Source", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/markdown/markdown.c b/objects/markdown/markdown.c
+index 3482289..b6fed12 100644
+--- a/objects/markdown/markdown.c
++++ b/objects/markdown/markdown.c
+@@ -139,10 +139,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_MARKDOWN, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_MARKDOWN, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/mcpsource/mcpsource.c b/objects/mcpsource/mcpsource.c
+index 1143e09..23f6da2 100644
+--- a/objects/mcpsource/mcpsource.c
++++ b/objects/mcpsource/mcpsource.c
+@@ -1436,17 +1436,17 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	SourceClass = RegisterClass(library, sourceClass);
+ 	PublishPosition(SourceClass);
+ 	Widget_Publish(SourceClass, MCPSourcePanel);
+-	PublishProp(SourceClass, "HostName", "data", PROP_TEXTBOX, "127.0.0.1");
+-	PublishProp(SourceClass, "Port",     "data", PROP_TEXTBOX, "8081");
+-	PublishProp(SourceClass, "ViewName", "data", PROP_TEXTBOX, "MCPAgents");
++	PublishProp(SourceClass, "HostName", PROP_TEXTBOX, "127.0.0.1");
++	PublishProp(SourceClass, "Port", PROP_TEXTBOX, "8081");
++	PublishProp(SourceClass, "ViewName", PROP_TEXTBOX, "MCPAgents");
+ 
+ 	SetName(agentClass, "MCPAgent");
+ 	SetPropLong(agentClass, "InstanceStart", (long)MCPAgent_InstanceStart);
+ 	SetPropLong(agentClass, "InstanceEnd", (long)MCPAgent_InstanceEnd);
+ 	MCPAgentClass = RegisterClass(library, agentClass);
+ 	PublishPosition(MCPAgentClass);
+-	PublishProp(MCPAgentClass, "AgentName",     "data", PROP_TEXTBOX, "");
+-	PublishProp(MCPAgentClass, "ConnectorPath", "data", PROP_TEXTBOX, "");
++	PublishProp(MCPAgentClass, "AgentName", PROP_TEXTBOX, "");
++	PublishProp(MCPAgentClass, "ConnectorPath", PROP_TEXTBOX, "");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/menubutton/menubutton.c b/objects/menubutton/menubutton.c
+index e56cb1c..293a364 100644
+--- a/objects/menubutton/menubutton.c
++++ b/objects/menubutton/menubutton.c
+@@ -149,12 +149,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Label",    "data", PROP_LABEL, "Menu");
+-	PublishProp(ClassSelf, "Items",    "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Selected", "data", PROP_MENU, "");
+-	PublishProp(ClassSelf, "In",       "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Label", PROP_LABEL, "Menu");
++	PublishProp(ClassSelf, "Items", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Selected", PROP_MENU, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/mobutton/mobutton.c b/objects/mobutton/mobutton.c
+index 2103b0b..98f2963 100644
+--- a/objects/mobutton/mobutton.c
++++ b/objects/mobutton/mobutton.c
+@@ -225,13 +225,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Label",    "data", PROP_TEXTBOX, "Press");
+-	PublishProp(ClassSelf, "Value",    "data", PROP_LED, "0");
+-	PublishProp(ClassSelf, "Interval", "data", PROP_TEXTBOX, "0");
+-	PublishProp(ClassSelf, "Press",    "in",   PROP_NULL, "0");
+-	PublishProp(ClassSelf, "Out",      "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "Press");
++	PublishProp(ClassSelf, "Value", PROP_LED, "0");
++	PublishProp(ClassSelf, "Interval", PROP_TEXTBOX, "0");
++	PublishProp(ClassSelf, "Press", PROP_NULL, "0");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/network/tcp.c b/objects/network/tcp.c
+index 66bbbc0..320a1ab 100755
+--- a/objects/network/tcp.c
++++ b/objects/network/tcp.c
+@@ -967,19 +967,19 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	ClassSelf = RegisterClass(library, class);
+ 
+-	PublishProp(ClassSelf, "LocalPort", "data", PROP_TEXTBOX, "8080");
+-	PublishProp(ClassSelf, "RemoteAddr", "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "RemotePort", "data", PROP_TEXTBOX, "0");
+-	PublishProp(ClassSelf, "Connected",  "data", PROP_LED, "0");
+-	PublishProp(ClassSelf, "Secure",    "data", PROP_CHECKBOX, "0");
+-	PublishProp(ClassSelf, "SslCert",   "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "SslKey",    "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "SslPass",   "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "Secured",   "data", PROP_LED, "0");
+-	PublishProp(ClassSelf, "Enable",    "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "In",        "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Out",       "out",  PROP_NULL, "");
+-	PublishProp(ClassSelf, "State",     "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "LocalPort", PROP_TEXTBOX, "8080");
++	PublishProp(ClassSelf, "RemoteAddr", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "RemotePort", PROP_TEXTBOX, "0");
++	PublishProp(ClassSelf, "Connected", PROP_LED, "0");
++	PublishProp(ClassSelf, "Secure", PROP_CHECKBOX, "0");
++	PublishProp(ClassSelf, "SslCert", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "SslKey", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "SslPass", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Secured", PROP_LED, "0");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/ollama/ollama.c b/objects/ollama/ollama.c
+index 3393374..ba0457a 100644
+--- a/objects/ollama/ollama.c
++++ b/objects/ollama/ollama.c
+@@ -777,8 +777,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, OllamaPanel);
+ 
+ 	/* the Models menu's backing list and the lifecycle state - no control */
+-	PublishProp(ClassSelf, "ModelsList", "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "ModelsList", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/pulsegenerator/pulsegenerator.c b/objects/pulsegenerator/pulsegenerator.c
+index 96e9219..b1ee6cd 100644
+--- a/objects/pulsegenerator/pulsegenerator.c
++++ b/objects/pulsegenerator/pulsegenerator.c
+@@ -331,7 +331,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	/* every control, from the table (widget type from each control's class) */
+ 	Widget_Publish(ClassSelf, PulseGenPanel);
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");	/* lifecycle, no control */
++	PublishProp(ClassSelf, "State", PROP_LED, "1");	/* lifecycle, no control */
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/reader/reader.c b/objects/reader/reader.c
+index 08fa1a8..9ebba03 100755
+--- a/objects/reader/reader.c
++++ b/objects/reader/reader.c
+@@ -219,6 +219,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
+ 	SetPropLong(instance, "local", (long)local);
+ 	SetPropLong(instance, "Activate", (long)Reader_Activate);
+ 
++	/* wiring from this icon means wiring from Out - a Reader is a source,
++	   so it stands in for its own Out and has no In stand-in at all
++	   (Connect, object.c; the client shows one dot for what is set) */
++	SetPropStr(instance, "ReservedOut", "Out");
++
+ 	InitPosition(instance);
+ 	Widget_MainSize(instance, ReaderPanel);
+ 	RegisterInstance(class, instance);
+@@ -258,7 +263,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	/* every control, from the table (Out among them, shown as a readout) */
++	/* every control, from the table */
+ 	Widget_Publish(ClassSelf, ReaderPanel);
+ 
+ 	return rtrn_handled;
+diff --git a/objects/regexp/regexp.c b/objects/regexp/regexp.c
+index bb85d96..d3870f9 100644
+--- a/objects/regexp/regexp.c
++++ b/objects/regexp/regexp.c
+@@ -358,8 +358,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, RegExpPanel);
+ 
+ 	/* the Action menu's backing list and the lifecycle state - no control */
+-	PublishProp(ClassSelf, "ActionList", "data", PROP_NULL, "Match,Reject,Replace,Replace Line");
+-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "ActionList", PROP_NULL, "Match,Reject,Replace,Replace Line");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/scriptbox/scriptbox.c b/objects/scriptbox/scriptbox.c
+index 230bc0e..6df0774 100644
+--- a/objects/scriptbox/scriptbox.c
++++ b/objects/scriptbox/scriptbox.c
+@@ -368,7 +368,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	/* every control, from the table (Language menu, Source/Output boxes, the
+ 	   visible In toggle, Out readout - widget type from each control's class) */
+ 	Widget_Publish(ClassSelf, ScriptBoxPanel);
+-	PublishProp(ClassSelf, "LanguageList", "data", PROP_NULL, "");	/* menu options, no control */
++	PublishProp(ClassSelf, "LanguageList", PROP_NULL, "");	/* menu options, no control */
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/skeleton/skeleton.c b/objects/skeleton/skeleton.c
+index 6d09992..bb92402 100644
+--- a/objects/skeleton/skeleton.c
++++ b/objects/skeleton/skeleton.c
+@@ -223,8 +223,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	/* the properties with no on-screen control: the wire input and the
+ 	   lifecycle state. TODO: publish your own non-control ports / *List props. */
+-	PublishProp(ClassSelf, "In",    "data", PROP_NULL, "0");
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "0");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/slider/slider.c b/objects/slider/slider.c
+index 76cc1e7..b35f03c 100644
+--- a/objects/slider/slider.c
++++ b/objects/slider/slider.c
+@@ -139,10 +139,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_SLIDER, "0");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_SLIDER, "0");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/stablediffusion/old/stablediffusion.c b/objects/stablediffusion/old/stablediffusion.c
+index b87beb0..7142001 100644
+--- a/objects/stablediffusion/old/stablediffusion.c
++++ b/objects/stablediffusion/old/stablediffusion.c
+@@ -889,8 +889,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	Widget_Publish(ClassSelf, SDPanel);
+ 
+-	PublishProp(ClassSelf, "In",    "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/stablediffusion/stablediffusion.c b/objects/stablediffusion/stablediffusion.c
+index 7958d4b..06c03cd 100644
+--- a/objects/stablediffusion/stablediffusion.c
++++ b/objects/stablediffusion/stablediffusion.c
+@@ -920,9 +920,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	Widget_Publish(ClassSelf, SDPanel);
+ 
+-	PublishProp(ClassSelf, "ModelsList", "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "In",         "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "ModelsList", PROP_NULL, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/stopwatch/stopwatch.c b/objects/stopwatch/stopwatch.c
+index 3045052..3b08c8e 100644
+--- a/objects/stopwatch/stopwatch.c
++++ b/objects/stopwatch/stopwatch.c
+@@ -303,10 +303,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 	Widget_Publish(ClassSelf, StopwatchPanel);
+ 
+ 	/* the dropdowns' backing lists and the lifecycle state - no on-screen control */
+-	PublishProp(ClassSelf, "RunEdgeList",   "data", PROP_NULL, "Positive,Negative");
+-	PublishProp(ClassSelf, "StopEdgeList",  "data", PROP_NULL, "Run Ends,Positive,Negative");
+-	PublishProp(ClassSelf, "TimeUnitsList", "data", PROP_NULL, "msecs,secs");
+-	PublishProp(ClassSelf, "State",         "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "RunEdgeList", PROP_NULL, "Positive,Negative");
++	PublishProp(ClassSelf, "StopEdgeList", PROP_NULL, "Run Ends,Positive,Negative");
++	PublishProp(ClassSelf, "TimeUnitsList", PROP_NULL, "msecs,secs");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/tcpport/tcpport.c b/objects/tcpport/tcpport.c
+index 56abb1d..04db645 100644
+--- a/objects/tcpport/tcpport.c
++++ b/objects/tcpport/tcpport.c
+@@ -691,6 +691,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
+ 	SetPropInt(instance, "Out", 0);
+ 	SetPropLong(instance, "local", (long)local);
+ 	SetPropLong(instance, "Activate", (long)TCPPort_Activate);
++
++	/* wiring at this icon means wiring at the data going over the wire:
++	   what you send is TxData, what arrives is RxData (Connect, object.c) */
++	SetPropStr(instance, "ReservedIn",  "TxData");
++	SetPropStr(instance, "ReservedOut", "RxData");
+ 	Widget_Port(instance, "In",      "", (void *)TCPPort_OnIn);
+ 	Widget_Port(instance, "InnerRx", "", (void *)TCPPort_OnInnerRx);
+ 	Widget_Port(instance, "InnerUp", "", (void *)TCPPort_OnInnerUp);
+@@ -833,9 +838,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	/* the three with no on-screen control: the two dataflow ports and the
+ 	   dropdown's backing list */
+-	PublishProp(ClassSelf, "In",               "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "Out",              "data", PROP_NULL, "");
+-	PublishProp(ClassSelf, "StandardPortList", "data", PROP_NULL, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Out", PROP_NULL, "");
++	PublishProp(ClassSelf, "StandardPortList", PROP_NULL, "");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/textbox/textbox.c b/objects/textbox/textbox.c
+index ee0a1b2..4c4374c 100644
+--- a/objects/textbox/textbox.c
++++ b/objects/textbox/textbox.c
+@@ -144,17 +144,17 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_TEXTBOX, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	/* the box's own declared size, in characters - a data property so it   */
+ 	/* is subscribed and PUSHED to the client on instantiation like any     */
+ 	/* value: the box goes and gets its size the moment it is rendered,     */
+ 	/* rather than every Textbox rendering at one hard-coded default         */
+-	PublishProp(ClassSelf, "Rows",   "data", PROP_NULL, "1");
+-	PublishProp(ClassSelf, "Cols",   "data", PROP_NULL, "20");
++	PublishProp(ClassSelf, "Rows", PROP_NULL, "1");
++	PublishProp(ClassSelf, "Cols", PROP_NULL, "20");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/textout/textout.c b/objects/textout/textout.c
+index 9175731..4538177 100644
+--- a/objects/textout/textout.c
++++ b/objects/textout/textout.c
+@@ -139,10 +139,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_TEXTOUT, "");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_TEXTOUT, "");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/view/view.c b/objects/view/view.c
+index e15b5f1..1c968c2 100644
+--- a/objects/view/view.c
++++ b/objects/view/view.c
+@@ -98,6 +98,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
+ 	SetPropStr(instance, "ReservedViewResizeable", "1");
+ 	SetPropStr(instance, "ReservedViewMode", "");
+ 
++	/* which control inside stands in for this View at each end of a wire,
++	   so a connection can be dropped on the closed icon instead of opening
++	   the panel to find it - read by Connect() (object.c), Views only.
++	   Empty means no stand-in: a wire lands on the View itself. */
++	SetPropStr(instance, "ReservedIn", "");
++	SetPropStr(instance, "ReservedOut", "");
++
+ 	/* Open/PanelX/PanelY come from InitPosition like every other class - */
+ 	/* a View's panel is not special, every thing's panel works the same   */
+ 	InitPosition(instance);
+@@ -132,10 +139,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	ClassSelf = RegisterClass(library, class);
+ 
+-	PublishProp(ClassSelf, "Enable",     "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
+-	PublishProp(ClassSelf, "ReservedViewResizeable", "data", PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "ReservedViewMode",       "data", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
++	PublishProp(ClassSelf, "ReservedViewResizeable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "ReservedViewMode", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "ReservedIn", PROP_TEXTBOX, "");
++	PublishProp(ClassSelf, "ReservedOut", PROP_TEXTBOX, "");
+ 	PublishPosition(ClassSelf);
+ 
+ 	return rtrn_handled;
+diff --git a/objects/vumeter/vumeter.c b/objects/vumeter/vumeter.c
+index e307e84..2592051 100644
+--- a/objects/vumeter/vumeter.c
++++ b/objects/vumeter/vumeter.c
+@@ -143,10 +143,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	PublishProp(ClassSelf, "Value",  "data", PROP_VUMETER, "0");
+-	PublishProp(ClassSelf, "In",     "in",   PROP_NULL, "");
+-	PublishProp(ClassSelf, "Enable", "in",   PROP_CHECKBOX, "1");
+-	PublishProp(ClassSelf, "State",  "data", PROP_LED, "1");
++	PublishProp(ClassSelf, "Value", PROP_VUMETER, "0");
++	PublishProp(ClassSelf, "In", PROP_NULL, "");
++	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
++	PublishProp(ClassSelf, "State", PROP_LED, "1");
+ 
+ 	return rtrn_handled;
+ }
+diff --git a/objects/writer/writer.c b/objects/writer/writer.c
+index bb0126d..ed2d74f 100755
+--- a/objects/writer/writer.c
++++ b/objects/writer/writer.c
+@@ -247,6 +247,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
+ 	SetPropLong(instance, "local", (long)local);
+ 	SetPropLong(instance, "Activate", (long)Writer_Activate);
+ 
++	/* wiring to this icon means wiring to In - a Writer is a sink, so it
++	   stands in for its own In and has no Out stand-in at all (Connect,
++	   object.c; the client shows one dot for what is set) */
++	SetPropStr(instance, "ReservedIn", "In");
++
+ 	InitPosition(instance);
+ 	Widget_MainSize(instance, WriterPanel);
+ 	RegisterInstance(class, instance);
+@@ -288,7 +293,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
+ 
+ 	PublishPosition(ClassSelf);
+ 
+-	/* every control, from the table (In among them, shown as a readout) */
++	/* every control, from the table */
+ 	Widget_Publish(ClassSelf, WriterPanel);
+ 
+ 	return rtrn_handled;
+diff --git a/testharness/connectiontest.py b/testharness/connectiontest.py
+index bee9d97..8eef9dd 100644
+--- a/testharness/connectiontest.py
++++ b/testharness/connectiontest.py
+@@ -228,6 +228,76 @@ def test_chained_wires(raw, r, home):
+              drives(raw, a, c, "62"))
+ 
+ 
++def test_view_stand_in(raw, r, home):
++    """ReservedIn/ReservedOut: a View can stand in for one of the controls
++    inside it, so a wire can be dropped on its closed ICON instead of
++    opening the panel to hunt for the control. Connect() (object.c) does
++    the redirect, so the real subscription lands on the inner control and
++    every graph walker - list-connections, clone, Disconnect - sees the
++    true endpoints. The View is never itself an endpoint.
++
++    Guards the mechanism that was asked for a month before it existed and
++    got replaced by an invented in/out "Direction" on every property of
++    every class instead. Nothing here is a direction ON a property: it
++    answers which internal stands in for the View at each END OF A WIRE,
++    which is a fact about the View's composition."""
++    view  = group_view(raw, home, "StandIn")
++    inner = make_slider(raw, view, 10, 10)
++    src   = make_slider(raw, home, 20, 140)
++    sink  = make_slider(raw, home, 20, 200)
++    if not (inner and src and sink):
++        r.expect("view stand-in: fixtures built", "view + 3 sliders",
++                 "inner=%s src=%s sink=%s" % (inner, src, sink), False)
++        return
++    leaf = inner.rsplit("/", 1)[1]
++
++    # --- ReservedIn: wiring TO the view lands on the inner control -------
++    raw.send({"cmd": "set-property", "instance": view,
++              "prop": "ReservedIn", "value": leaf + "/Value"})
++    raw.send({"cmd": "connect", "from": src, "fromPort": "Value",
++              "to": view, "toPort": "Value"})
++
++    wires = [w for w in connections(raw) if w[0] == src]
++    r.expect("ReservedIn: the wire lands on the inner control, not the View",
++             "(%s, Value, %s, Value) - the View is not an endpoint" % (src, inner),
++             "wires from %s: %s" % (src, wires),
++             (src, "Value", inner, "Value") in wires)
++
++    r.expect("ReservedIn: it actually drives the inner control",
++             "writing %s.Value moves %s.Value" % (src, inner),
++             "driven: %s" % drives(raw, src, inner, "61"),
++             drives(raw, src, inner, "62"))
++
++    # --- ReservedOut: wiring FROM the view sources from the control ------
++    raw.send({"cmd": "set-property", "instance": view,
++              "prop": "ReservedOut", "value": leaf + "/Value"})
++    raw.send({"cmd": "connect", "from": view, "fromPort": "Value",
++              "to": sink, "toPort": "Value"})
++
++    wires = [w for w in connections(raw) if w[2] == sink]
++    r.expect("ReservedOut: the wire sources from the inner control",
++             "(%s, Value, %s, Value) - the View is not an endpoint" % (inner, sink),
++             "wires into %s: %s" % (sink, wires),
++             (inner, "Value", sink, "Value") in wires)
++
++    r.expect("ReservedOut: it actually drives from the inner control",
++             "writing %s.Value moves %s.Value" % (inner, sink),
++             "driven: %s" % drives(raw, inner, sink, "71"),
++             drives(raw, inner, sink, "72"))
++
++    # --- unset means no redirect: the View is an ordinary endpoint -------
++    plain = group_view(raw, home, "NoStandIn")
++    raw.send({"cmd": "connect", "from": src, "fromPort": "Value",
++              "to": plain, "toPort": "Value"})
++    wires = [w for w in connections(raw) if w[0] == src and w[2] == plain]
++    r.expect("no ReservedIn: the View is an ordinary endpoint",
++             "(%s, Value, %s, Value) - unset means no redirect at all" % (src, plain),
++             "wires from %s to %s: %s" % (src, plain, wires),
++             (src, "Value", plain, "Value") in wires)
++    close_group(raw, plain)
++    close_group(raw, view)
++
++
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument("--host", default="127.0.0.1")
+@@ -267,6 +337,10 @@ def main():
+     test_chained_wires(raw, r, g)
+     close_group(raw, g)
+ 
++    g = group_view(raw, home, "ViewStandIn")
++    test_view_stand_in(raw, r, g)
++    close_group(raw, g)
++
+     raw.close()
+     sys.exit(1 if r.summary() else 0)
+ 
+diff --git a/web/app.js b/web/app.js
+index 23cc1fe..26439c3 100644
+--- a/web/app.js
++++ b/web/app.js
+@@ -54,7 +54,7 @@ const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PR
+ const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
+ 
+ let ws = null;
+-let classes = {};          // className -> [{Name,Direction,Widget,Default}, ...]
++let classes = {};          // className -> [{Name,Widget,Default}, ...]
+ let instances = {};        // alias -> {className, el, ports: {name: dotEl}}
+ let selfDisplays = {};     // "alias.propName" -> {el,widgetClass}, for a widget class's own State shown on itself
+ let liveControls = {};     // "alias.propName" -> {el,widgetClass}, an editable control synced from its own property-changed events
+@@ -322,7 +322,8 @@ function handleEvent(msg) {
+       if (currentMode === 'Connect') send({ cmd: 'list-connections' });
+       break;
+     case 'instance-created':
+-      onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container);
++      onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
++                        msg.reservedIn, msg.reservedOut);
+       break;
+     case 'property-changed':
+       onPropertyChanged(msg.instance, msg.port, msg.value);
+@@ -375,7 +376,6 @@ function handleEvent(msg) {
+ function parseInterface(interfaceNode) {
+   return (interfaceNode && interfaceNode.children || []).map((p) => ({
+     Name: nodeProp(p, 'Name'),
+-    Direction: nodeProp(p, 'Direction'),
+     Widget: parseInt(nodeProp(p, 'Widget'), 10),
+     Default: nodeProp(p, 'Default'),
+     /* an object can declare its own box size on the published entry       */
+@@ -1015,7 +1015,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
+ /* built by the server with Mode="Clone" and Deletable="0" already set        */
+ /* (BuildPalette, object.c) - nothing here knows or cares that any            */
+ /* particular View happens to be "the palette".                              */
+-function registerView(alias, props, pos, hidden, container) {
++function registerView(alias, props, pos, hidden, container, reservedIn, reservedOut) {
+   /* the icon IS the view's permanent presence - it never goes away.        */
+   /* Opening shows the panel as a separate element with its own position    */
+   /* (PanelX/PanelY, real shared properties independent of the icon's        */
+@@ -1035,6 +1035,7 @@ function registerView(alias, props, pos, hidden, container) {
+   iconLabel.textContent = baseName(alias);
+   iconLabel.title = alias;
+   icon.appendChild(iconLabel);
++
+   wrap.appendChild(icon);
+ 
+   /* the panel floats at the ROOT wherever PanelX/PanelY say, whatever    */
+@@ -1114,6 +1115,9 @@ function registerView(alias, props, pos, hidden, container) {
+   placeInContainer(wrap, container || '');
+   flushPendingContainer(alias);
+ 
++  /* ports start EMPTY: a dot is created below only for a stand-in this view
++     actually declared. An endpoint that was never declared therefore cannot
++     exist, let alone be shown or clicked. */
+   instances[alias] = { className: 'View', el: wrap, ports: {} };
+   livePositions[alias] = { el: wrap };
+ 
+@@ -1124,6 +1128,10 @@ function registerView(alias, props, pos, hidden, container) {
+   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewMode' });	/* a view may pin its mode */
+   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
+   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewResizeable' });
++  /* the connect gesture's handles - one dot per stand-in this thing
++     actually declared, from what the bridge asked it when announcing it */
++  addStandInDot(alias, view, 'ReservedIn', reservedIn);
++  addStandInDot(alias, view, 'ReservedOut', reservedOut);
+ 
+   log('created ' + alias + ' (View)', 'event');
+ }
+@@ -1160,7 +1168,8 @@ document.addEventListener('pointerup', () => {
+   resizeState = null;
+ });
+ 
+-function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container) {
++function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
++                           reservedIn, reservedOut) {
+   /* replays are idempotent - a container listed twice (or an instance     */
+   /* that arrived live before its container's members were fetched) never  */
+   /* renders twice                                                          */
+@@ -1199,7 +1208,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
+   /* because it's the one class that actually contains other instances,    */
+   /* not because it's a Palette.                                           */
+   if (className === 'View') {
+-    registerView(alias, props, pos, hidden, container);
++    registerView(alias, props, pos, hidden, container, reservedIn, reservedOut);
+     return;
+   }
+ 
+@@ -1229,7 +1238,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
+      The object does not lay anything out; the view does, exactly as it
+      does for a hand-built View or the palette. No card, no stacked rows,
+      no special case. */
+-  registerView(alias, props, pos, false, container);
++  registerView(alias, props, pos, false, container, reservedIn, reservedOut);
+ }
+ 
+ function updateReadout(el, widgetClass, value) {
+@@ -1240,6 +1249,45 @@ function updateReadout(el, widgetClass, value) {
+   else el.textContent = value;
+ }
+ 
++/*
++ * The connect gesture's handles on a view icon. PURELY VISUAL: a dot is not
++ * a port and nothing about it exists in the engine - it is somewhere to
++ * click, and a completed gesture sends exactly ONE connect naming the view.
++ * The engine's ReservedIn/ReservedOut then decides where that one connection
++ * actually lands (Connect, object.c); the client never needs to know.
++ *
++ * A dot is drawn only where the class declared a stand-in, which arrives in
++ * the published interface with instance-created like every other property -
++ * so a Reader shows one on the right, a Writer one on the left, a TCPPort
++ * both, and a plain View (which declares neither) none at all. No dot means
++ * nothing to click, which is also what stops a view being wired by accident.
++ *
++ * The dot is the only thing in the icon that takes the mouse: it stops every
++ * phase of the gesture, so the icon's own drag and open handlers underneath
++ * can never swallow it.
++ */
++function addStandInDot(alias, view, which, spec) {
++  if (!spec || !spec.length) return;
++
++  /* remembered so the wire drawn to the inner control can also be mirrored
++     to this icon (standInView / onConnected) - the same one fact, not a
++     second lookup somewhere else */
++  (view.standIn = view.standIn || {})[which] = spec;
++
++  const dot = document.createElement('div');
++  dot.className = 'view-dot ' + (which === 'ReservedIn' ? 'in' : 'out');
++  dot.title = (which === 'ReservedIn' ? 'wire in → ' : 'wire out → ') + spec;
++  ['pointerdown', 'pointerup', 'click'].forEach((type) => {
++    dot.addEventListener(type, (ev) => {
++      ev.stopPropagation();
++      ev.preventDefault();
++      if (type === 'click') onPortClick(aliasOfEl(view.el, alias), which, dot);
++    });
++  });
++  view.icon.appendChild(dot);
++  if (instances[alias]) instances[alias].ports[which] = dot;
++}
++
+ function onPropertyChanged(alias, port, value) {
+   /* every property-changed event already carries the current value -      */
+   /* caching it costs nothing and is what makes Clone (below) able to       */
+@@ -1304,13 +1352,13 @@ function onPropertyChanged(alias, port, value) {
+   }
+ 
+   /* an Alias atom assembles itself from its own properties as they arrive  */
+-  /* (Target/TargetProp say what it stands for, Widget/Direction are the    */
+-  /* engine's stamped presentation, Label its own) - see registerAliasAtom.  */
++  /* (Target/TargetProp say what it stands for, Widget is the engine's      */
++  /* stamped presentation, Label its own) - see registerAliasAtom.           */
+   /* An internals-view member additionally becomes a row on its owner's      */
+   /* card panel (maybeBuildCardRow) - same member, second projection.         */
+   const aliasAtom = aliasAtoms[alias];
+   if (aliasAtom) {
+-    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Direction' || port === 'Label') {
++    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Label') {
+       aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
+       renderAliasControl(alias);
+     } else if (port === 'Container') {
+@@ -1422,26 +1470,57 @@ function wireKey(fromAlias, fromPort, toAlias, toPort) {
+   return fromAlias + '.' + fromPort + '>' + toAlias + '.' + toPort;
+ }
+ 
+-function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
++/* the arrowhead, defined once and referenced by every wire layer: an      */
++/* url(#id) reference resolves document-wide, so the per-view svgs share    */
++/* the root overlay's marker instead of each growing their own             */
++function ensureWireMarkers() {
++  const root = $('wires');
++  if (!root || root.querySelector('#wire-arrow')) return;
++  const defs = document.createElementNS(SVGNS, 'defs');
++  const m = document.createElementNS(SVGNS, 'marker');
++  m.setAttribute('id', 'wire-arrow');
++  m.setAttribute('viewBox', '0 0 10 10');
++  m.setAttribute('refX', '9');         /* the tip sits at the line's end point */
++  m.setAttribute('refY', '5');
++  m.setAttribute('markerWidth', '7');
++  m.setAttribute('markerHeight', '7');
++  m.setAttribute('orient', 'auto');    /* follows the line, so it always points at the sink */
++  const p = document.createElementNS(SVGNS, 'path');
++  p.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
++  p.setAttribute('fill', '#6b9fe6');   /* matches the stroke in style.css */
++  m.appendChild(p);
++  defs.appendChild(m);
++  root.appendChild(defs);
++}
++
++/* onDisc: what the mid-wire "x" should disconnect. A mirror wire drawn to */
++/* a View's icon is a second rendering of ONE real connection, so its "x"  */
++/* must remove that real connection, not a wire to the View that never     */
++/* existed (the engine redirected it away at Connect time).                */
++function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl, onDisc) {
+   const key = wireKey(fromAlias, fromPort, toAlias, toPort);
+   if (wires.some((w) => w.key === key)) return;   /* a wire spanning two views is announced once per view */
+ 
++  ensureWireMarkers();
+   const svg = wireLayerFor(fromEl, toEl);
+   const line = document.createElementNS(SVGNS, 'line');
++  line.setAttribute('marker-end', 'url(#wire-arrow)');
+   svg.appendChild(line);
+ 
+   /* the mid-wire "x": sends disconnect - the disconnected event is the   */
+   /* only remover, exactly as connected was the only drawer               */
++  const real = onDisc || { from: fromAlias, fromPort, to: toAlias, toPort };
+   const x = document.createElementNS(SVGNS, 'text');
+   x.setAttribute('class', 'wire-x');
+   x.textContent = '×';
+   x.addEventListener('click', (ev) => {
+     ev.stopPropagation();
+-    send({ cmd: 'disconnect', from: fromAlias, fromPort, to: toAlias, toPort });
++    send({ cmd: 'disconnect', from: real.from, fromPort: real.fromPort,
++           to: real.to, toPort: real.toPort });
+   });
+   svg.appendChild(x);
+ 
+-  const wire = { key, fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line, x, svg };
++  const wire = { key, fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line, x, svg, real };
+   wires.push(wire);
+   updateWire(wire);
+   log(fromAlias + '.' + fromPort + ' → ' + toAlias + '.' + toPort + ' connected', 'event');
+@@ -1496,13 +1575,53 @@ function onConnected(fromAlias, fromPort, toAlias, toPort) {
+   if (!fromDot || !toDot) return;
+ 
+   drawWire(fromAlias, fromPort, fromDot, toAlias, toPort, toDot);
++
++  /* The engine redirected this wire away from a View to the control       */
++  /* standing in for it (ReservedIn/ReservedOut, Connect in object.c), so   */
++  /* the only endpoint it reports is the inner control - which lives in a   */
++  /* panel that is usually closed. Draw the SAME connection a second time,  */
++  /* to the View's icon, so it is visible either way: the icon line reads   */
++  /* while the panel is shut, the control line while it is open. One real   */
++  /* connection, two renderings - both "x"es disconnect the real one.       */
++  const real = { from: fromAlias, fromPort, to: toAlias, toPort };
++
++  const inView = standInView(toAlias, toPort, 'ReservedIn');
++  const inSpot = inView && instances[inView] && instances[inView].ports.ReservedIn;
++  if (inSpot)
++    drawWire(fromAlias, fromPort, fromDot, inView, 'ReservedIn', inSpot, real);
++
++  const outView = standInView(fromAlias, fromPort, 'ReservedOut');
++  const outSpot = outView && instances[outView] && instances[outView].ports.ReservedOut;
++  if (outSpot)
++    drawWire(outView, 'ReservedOut', outSpot, toAlias, toPort, toDot, real);
++}
++
++/* Is (alias, port) the control some View named as its stand-in? The inner  */
++/* control's own alias already says which View contains it - its path IS    */
++/* the containment chain - so this is a direct lookup, no scan: take the    */
++/* parent path and ask whether that View's ReservedIn/ReservedOut names     */
++/* this leaf. Accepts both spellings the engine accepts ("Slider_1" with    */
++/* the property passing through, or "Slider_1/Value" fully specified).      */
++function standInView(alias, port, which) {
++  const cut = alias.lastIndexOf('/');
++  if (cut <= 0) return null;
++  const viewAlias = alias.slice(0, cut);
++  const leaf = alias.slice(cut + 1);
++  const spec = propertyValues[viewAlias + '.' + which];
++  if (!spec) return null;
++  return (spec === leaf || spec === leaf + '/' + port) ? viewAlias : null;
+ }
+ 
+ /* the one wire-remover, mirroring onConnected the drawer */
+ function onDisconnected(fromAlias, fromPort, toAlias, toPort) {
+-  const key = wireKey(fromAlias, fromPort, toAlias, toPort);
++  /* matched on the REAL connection each line renders, not on the line's   */
++  /* own endpoints: a View stand-in draws one connection twice (control    */
++  /* and icon), and both renderings have to go when it is disconnected -   */
++  /* keying on endpoints would leave the icon line behind forever          */
+   wires = wires.filter((w) => {
+-    if (w.key !== key) return true;
++    const rl = w.real;
++    if (!(rl && rl.from === fromAlias && rl.fromPort === fromPort
++          && rl.to === toAlias && rl.toPort === toPort)) return true;
+     removeWire(w);
+     return false;
+   });
+@@ -1734,12 +1853,11 @@ function registerAliasAtom(alias, pos, container) {
+   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
+ 
+   /* what it stands for + its own presentation - the atom assembles itself  */
+-  /* as these arrive (onPropertyChanged's aliasAtoms branch). Widget and     */
+-  /* Direction are the engine's stamps (create-alias/internals, bridge.c).   */
++  /* as these arrive (onPropertyChanged's aliasAtoms branch). Widget is the  */
++  /* engine's stamp (create-alias/internals, bridge.c).                      */
+   send({ cmd: 'subscribe', instance: alias, port: 'Target' });
+   send({ cmd: 'subscribe', instance: alias, port: 'TargetProp' });
+   send({ cmd: 'subscribe', instance: alias, port: 'Widget' });
+-  send({ cmd: 'subscribe', instance: alias, port: 'Direction' });
+   send({ cmd: 'subscribe', instance: alias, port: 'Label' });
+ 
+   log('created ' + alias + ' (Alias)', 'event');
+diff --git a/web/style.css b/web/style.css
+index 15f0fbb..868ee1c 100644
+--- a/web/style.css
++++ b/web/style.css
+@@ -258,6 +258,36 @@ svg.view-wires {
+ /* there are NO port dots: the icon itself is the wire target, clicked in  */
+ /* Connect mode exactly like any control (registerCard's icon handler)      */
+ 
++/* ...with ONE exception, and only on a view: a view that named a stand-in  */
++/* inside itself (ReservedIn/ReservedOut) can be wired at its closed icon,  */
++/* so it shows where. In on the left, out on the right. The dot EXISTS only */
++/* when that property is set - setStandInDot creates and destroys it, it is */
++/* never merely hidden - so a view that named one has one dot and a view    */
++/* that named neither has none. Nothing else in the app grows dots; this is */
++/* not a general in/out affordance.                                          */
++.view-dot {
++  display: none;
++  position: absolute;
++  top: 50%;
++  width: 11px;
++  height: 11px;
++  margin-top: -5.5px;
++  border-radius: 50%;
++  background: #6b9fe6;
++  border: 1px solid #24262e;
++  cursor: pointer;
++  /* above the icon, and the one thing in it that takes the mouse, so the  */
++  /* icon underneath can never swallow the wire gesture                     */
++  z-index: 3;
++  pointer-events: auto;
++}
++.view-dot.in  { left: -6px; }
++.view-dot.out { right: -6px; }
++.view-dot:hover { background: #e6c66b; }
++
++/* wiring clutter outside Connect mode, exactly like .port-row above */
++body.mode-connect .view-dot { display: block; }
++
+ /* a widget primitive standing on its own - a control (or a dot, for LED) */
+ /* and a label, nothing else: no panel, no header, no ports                */
+ .widget-atom {
+diff --git a/widget.c b/widget.c
+index cb46ead..e7c8918 100644
+--- a/widget.c
++++ b/widget.c
+@@ -306,7 +306,7 @@ void Widget_Publish(NodeObj class, WidgetItem *table)
+ 
+ 		/* everything subscribable: one direction, value pushed to whoever
+ 		   subscribes. `def` is the class default (the instance re-sets it). */
+-		PublishProp(class, t->prop, "data", Widget_PropType(t->cls),
++		PublishProp(class, t->prop, Widget_PropType(t->cls),
+ 					t->def ? t->def : "");
+ 	}
+ }

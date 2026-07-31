@@ -46,6 +46,6 @@ Each one remembers which MCPSource made it (so a clone dropped anywhere
 in a flow still knows who to ask) and never opens a connection itself -
 Submit hands the call to that connector, which does the actual networking
 and delivers the result back into this instance's own output properties.
-Its inputs and outputs are ordinary container ports, so wiring something
+Its inputs and outputs are ordinary container properties, so wiring something
 else's output into one of these inputs (or this agent's output into
 something else) works exactly like wiring any two objects together.

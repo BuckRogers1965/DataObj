@@ -303,10 +303,10 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, StopwatchPanel);
 
 	/* the dropdowns' backing lists and the lifecycle state - no on-screen control */
-	PublishProp(ClassSelf, "RunEdgeList",   "data", PROP_NULL, "Positive,Negative");
-	PublishProp(ClassSelf, "StopEdgeList",  "data", PROP_NULL, "Run Ends,Positive,Negative");
-	PublishProp(ClassSelf, "TimeUnitsList", "data", PROP_NULL, "msecs,secs");
-	PublishProp(ClassSelf, "State",         "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "RunEdgeList", PROP_NULL, "Positive,Negative");
+	PublishProp(ClassSelf, "StopEdgeList", PROP_NULL, "Run Ends,Positive,Negative");
+	PublishProp(ClassSelf, "TimeUnitsList", PROP_NULL, "msecs,secs");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

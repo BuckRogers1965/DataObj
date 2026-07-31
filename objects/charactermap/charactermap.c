@@ -441,14 +441,14 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, CharMapPanel);
 
 	/* the preset menu's backing list and the lifecycle state - no control */
-	PublishProp(ClassSelf, "PresetList", "data", PROP_NULL,
+	PublishProp(ClassSelf, "PresetList", PROP_NULL,
 				"default,Upper Case,Lower Case,"
 				"Strip CR (Win->Unix),CR->LF (Mac->Unix),LF->CR (Unix->Mac),"
 				"Backslash->Slash,Slash->Backslash,ROT13,"
 				"Comma->Tab (CSV->TSV),Tab->Comma (TSV->CSV),"
 				"Swap Quotes,Swap Brackets,Strip Tabs,"
 				"ASCII to EBCDIC,EBCDIC to ASCII");
-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

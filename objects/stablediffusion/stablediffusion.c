@@ -920,9 +920,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	Widget_Publish(ClassSelf, SDPanel);
 
-	PublishProp(ClassSelf, "ModelsList", "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "In",         "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "ModelsList", PROP_NULL, "");
+	PublishProp(ClassSelf, "In", PROP_NULL, "");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

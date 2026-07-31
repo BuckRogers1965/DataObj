@@ -777,8 +777,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, OllamaPanel);
 
 	/* the Models menu's backing list and the lifecycle state - no control */
-	PublishProp(ClassSelf, "ModelsList", "data", PROP_NULL, "");
-	PublishProp(ClassSelf, "State",      "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "ModelsList", PROP_NULL, "");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

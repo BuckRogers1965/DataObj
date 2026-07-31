@@ -10,4 +10,4 @@ target once a connection upgrades. The two targets are wired in after creation
 
 - **Enable** - gates routing; any source can drive it.
 - **State** - the lifecycle LED.
-- **Wire** - the raw input port; the panel shows the last bytes seen.
+- **Wire** - the raw input property; the panel shows the last bytes seen.

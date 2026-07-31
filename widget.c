@@ -83,9 +83,9 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 		SetPropStr(c, "Label", prop);
 
 	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Out", target, prop);			/* a command: press writes prop */
+		Connect(c, "Value", target, prop);			/* a command: press writes prop */
 	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Out", target, "Activate");
+		Connect(c, "Value", target, "Activate");
 	else if (strcmp(cls, "Markdown") == 0)
 		;											/* loaded on open, not wired here */
 	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
@@ -306,7 +306,7 @@ void Widget_Publish(NodeObj class, WidgetItem *table)
 
 		/* everything subscribable: one direction, value pushed to whoever
 		   subscribes. `def` is the class default (the instance re-sets it). */
-		PublishProp(class, t->prop, "data", Widget_PropType(t->cls),
+		PublishProp(class, t->prop, Widget_PropType(t->cls),
 					t->def ? t->def : "");
 	}
 }

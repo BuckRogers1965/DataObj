@@ -53,13 +53,11 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 
 /* one edge out Out - the same shape Pulse emits, so sinks need no        */
 /* special knowledge that a hand rather than a timer made it              */
+/* the button's state IS the thing it reports - writing Value fans out to
+   whatever subscribed to it. There is no second "Out" to keep in step. */
 static void MoButton_Edge(NodeObj instance, char *level)
 {
-	NodeObj out = NewNode(STRING);
-
-	SetName(out, "Data");
-	SetValueStr(out, level);
-	SndMsg(instance, "Out", msg_send, out);
+	SetPropStr(instance, "Value", level);
 }
 
 /* auto-repeat while held: re-send the "1" every Interval ms. Armed on    */
@@ -104,10 +102,9 @@ int MoButton_OnPress(NodeObj instance, MsgId message, NodeObj data)
 		return rtrn_handled;		/* no edge, no message */
 
 	local->down = down;
-	SetPropStr(instance, "Value", down ? "1" : "0");
 	{
 		char dbg[200];
-		snprintf(dbg, sizeof(dbg), "MoButton_OnPress firing Out=%s on '%s'", down ? "1" : "0", GetPropStr(instance, "Name"));
+		snprintf(dbg, sizeof(dbg), "MoButton_OnPress Value=%s on '%s'", down ? "1" : "0", GetPropStr(instance, "Name"));
 		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
 	MoButton_Edge(instance, down ? "1" : "0");
@@ -135,7 +132,6 @@ int MoButton_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 	if (!local->enabled && local->down)
 	{
 		local->down = 0;
-		SetPropStr(instance, "Value", "0");
 		MoButton_Edge(instance, "0");
 	}
 
@@ -171,15 +167,14 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "Label", "Press");
 	SetPropStr(instance, "Value", "0");
 	SetPropInt(instance, "Interval", 0);	/* 0 = no auto-repeat */
-	SetPropInt(instance, "Out", 0);
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)MoButton_Activate);
 
-	/* the gesture port: the projector sends 1 on press, 0 on release -    */
-	/* and so can anything else wired to it                                 */
-	SetPropStr(instance, "Press", "0");
-	port = GetPropNode(instance, "Press");
+	/* Value IS the button: 1 while held, 0 when released. Writing it is
+	   how the hand (or anything wired in) presses it, and the same write
+	   fans out to whatever is listening. One property, both directions. */
+	port = GetPropNode(instance, "Value");
 	SetPropLong(port, "OnMsg", (long)MoButton_OnPress);
 
 	SetPropStr(instance, "Enable", "1");
@@ -225,13 +220,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Label",    "data", PROP_TEXTBOX, "Press");
-	PublishProp(ClassSelf, "Value",    "data", PROP_LED, "0");
-	PublishProp(ClassSelf, "Interval", "data", PROP_TEXTBOX, "0");
-	PublishProp(ClassSelf, "Press",    "in",   PROP_NULL, "0");
-	PublishProp(ClassSelf, "Out",      "out",  PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable",   "in",   PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State",    "data", PROP_LED, "1");
+	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "Press");
+	PublishProp(ClassSelf, "Value", PROP_LED, "0");
+	PublishProp(ClassSelf, "Interval", PROP_TEXTBOX, "0");
+	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

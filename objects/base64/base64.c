@@ -273,7 +273,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	/* every control, straight from the table (widget type from the class) */
 	Widget_Publish(ClassSelf, Base64Panel);
-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");	/* lifecycle, no control */
+	PublishProp(ClassSelf, "State", PROP_LED, "1");	/* lifecycle, no control */
 
 	return rtrn_handled;
 }

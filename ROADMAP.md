@@ -24,7 +24,7 @@ the app was always an empty view: the objects are the functionality,
 so the view was always replaceable.
 
 Current state (July 2026): loading/registration, message routing with
-fan-out, ports, the Enable control plane, scheduler-driven lifecycles
+fan-out, the Enable control plane, scheduler-driven lifecycles
 with emergent shutdown, and working objects: Reader, Writer, Out
 (probe), Filter, Pulse, Queue/Stack, TCP server. See CLAUDE.md.
 
@@ -115,7 +115,7 @@ everything after this is cheap.
    phase asked for, made real as objects instead of as a flag. A
    **File object** belongs in this set too; its scope is still open,
    pending the demo objects that define it (do not guess at it — note
-   that CLAUDE.md's "source and sink are two separate classes, not one
+   that CLAUDE.md's "reading and writing are two separate classes, not one
    File object with a Mode" documents a DIFFERENT, older question, so
    check before assuming they conflict).*
 
@@ -150,7 +150,7 @@ everything after this is cheap.
    job is registration and composition, so those calls move to
    widget.c's side of the line.*
 4. **Interface publication**: at ClassStart each class registers a
-   description of its ports and properties (name, direction, widget
+   description of its properties (name, widget
    type, default value). This is the palette's data source and the
    default skin generator.
    *Already present: the "objects publish their own interface"
@@ -165,7 +165,7 @@ everything after this is cheap.
    it: no per-bridge alias tables, so every translator - bridge, script
    hosts, the future MCP server - resolves the same names against the
    same index, and instances created over one wire are addressable from
-   every other (the raw port and the GUI now genuinely share one
+   every other (the raw TCP surface and the GUI now genuinely share one
    namespace). Retired names actually reclaim their keys (NSDelete
    rewritten: the old prune freed chains still shared by sibling keys).
    Still to come on top of it: MoveBranch - the engine-level prefix
@@ -178,7 +178,7 @@ The structure is already in reader.c's `SetSubProp()`: each
 user-facing property carries sub-properties — `graphics` (widget
 type), `OnChange` (callback), `local`. Make that the standard.
 
-No special categories, anywhere in this phase: not "ports vs
+No special categories, anywhere in this phase: not "handlers vs
 properties," not "watchable vs plain," not "connectable vs not." A
 property is a property. Every one of them is a valid wire endpoint in
 both directions and every object has connectivity by default, with no
@@ -206,11 +206,11 @@ per-property or per-object opt-in.
    `ConnectToActivate` (object.c) and the Bridge's bind-property/
    bind-activate commands exist purely because Connect() only works
    today when the target already has a compiled-in OnMsg handler on a
-   named port — a plain data property has none, so wiring a widget's
+   named property — a plain data property has none, so wiring a widget's
    Value into an arbitrary property needed a bare adapter node
    standing in as a translator. Give every property a *default*
    handler ("store whatever arrives") and Connect() itself works
-   uniformly against any property name on any instance. A port like
+   uniformly against any property name on any instance. A property like
    Enable or In still installs its own handler when it needs real
    logic beyond storing a value, and that handler still wins — but
    that is an override on a universal default, not the only way
@@ -220,10 +220,10 @@ per-property or per-object opt-in.
    *Done (July 2026): a Subscriber records {Instance, Port, Callback};
    delivery with no Callback applies the universal default - store what
    arrived (DeliverToSubscriber, node.c, shared by both fan-out
-   walkers). Activate is an ordinary port (ActivateOnMsg stamped by
+   walkers). Activate is an ordinary property (ActivateOnMsg stamped by
    RegisterInstance). The adapters are deleted; bind-property/
    bind-activate survive only as bridge dispatch synonyms for connect
-   so recorded flows replay. Because the record names the REAL sink,
+   so recorded flows replay. Because the record names the REAL target,
    list-connections, CloneConnections, Disconnect and the delete scrub
    all read the same graph - no adapter special-casing anywhere.
    Proven raw-first in testharness/connectiontest.py.*
@@ -260,11 +260,11 @@ per-property or per-object opt-in.
    collapsing it never touched the graph, only the rendering of it.
    A View can additionally declare, through its own settings (the same
    settings-panel mechanism every object gets, Phase 2.5), which of
-   its children's ports or properties are aliased as *its own* In and
+   its children's properties are aliased as *its own* In and
    Out — this is what makes a fully-composed View (a Slider wired to a
    VU meter, say) usable as one black-box unit from outside, without
    whatever is wiring to it needing to know what's inside. This is
-   Phase 5's "container ports" idea, concretely mechanized. It is a
+   Phase 5's "container properties" idea, concretely mechanized. It is a
    convenience, not a requirement — every property of every child
    inside a View stays individually wireable with or without this
    curation, because nothing needed an opt-in to be connectable in the
@@ -289,7 +289,7 @@ per-property or per-object opt-in.
    same way it will eventually ship its own script-defined behavior.
 7. **Every object ships its README, and Help renders it.** Each
    object module directory carries a README.md — what the object is,
-   its ports and properties, how to wire it — loaded at class
+   its properties, how to wire it — loaded at class
    registration onto the class node (documentation is engine state
    riding the class, exactly like UUID/Company provenance, and it
    travels wherever the class does). Alongside it, a **Markdown
@@ -348,7 +348,7 @@ per-property or per-object opt-in.
    that connection," so one slow or partial connection can never bleed
    into another's parsing state.
 2. **WebSocket object**: handshake + framing over the TCP object.
-   *Already present: TCP server, buff, the port pattern.*
+   *Already present: TCP server, buff, the subscription pattern.*
 3. **Bridge object / control protocol**: JSON commands in
    (create-instance, connect, set-property, activate, subscribe) and
    events out (property-changed, message-flowed, instance-created).
@@ -384,7 +384,7 @@ per-property or per-object opt-in.
      "every property is uniformly gettable/settable" is what makes this
      possible without per-widget-type code).*
 4. **Live taps**: "subscribe" attaches a JSON-emitting probe variant
-   to any port or property, streaming over the socket. The instrument
+   to any property, streaming over the socket. The instrument
    panel is a bundle of taps.
 5. **Sessions and login**: users as nodes (`Main/Users/<name>`), each
    with canvas containers; token auth first, TLS later.
@@ -445,7 +445,7 @@ per-property or per-object opt-in.
    addressable, which is the only moment the outside world can
    meaningfully be told about it. The core cannot call into a loadable
    object, so the emission rides the message fabric rather than a
-   direct call: a well-known node carries `Created`/`Removed` ports,
+   direct call: a well-known node carries `Created`/`Removed` properties,
    and the Bridge `Connect()`s itself to them at InstanceStart like any
    other object. Scoping is unchanged — `Bridge_SendEventScoped`
    already filters by container against `connViews`.
@@ -489,8 +489,8 @@ shouldn't have been recreated in the first place.)
    instead.
 3. **Wiring**: Connect()/SndMsg, exactly the Reader.Out → Writer.In
    wiring already built, now reaching every property once Phase 2.3
-   lands, not just compiled ports — driven by Connect mode's two-click
-   source/destination gesture (Phase 4.6), not a dedicated port-dot
+   lands, not just ones with handlers — driven by Connect mode's two-click
+   source/destination gesture (Phase 4.6), not a dedicated dot
    drag.
 4. **Opening a settings panel**: a composite object's control panel is
    just its associated View (Phase 2.5) — "open settings" means
@@ -513,7 +513,7 @@ shouldn't have been recreated in the first place.)
      - *Connect*: a wire now follows the cursor from that control; the
        next click, on a different control, completes exactly one wire
        (`connect`, Output → Input, direction inferred from which side
-       is a source vs a sink — the class Interface already knows this)
+       is read vs written — the class Interface already knows this)
        and the interaction ends, back to Use mode.
      - *Move*: the control itself now follows the cursor; the next
        click drops it at that location (`place` with the new X/Y for
@@ -636,13 +636,13 @@ shouldn't have been recreated in the first place.)
 
 ## Phase 5 — Flows become objects (composition)
 
-1. **Container ports**: a container publishes named In/Out ports that
-   alias ports of inner instances; SndMsg to a container port routes
+1. **Container properties**: a container publishes named properties that
+   alias properties of inner instances; a write to a container property routes
    inward. One new subscription-record type.
    *Done (July 2026): NOT a new record type - the existing link/alias
-   mechanism IS container ports. `bind-port` (bridge command ->
-   LinkPropertyAs, object.c) makes a container's OWN port a transparent
-   link to a child's port, so wiring to/from the container port resolves
+   mechanism IS container properties. `bind-port` (bridge command ->
+   LinkPropertyAs, object.c) makes a container's OWN property a transparent
+   link to a child's property, so wiring to/from it resolves
    through to the child (ResolvePort). A View.In bound to an inner input
    control's In, a View.Out bound to an inner output control's Value, and
    the View is a black-box widget the outside wires to without knowing
@@ -651,8 +651,8 @@ shouldn't have been recreated in the first place.)
    this is a SCRIPTED COMPOSITE WIDGET - a View that behaves like a
    compiled widget but whose logic is editable script.
    testharness/widgettest.py builds and proves one over the protocol
-   (input -> container port -> inner control -> script -> output control
-   -> container port -> outside). This is the concrete Phase 5 + Phase 7
+   (input -> container property -> inner control -> script -> output control
+   -> container property -> outside). This is the concrete Phase 5 + Phase 7
    convergence.*
    **Next (July 2026, from the MCPSource agent-widget work): a real test
    suite around save, load, export, and import of scripted composite
@@ -713,14 +713,14 @@ objects bound to their connector.
    HTTP layer, meeting the async-dns module for resolution).
 2. **Web API wrapper classes**: generated from OpenAPI/REST
    descriptions — each endpoint a palette object with typed input
-   properties and a response Out port. Webhook receiver object for
-   the inbound direction (a route on the HTTP server → an Out port).
+   properties and a response Out property. Webhook receiver object for
+   the inbound direction (a route on the HTTP server → an Out property).
 3. **The MCP client View**: a View that, pointed at an MCP server
    (stdio transport first — an Exec object holding a subprocess with
-   its stdio as In/Out ports is Reader/Writer-shaped; HTTP transport
+   its stdio as In/Out properties is Reader/Writer-shaped; HTTP transport
    once 6.1 lands), calls tools/list and fills ITSELF with the served
    interface: each tool registers as a class (the tool's input schema
-   becomes properties/ports with stamped widget types, results flow
+   becomes properties with stamped widget types, results flow
    out Out), and the View holds a live, wireable instance of each.
    You get the widgets of THEIR served interfaces on YOUR canvas -
    rendered, paneled and connectable with zero client changes, since
@@ -773,7 +773,7 @@ interpreter.
    *Done (July 2026): TWO hosts — Lua (`objects/script`) and QuickJS/
    JavaScript (`objects/jsscript`, QuickJS vendored with libbf) — built
    on the "language host is a BRIDGE CLIENT" shape (the user's framing:
-   the web bridge is the pattern). Each has In/Out/Print ports plus
+   the web bridge is the pattern). Each has In/Out/Print properties plus
    Cmd/Evt: wire Cmd→Bridge.In and Bridge.Out→Evt and a script speaks
    the full JSON protocol, a peer of the browser, no diminished API.
    ScriptHost=1 marks a class as a language for runtime discovery; a
@@ -792,7 +792,7 @@ interpreter.
    (Phase 5) and federated tools (Phase 6). Third form of the same
    trick: classes defined by data.
 4. **Overrides**: the revived Intercept path (Phase 2.2) doubles as
-   the override hook — attach a script to any property or port of a
+   the override hook — attach a script to any property of a
    *compiled* object to wrap, filter, or replace its behavior with no
    recompile. The emailed-fix support model at its finest grain: a
    fix can be a script in a flow file.
@@ -830,11 +830,11 @@ interpreter.
   core" actually safe at scale: an object that needs another object's
   class to exist first (subclassing, a composite depending on its parts)
   declares it instead of relying on scan-order luck.
-- **Source enumeration — a sink reading all its inputs (`wgv->Sources`).**
-  Today `Connect` records the subscription on the **source** port (a
+- **Source enumeration — reading all of a property's inputs (`wgv->Sources`).**
+  Today `Connect` records the subscription on the **source** property (a
   `Subscriber` sub-node naming `{Instance, Port, Callback}`): a forward,
-  source→sink index that answers "who do I feed?" but not the reverse.
-  A sink handler is delivered one value at a time and cannot ask "who is
+  forward index that answers "who do I feed?" but not the reverse.
+  A handler is delivered one value at a time and cannot ask "who is
   wired into my In, and what does each hold right now?" VNOS gave every
   input exactly that — `wgv->numSources` / `wgv->Sources[i]` — and objects
   walked it to *combine* their inputs. Without it a whole family of objects

@@ -19,8 +19,8 @@ ways by widget.h:
   - Widget_Publish (ClassStart)  - publishes a property per control row; the
                                    widget type is derived from the control class.
   - Widget_Init    (InstanceStart) - gives the instance each control's initial
-                                   value; a row with a handler becomes a reactive
-                                   port, one without is a plain property.
+                                   value; a row with a handler ACTS when written,
+                                   one without just holds its value.
   - Widget_BuildTable / _DeferBuild / _BuildOnce - lays the controls out one tick
                                    after creation (once the instance has a path).
 
@@ -54,9 +54,9 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 
 /* ---- your logic ----------------------------------------------------- */
 
-/* Out is just a property. Setting it fans out to everything subscribed -
-   the Out LED, and anything a flow wired to it. The write IS the event;
-   there is no "out port". */
+/* Out is just a property that happens to be named Out. Setting it fans out
+   to everything subscribed - the Out LED, and anything a flow wired to it.
+   The write IS the event. */
 static void Skeleton_Emit(NodeObj instance, int value)
 {
 	SetPropStr(instance, "Out", value ? "1" : "0");
@@ -64,8 +64,8 @@ static void Skeleton_Emit(NodeObj instance, int value)
 
 /* ---- action handlers (a property with an OnMsg handler acts on write) - */
 
-/* In: a value arrived from a wired source (or a control). Do your thing.
-   In is just a property NAMED In - not a special port kind. */
+/* In: a value arrived from something wired to it (or from a control). Do
+   your thing. In is just a property that happens to be named In. */
 int Skeleton_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	SkeletonData *local = (SkeletonData *)GetPropLong(instance, "local");
@@ -115,8 +115,8 @@ int Skeleton_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 		return rtrn_dropped;
 
 	local->enabled = GetValueInt(data) ? 1 : 0;
-	/* mirror the port's own value WITHOUT re-firing (SetValueStr does not
-	   fan out) - never SetProp a port's own name, it would shadow it */
+	/* mirror our own value WITHOUT re-firing (SetValueStr does not fan out),
+	   so writing it here cannot bounce back to whoever just wrote it */
 	SetValueStr(GetPropNode(instance, "Enable"), local->enabled ? "1" : "0");
 
 	return rtrn_handled;
@@ -155,8 +155,8 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   Enable/Trigger carry a handler (a write acts), Out is plain data. */
 	Widget_Init(instance, SkeletonPanel);
 
-	/* properties with no on-screen control: In (a wire input with a handler)
-	   and the lifecycle State. TODO: your own non-control ports / *List props. */
+	/* properties with no on-screen control: In (written by a wire, and it has
+	   a handler so it acts) and the lifecycle State. TODO: your own. */
 	Widget_Port(instance, "In", "0", (void *)Skeleton_OnIn);
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
@@ -171,7 +171,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 }
 
 /* The whole widget in one table: the main view, the Help sub-view, and every
-   control (its initial value and, for the ports, its handler).
+   control (its initial value and, where it acts on write, its handler).
    TODO: add / change controls to match your widget. */
 static WidgetItem SkeletonPanel[] = {
 	/* cls        prop        def  panel   x    y    w   h  label       [handler] */
@@ -216,15 +216,15 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	/* every control, straight from the table - the widget type comes from each
 	   control's class, so it is never restated here. Everything is "data" (a
-	   subscribable value); a handler makes a property ACT, it is not a direction.
-	   NEVER name a data property with a reserved view name (ReservedViewMode,
-	   ReservedViewOpen, ReservedViewPanelX/Y, ReservedViewResizeable). */
+	   subscribable value); a handler makes a property ACT when written.
+	   NEVER name a data property with a reserved view name (ReservedViewOpen,
+	   ReservedViewPanelX/Y, ReservedViewResizeable). */
 	Widget_Publish(ClassSelf, SkeletonPanel);
 
-	/* the properties with no on-screen control: the wire input and the
-	   lifecycle state. TODO: publish your own non-control ports / *List props. */
-	PublishProp(ClassSelf, "In",    "data", PROP_NULL, "0");
-	PublishProp(ClassSelf, "State", "data", PROP_LED, "1");
+	/* the properties with no on-screen control: the one things write into,
+	   and the lifecycle state. TODO: publish your own. */
+	PublishProp(ClassSelf, "In", PROP_NULL, "0");
+	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

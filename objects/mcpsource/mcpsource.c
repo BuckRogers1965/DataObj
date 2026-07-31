@@ -1436,17 +1436,17 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SourceClass = RegisterClass(library, sourceClass);
 	PublishPosition(SourceClass);
 	Widget_Publish(SourceClass, MCPSourcePanel);
-	PublishProp(SourceClass, "HostName", "data", PROP_TEXTBOX, "127.0.0.1");
-	PublishProp(SourceClass, "Port",     "data", PROP_TEXTBOX, "8081");
-	PublishProp(SourceClass, "ViewName", "data", PROP_TEXTBOX, "MCPAgents");
+	PublishProp(SourceClass, "HostName", PROP_TEXTBOX, "127.0.0.1");
+	PublishProp(SourceClass, "Port", PROP_TEXTBOX, "8081");
+	PublishProp(SourceClass, "ViewName", PROP_TEXTBOX, "MCPAgents");
 
 	SetName(agentClass, "MCPAgent");
 	SetPropLong(agentClass, "InstanceStart", (long)MCPAgent_InstanceStart);
 	SetPropLong(agentClass, "InstanceEnd", (long)MCPAgent_InstanceEnd);
 	MCPAgentClass = RegisterClass(library, agentClass);
 	PublishPosition(MCPAgentClass);
-	PublishProp(MCPAgentClass, "AgentName",     "data", PROP_TEXTBOX, "");
-	PublishProp(MCPAgentClass, "ConnectorPath", "data", PROP_TEXTBOX, "");
+	PublishProp(MCPAgentClass, "AgentName", PROP_TEXTBOX, "");
+	PublishProp(MCPAgentClass, "ConnectorPath", PROP_TEXTBOX, "");
 
 	return rtrn_handled;
 }

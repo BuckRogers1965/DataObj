@@ -21,8 +21,15 @@ joins when TCP client mode does).
 Three governing principles:
 - **Everything is a node**: one tree structure holds the registry, configuration,
   and wiring; properties are nodes, so anything can be annotated.
+  **There is no such thing as a port, and no in/out direction.** There is no
+  port type, no "sink", no distinction between a "compiled port" and a "plain
+  property" - every one of them is a node, and any node is subscribable. `In`,
+  `Out`, `Enable`, `Clock` are just *names* objects happen to give properties;
+  naming a property `Out` does not make it special in any way. A connection has
+  a from end and a to end - that is a fact about the wire, never about the
+  properties it joins.
 - **Everything is a message**: objects interact only by messages routed through
-  subscriptions between ports. Delivery is in-process pointer-passing (function
+  subscriptions on nodes. Delivery is in-process pointer-passing (function
   pointer call with a node handle — no copies, no serialization, no thread
   handoffs) **queued through the scheduler**: `SndMsg` costs one task insert,
   and each hop is dispatched breadth-first from `ExecTasks`, so downstream work
@@ -95,7 +102,7 @@ Deactivated modules: `objects/pulse` (Makefile renamed to `.back`/`.bak`) and
 `objects/out`, `objects/msg`, `objects/pulse`, `objects/reader`, `objects/writer`
 are the active ones (`pulse` was reactivated July 2026 with a rewritten
 `pulseobj.c` on the working lifecycle: Interval/Count properties, emits "1"/"0"
-edges out its `Out` port, finite trains end with `msg_eof`, Count=0 pulses
+edges out its `Out` property, finite trains end with `msg_eof`, Count=0 pulses
 forever and intentionally holds the program open).
 
 `objects/network/TCPObject.c` deserves special mention: it is **the reference
@@ -279,7 +286,7 @@ Two hosts exist: `objects/script` (Lua, the first) and `objects/jsscript`
 (QuickJS/JavaScript, `objects/jsscript/quickjs/` vendored — MUST include
 libbf.c or `dlopen` fails on `bf_context_init`). A host: one interpreter
 per instance; `Activate` (re)runs the `Source` property in a fresh
-context; ports `In`/`Out` (dataflow), `Print` (output + loud errors),
+context; properties `In`/`Out` (dataflow), `Print` (output + loud errors),
 `Cmd`/`Evt` (wire to a Bridge = full protocol: create/connect/subscribe/…
 with session naming and events, a script is a peer of the browser); a
 runaway guard (QuickJS interrupt handler with a wall-clock budget — Lua
@@ -289,9 +296,9 @@ memory. Twin tests: `testharness/jstest.py`.
 
 **Scripted composite widget** (Phase 5 + 7 together): a View made into a
 black-box widget. `bind-port` (bridge command -> `LinkPropertyAs`) makes
-a container's OWN port a transparent link to a child's port (container
-ports = the existing alias mechanism, not a new record type) - wiring
-to/from the container port resolves through to the child (`ResolvePort`).
+a container's OWN property a transparent link to a child's property (the
+existing alias mechanism, not a new record type) - wiring to/from the
+container's property resolves through to the child (`ResolvePort`).
 So a View.In bound to an inner input control, a View.Out bound to an
 inner output control, plus a script INSIDE (a language host wired to a
 Bridge = a protocol client) that subscribes to the input control and
@@ -324,7 +331,7 @@ or mid-rename has no path — capture a path BEFORE mutating Name/
 Container, see Bridge_Set). The bridge keeps NO alias table — it
 registers/resolves against the engine index, and enumeration (listing,
 repath walks) is a registry walk + PathOfInstance. Consequence: all
-translators share one namespace — instances created over the raw port
+translators share one namespace — instances created over the raw TCP surface
 are addressable from the GUI and vice versa.
 
 **The root is a real View, and there is no fabricated `/Root` prefix
@@ -390,24 +397,24 @@ composed:
 
 - A **Reader** instance reads `test.txt`; a **Writer** instance writes `test.txt.back`;
   `Connect(Reader "Out" → Writer "In")` — emulating `cat`.
-- **Design decision: source and sink are two separate object classes**, not one
+- **Design decision: reading and writing are two separate object classes**, not one
   "File" object with a Mode property (an older, abandoned idea). Reader is a
   pure data **source** (owns `Out`, pushes chunks);
-  Writer is a pure data **sink** (owns `In`, reacts to arrivals). **The sink
-  subscribes to the source**: `Connect()` adds the writer's `In` to a subscription
+  Writer only consumes (has `In`, reacts to arrivals). **The consumer
+  subscribes to the producer**: `Connect()` adds the writer's `In` to a subscription
   list stored on the reader's `Out` property (properties are nodes, so the list
   lives as sub-nodes on `Out` — see the `AddSubscription()` stub in object.c).
   Data flows as **routed messages**, not stored property values: the reader's task
   reads one chunk, wraps it in a data node, and sends it as a message out its `Out`
-  port; the routing layer (`SndMsg`/`DispatchMsg` in object.c) walks `Out`'s
+  property; the routing layer (`SndMsg`/`DispatchMsg` in object.c) walks `Out`'s
   subscription list and delivers that message to every subscriber's handler as
   `(instance, msgid, data)`. The
   `rtrn_handled`/`rtrn_propagate`/`rtrn_dropped` codes in callback.h are the
-  per-delivery verdicts. `Out` is a named output port — it exists to hold the
+  per-delivery verdicts. `Out` is an ordinary property — it exists to hold the
   subscription list and give `Connect()` an endpoint; chunks flow through it, they
   are not retained on it. EOF is just another message id through the same router,
-  so sinks switch on msgid (data vs EOF) exactly like TCPObject's message dispatch.
-  One source fans out to any number of sinks; the sink never polls.
+  so consumers switch on msgid (data vs EOF) exactly like TCPObject's message
+  dispatch. One producer fans out to any number of consumers; none of them poll.
 - The reader drives itself via scheduler tasks, emitting chunks on its `Out`
   property. On end-of-file it sends an **EOF message on its Out** and deactivates
   (stops rescheduling, so its tasks drain).
@@ -425,16 +432,16 @@ message flow and exits on its own when the flow drains. How the pieces landed:
 
 - **Routing** (`object.c`): `SndMsg(instance, "Out", msgid, data)` queues a
   `MsgEnvelope` on the scheduler (one `AddTaskNow`, nothing more); when the task
-  fires, `DispatchMsg` walks the `Subscriber` sub-nodes on the named port and
+  fires, `DispatchMsg` walks the `Subscriber` sub-nodes on the named property and
   delivers to each (`DeliverToSubscriber`, node.c — the one definition of
   delivery, shared with node.c's own synchronous property-write fan-out).
   `Connect()` builds the subscription: it records `{Instance, Port, Callback}`
-  on the source port via `AddSubscription()` — Callback is the sink port's
+  on the source property via `AddSubscription()` — Callback is the target's
   `OnMsg` handler if it has one, else 0, in which case delivery applies the
   universal default: store the payload onto the record's `{Instance, Port}`
   (whose own write fans out in turn, so chains hop). This is what lets
-  `Connect()` reach ANY property — compiled port, plain data property, or
-  `Activate` (an ordinary port since July 2026: `ActivateOnMsg` stamped by
+  `Connect()` reach ANY property — one with a compiled handler, a plain data
+  property, or `Activate` (ordinary since July 2026: `ActivateOnMsg` stamped by
   `RegisterInstance`) — with no adapter species (the old
   `PropertyBinding`/`ActivateBinding` adapters are deleted), so every graph
   walker (list-connections, `CloneConnections`, the delete scrub,
@@ -447,7 +454,7 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   the opposite). Handlers still run synchronously *within* a delivery and must
   copy anything they keep; anything forwarding a message it received sends a
   fresh copy, since the original belongs to the upstream sender's own queued
-  delivery (see Filter_OnIn). DispatchMsg re-reads the port's live Subscriber
+  delivery (see Filter_OnIn). DispatchMsg re-reads the property's live Subscriber
   list at delivery time, not a snapshot.
 - **Deletion safety** (`object.c`): because messages can be in flight when
   either end dies, `DeleteInstance` runs `ScrubRegistrySubscriptions` (strips
@@ -474,20 +481,20 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   Filename and arms a read task; the task freads one chunk, sends it out `Out`
   (`msg_send`, string payload), re-arms; at feof sends `msg_eof`, closes,
   doesn't re-arm. Text payloads only (null-terminated).
-- **Writer** (`objects/writer/writer.c`): `In` port with `OnMsg = Writer_OnIn`;
+- **Writer** (`objects/writer/writer.c`): `In` with `OnMsg = Writer_OnIn`;
   chunks are copied into a dyn `buff` and a drain task (armed on demand, guarded
   by a `scheduled` flag) writes oldest-first via `buffGetBlockFromTail` — note
   `buffGetBlockFromHead` is LIFO (head is the write end); tail is FIFO. After
   `msg_eof` and an empty buffer it closes and stops re-arming.
 - **Out** (`objects/out/out.c`): a debug probe. Subscribe its `In` to any source
-  port and it prints every passing message to stdout tagged with its `Label`
+  property and it prints every passing message to stdout tagged with its `Label`
   property (msg id + payload size + payload; on EOF it prints message/byte
   totals). It prints synchronously in its handler and **never schedules a task**,
   so probes can be dropped onto any connection without holding the program open.
   `Echo=0` silences a probe without disconnecting it. It returns `rtrn_propagate`
   (a probe watches, it doesn't consume). The cat flow (flowtest.py) proves the
   same fan-out by subscribing its own tap to the Reader's `Out` alongside the
-  Writer — two subscribers on one port.
+  Writer — two subscribers on one property.
 - **Filter** (`objects/filter/filter.c`): a mid-flow object — `In` handler tests
   each message and forwards passers out its own `Out` with a fresh **copy** of
   the data node (the received original is owned by the upstream sender's queued
@@ -495,23 +502,23 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   property: `all` / `change` (dedupe against last seen) / `ones` / `zeros`.
   `msg_eof` always passes, even through a disabled filter, so streams can always
   finish downstream. No tasks; never holds the program open.
-- **The Enable port convention** (on Pulse, Reader, Writer, Out, Filter): every
-  object carries an `Enable` input port (created with `SetPropStr(inst,
-  "Enable", "1")`, handler registered as `OnMsg` on the port). Send `1` to
+- **The Enable convention** (on Pulse, Reader, Writer, Out, Filter): every
+  object carries an `Enable` property (created with `SetPropStr(inst,
+  "Enable", "1")`, handler registered as `OnMsg` on it). Send `1` to
   enable, `0` to disable; EOF on an enable line is ignored. Because it's an
-  ordinary port, **any source can drive any object's Enable through
+  ordinary property, **anything can drive any object's Enable through
   `Connect()`** — e.g. a timer/pulse can shut an object down (the planned
   30-second TCP timeout is just `Connect(Timer, "Out", TCP, "Enable")`).
   Semantics: task-driven objects **pause by not rescheduling** (zero cost while
-  disabled; the rising edge re-arms via a `scheduled` flag), sinks just gate
+  disabled; the rising edge re-arms via a `scheduled` flag), consumers just gate
   their handler; the Writer keeps buffering while paused and drains on resume.
   Note: a fully paused flow schedules nothing, so the program will quiesce and
   exit with data still buffered — pausing is not a way to keep a program alive.
-- **Port-shadowing landmine**: never call `SetProp*` with a port's name after
-  the port is created — SetProp prepends a *new* shadowing prop, and Connect /
-  SndMsg would find the shadow (without `OnMsg`/subscribers) instead of the
-  real port. Update port state with `SetValueStr(portNode, ...)` on the node
-  itself, as the Enable handlers do. (Ports are created as STRING props where
+- **Shadowing landmine (historical)**: `SetProp*` used to PREPEND a new prop
+  rather than update in place, so writing a property that carried `OnMsg`/
+  subscribers could hide the real one. `SetPropStr` now updates in place and
+  fans out only on a real change, so this no longer applies. (Properties that
+  mirror state are created as STRING props where
   state is mirrored, since `SetValueInt(node, 0)` is a no-op — see below.)
 - **TCP** (`objects/network/tcp.c`, built as `tcp.object`; `TCPObject.c` in the
   same directory stays as the uncompiled VNOS reference): server mode, any
@@ -567,11 +574,11 @@ Random (pulse skeleton with High/Low props).
 The long-range plan lives in **ROADMAP.md**: a web app where users log in, see
 their canvas, drag objects from a palette into dataflows, and control them
 through skinned instrument panels (LED/slider/VU meter/text widgets bound to
-properties); finished flows become composite objects with their own ports.
+properties); finished flows become composite objects with their own properties.
 Keystones in order: node-tree ⇄ JSON serialization, reviving the parked
 Intercept path so property writes fire object callbacks, the SetSubProp widget
 pattern (already sketched in reader.c) on every object, HTTP/WebSocket/bridge
-objects over the TCP object, container ports for composition, then federated
+objects over the TCP object, container properties for composition, then federated
 palettes: web APIs and MCP servers imported as palette classes (their schemas
 translated into the published-interface format; instances are generic proxies),
 and the framework itself exposed as an MCP server so agents can invoke and
@@ -595,7 +602,7 @@ stubs. Known rough edges to be aware of before touching anything:
 - `SetValueInt(node, 0)` is a silent no-op: node.c guards with `if (!node || !value)`,
   so a zero can never be stored through it. Fresh INTEGER nodes read as 0 anyway,
   but don't rely on SetValueInt for zeros — this is why pulse edges travel as the
-  strings "1"/"0" (sinks wanting numbers use the automatic data conversion).
+  strings "1"/"0" (anything wanting numbers uses the automatic data conversion).
 - Several functions use implicit-int K&R style (`loadClasses()`, `PrintRegInfo()`);
   the root Makefile builds with `-w`, so no warnings surface.
 - The Makefile's `depend` output was generated on a Linux box; the repo is currently
