@@ -287,7 +287,7 @@ function send(cmd) {
     console.warn('[send DROPPED - socket not open]', cmd);
     return;
   }
-  console.debug('[send]', cmd);
+  console.log('[send]', cmd);
   ws.send(JSON.stringify(cmd));
 }
 
@@ -335,7 +335,8 @@ function handleEvent(msg) {
       if (currentMode === 'Connect') send({ cmd: 'list-connections' });
       break;
     case 'instance-created':
-      onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container);
+      onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
+                        msg.reservedIn, msg.reservedOut);
       break;
     case 'property-changed':
       onPropertyChanged(msg.instance, msg.port, msg.value);
@@ -1046,7 +1047,20 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
 /* built by the server with Mode="Clone" and Deletable="0" already set        */
 /* (BuildPalette, object.c) - nothing here knows or cares that any            */
 /* particular View happens to be "the palette".                              */
-function registerView(alias, props, pos, hidden, container) {
+/* a dot on one side of an icon: in on the left, out on the right. Visual
+   only - no handler, no state, nothing behind it. */
+function addStandInMark(icon, side, alias, spec) {
+  const dot = document.createElement('div');
+  dot.className = 'view-dot ' + side;
+  dot.title = (side === 'in' ? 'wire in -> ' : 'wire out -> ') + spec;
+  dot.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    onStandInClick(alias, side, spec, dot);
+  });
+  icon.appendChild(dot);
+}
+
+function registerView(alias, props, pos, hidden, container, reservedIn, reservedOut) {
   /* the icon IS the view's permanent presence - it never goes away.        */
   /* Opening shows the panel as a separate element with its own position    */
   /* (PanelX/PanelY, real shared properties independent of the icon's        */
@@ -1156,6 +1170,12 @@ function registerView(alias, props, pos, hidden, container) {
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewResizeable' });
 
+  /* purely a visual cue, shown only in Connect mode: this view names a
+     control that stands in for it on that side. Not clickable, not a port,
+     nothing subscribes to it - just a mark so you can see it is wireable. */
+  if (reservedIn)  addStandInMark(icon, 'in', alias, reservedIn);
+  if (reservedOut) addStandInMark(icon, 'out', alias, reservedOut);
+
   log('created ' + alias + ' (View)', 'event');
 }
 
@@ -1191,7 +1211,8 @@ document.addEventListener('pointerup', () => {
   resizeState = null;
 });
 
-function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container) {
+function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
+                           reservedIn, reservedOut) {
   /* replays are idempotent - a container listed twice (or an instance     */
   /* that arrived live before its container's members were fetched) never  */
   /* renders twice                                                          */
@@ -1230,7 +1251,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   /* because it's the one class that actually contains other instances,    */
   /* not because it's a Palette.                                           */
   if (className === 'View') {
-    registerView(alias, props, pos, hidden, container);
+    registerView(alias, props, pos, hidden, container, reservedIn, reservedOut);
     return;
   }
 
@@ -1260,7 +1281,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
      The object does not lay anything out; the view does, exactly as it
      does for a hand-built View or the palette. No card, no stacked rows,
      no special case. */
-  registerView(alias, props, pos, false, container);
+  registerView(alias, props, pos, false, container, reservedIn, reservedOut);
 }
 
 function updateReadout(el, widgetClass, value) {
@@ -1408,12 +1429,103 @@ function onPortClick(alias, port, el) {
   const from = pendingPort;
   pendingPort.el.classList.remove('armed');
   pendingPort = null;
+  completeWire(from, { alias, port, el });
+}
+
+/* A stand-in dot is a DIRECTED end: the out dot on the right can only
+   START a wire, the in dot on the left can only FINISH one. A view itself
+   is not a target - only its dots are. */
+function onStandInClick(alias, side, spec, el) {
+  if (effectiveMode(el) !== 'Connect') return;
+
+  const end = { alias, port: spec, el, standIn: side };
+
+  if (side === 'out') {
+    if (pendingPort) {
+      console.warn('[connect] the out dot starts a wire, it cannot finish one -',
+                   alias, '(' + spec + ')');
+      return;
+    }
+    pendingPort = end;
+    el.classList.add('armed');
+    return;
+  }
+
+  if (!pendingPort) {
+    console.warn('[connect] the in dot finishes a wire, it cannot start one -',
+                 alias, '(' + spec + ')');
+    return;
+  }
+
+  const from = pendingPort;
+  pendingPort.el.classList.remove('armed');
+  pendingPort = null;
+  completeWire(from, end);
+}
+
+/* what a stand-in spec actually resolves to: bare "TxData" is a property
+   on the view itself; "Slider_1/Value" is a property on a control inside
+   it. Reported only - the client does not act on it. */
+function resolveStandIn(alias, spec) {
+  const cut = spec.lastIndexOf('/');
+  if (cut < 0) return { instance: alias, prop: spec };
+  return { instance: alias + '/' + spec.slice(0, cut), prop: spec.slice(cut + 1) };
+}
+
+/* the real (instance, property) an end names - x-ray through a stand-in
+   dot to the control it stands for, even with the view shut */
+function realEnd(e) {
+  return e.standIn ? resolveStandIn(e.alias, e.port)
+                   : { instance: e.alias, prop: e.port };
+}
+
+function describeEnd(e) {
+  const r = realEnd(e);
+  return {
+    shown: e.standIn ? e.alias + '  [' + e.standIn + ' dot -> "' + e.port + '"]'
+                     : e.alias + '.' + e.port,
+    real: r.instance + '.' + r.prop,
+  };
+}
+
+/* One wire, either end of which may be a stand-in dot. If a dot is
+   involved we do NOT wire anything yet - we report exactly what would be
+   sent and what it would really subscribe to. Everything else behaves as
+   it always has. */
+function completeWire(from, to) {
+  /* A loopback is fine - a view's out into its own in is a real thing to
+     want. What is never fine is a property wired to ITSELF: the write
+     would deliver straight back into the thing that made it. Compared on
+     what the ends RESOLVE to, so a dot and a directly-clicked property
+     that land on the same place are caught as well. */
+  const fr = describeEnd(from).real, tr = describeEnd(to).real;
+  if (fr === tr) {
+    console.warn('[connect] refused - both ends are the same property:', fr);
+    return;
+  }
+
+  /* One ordinary connect between two REAL properties. A stand-in dot is
+     resolved here, on the client, to the control it stands for - the engine
+     is handed the same command it would get if you had opened the view and
+     clicked that control directly, and knows nothing about dots. */
+  const F = realEnd(from), T = realEnd(to);
+
+  if (from.standIn || to.standIn) {
+    const f = describeEnd(from), t = describeEnd(to);
+    console.log(
+      '[connect: stand-in]\n' +
+      '  from : ' + f.shown + '\n' +
+      '  to   : ' + t.shown + '\n' +
+      '  subscribing: ' + t.real + '   to   ' + f.real + '\n' +
+      '  sending: ' + JSON.stringify({ cmd: 'connect', from: F.instance, fromPort: F.prop,
+                                       to: T.instance, toPort: T.prop }));
+  }
 
   /* send the verb; the connected event is the ONLY wire-drawer - same    */
   /* law as delete (readmefirst repair #5): the GUI never invents a line  */
   /* the engine hasn't confirmed, and every other window sees the same    */
   /* event this one does                                                   */
-  send({ cmd: 'connect', from: from.alias, fromPort: from.port, to: alias, toPort: port });
+  send({ cmd: 'connect', from: F.instance, fromPort: F.prop, to: T.instance, toPort: T.prop });
 }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -1483,7 +1595,10 @@ function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
 
   ensureWireArrow();
   const svg = wireLayerFor(fromEl, toEl);
-  const line = document.createElementNS(SVGNS, 'line');
+  /* a view wired to itself is drawn as a loop ARCING OVER the icon, not a
+     straight segment through it - the shape says "this comes back to me" */
+  const loop = fromAlias === toAlias;
+  const line = document.createElementNS(SVGNS, loop ? 'path' : 'line');
   line.setAttribute('marker-end', 'url(#wire-arrow)');
   svg.appendChild(line);
 
@@ -1498,7 +1613,7 @@ function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
   });
   svg.appendChild(x);
 
-  const wire = { key, fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line, x, svg };
+  const wire = { key, fromAlias, fromPort, fromEl, toAlias, toPort, toEl, line, x, svg, loop };
   wires.push(wire);
   updateWire(wire);
   log(fromAlias + '.' + fromPort + ' → ' + toAlias + '.' + toPort + ' connected', 'event');
@@ -1520,6 +1635,23 @@ function updateWire(wire) {
   const y1 = a.top + a.height / 2 - oRect.top + origin.scrollTop;
   const x2 = b.left + b.width / 2 - oRect.left + origin.scrollLeft;
   const y2 = b.top + b.height / 2 - oRect.top + origin.scrollTop;
+  if (wire.loop) {
+    /* out on the right, in on the left: bow up and over the icon and come
+       back down the other side. The rise scales with the gap so a wide
+       widget gets a proportionally wide loop rather than a flat smear. */
+    const rise = Math.max(34, Math.abs(x1 - x2) * 0.9);
+    const cy = Math.min(y1, y2) - rise;
+    wire.line.setAttribute('d',
+      'M ' + x1 + ' ' + y1 +
+      ' C ' + (x1 + rise * 0.5) + ' ' + cy +
+      ' ' + (x2 - rise * 0.5) + ' ' + cy +
+      ' ' + x2 + ' ' + y2);
+    /* the x sits at the apex, clear of the icon it arcs over */
+    wire.x.setAttribute('x', (x1 + x2) / 2);
+    wire.x.setAttribute('y', cy + rise * 0.25);
+    return;
+  }
+
   wire.line.setAttribute('x1', x1);
   wire.line.setAttribute('y1', y1);
   wire.line.setAttribute('x2', x2);

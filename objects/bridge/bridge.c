@@ -235,27 +235,42 @@ static void Bridge_SendEventScoped(NodeObj instance, InstanceData *local, char *
 
 void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, char *className, NodeObj classNode, char *parent, char *container, int hidden, long connId)
 {
-	NodeObj interface, chunk;
+	NodeObj interface, chunk, self;
 	char *escAlias, *escClass, *escParent, *escContainer, *interfaceText, *buf;
+	char *escIn, *escOut, *sIn, *sOut;
 	int bufLen;
 
 	interface = classNode ? GetClassInterface(classNode) : NULL;
 	interfaceText = interface ? NodeToText(interface) : strdup("null");
+
+	/* whether this thing names a stand-in on either side. Read straight off
+	   the instance while already describing it - no round trip, nothing
+	   subscribes, nothing is created by the asking. Empty for anything that
+	   names neither, which is most things. Purely so the client can show a
+	   dot; the engine does nothing with it. */
+	self = alias ? ResolvePath(alias) : NULL;
+	sIn  = self ? GetPropStr(self, "ReservedIn")  : NULL;
+	sOut = self ? GetPropStr(self, "ReservedOut") : NULL;
+	escIn  = JsonEscapeStr(sIn  ? sIn  : "");
+	escOut = JsonEscapeStr(sOut ? sOut : "");
 
 	escAlias     = JsonEscapeStr(alias ? alias : "");
 	escClass     = JsonEscapeStr(className ? className : "");
 	escParent    = JsonEscapeStr(parent ? parent : "");
 	escContainer = JsonEscapeStr(container ? container : "");
 
-	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer) + (int) strlen(interfaceText) + 160;
+	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
+			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + 220;
 	buf = malloc(bufLen);
-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"interface\":%s}",
-			 escAlias, escClass, escParent, escContainer, hidden ? "true" : "false", interfaceText);
+	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"interface\":%s}",
+			 escAlias, escClass, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, interfaceText);
 
 	free(escAlias);
 	free(escClass);
 	free(escParent);
 	free(escContainer);
+	free(escIn);
+	free(escOut);
 	free(interfaceText);
 
 	if (connId)

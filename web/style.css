@@ -161,11 +161,14 @@ svg.view-wires {
   z-index: 30;
 }
 
-#wires line, svg.view-wires line {
+#wires line, svg.view-wires line,
+#wires path, svg.view-wires path {
   stroke: #6b9fe6;
   stroke-width: 2;
+  fill: none;              /* a loop is a stroked arc, never a filled shape */
 }
-#wires line.pending, svg.view-wires line.pending {
+#wires line.pending, svg.view-wires line.pending,
+#wires path.pending, svg.view-wires path.pending {
   stroke: #e6c66b;
   stroke-dasharray: 4 3;
 }
@@ -255,8 +258,29 @@ svg.view-wires {
   font-weight: 600;
 }
 
-/* there are NO port dots: the icon itself is the wire target, clicked in  */
-/* Connect mode exactly like any control (registerCard's icon handler)      */
+/* A view is NOT a wire target - only these dots are, and they are directed: */
+/* the out dot on the right can only START a wire, the in dot on the left     */
+/* can only FINISH one. They appear only where the view named a stand-in.     */
+.view-dot {
+  display: none;
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: #6b9fe6;
+  border: 1px solid #24262e;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+}
+.view-dot:hover { background: #e6c66b; }
+.view-dot.in  { left: -5px; }
+.view-dot.out { right: -5px; }
+
+/* wiring clutter outside Connect mode, exactly like .port-row above */
+body.mode-connect .view-dot { display: block; }
 
 /* a widget primitive standing on its own - a control (or a dot, for LED) */
 /* and a label, nothing else: no panel, no header, no ports                */
