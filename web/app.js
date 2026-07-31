@@ -1453,12 +1453,38 @@ function wireKey(fromAlias, fromPort, toAlias, toPort) {
   return fromAlias + '.' + fromPort + '>' + toAlias + '.' + toPort;
 }
 
+/* the arrowhead, defined once in the root overlay and shared by every wire
+   layer - an url(#id) reference resolves document-wide, so the per-view svgs
+   use this one rather than each growing their own */
+function ensureWireArrow() {
+  const root = $('wires');
+  if (!root || root.querySelector('#wire-arrow')) return;
+
+  const defs = document.createElementNS(SVGNS, 'defs');
+  const m = document.createElementNS(SVGNS, 'marker');
+  m.setAttribute('id', 'wire-arrow');
+  m.setAttribute('viewBox', '0 0 10 10');
+  m.setAttribute('refX', '9');        /* the tip sits at the line's end */
+  m.setAttribute('refY', '5');
+  m.setAttribute('markerWidth', '7');
+  m.setAttribute('markerHeight', '7');
+  m.setAttribute('orient', 'auto');   /* follows the line, so it always points at the target */
+  const path = document.createElementNS(SVGNS, 'path');
+  path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  path.setAttribute('fill', '#6b9fe6');   /* matches the stroke in style.css */
+  m.appendChild(path);
+  defs.appendChild(m);
+  root.appendChild(defs);
+}
+
 function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
   const key = wireKey(fromAlias, fromPort, toAlias, toPort);
   if (wires.some((w) => w.key === key)) return;   /* a wire spanning two views is announced once per view */
 
+  ensureWireArrow();
   const svg = wireLayerFor(fromEl, toEl);
   const line = document.createElementNS(SVGNS, 'line');
+  line.setAttribute('marker-end', 'url(#wire-arrow)');
   svg.appendChild(line);
 
   /* the mid-wire "x": sends disconnect - the disconnected event is the   */
