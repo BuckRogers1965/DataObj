@@ -605,6 +605,13 @@ stubs. Known rough edges to be aware of before touching anything:
   strings "1"/"0" (anything wanting numbers uses the automatic data conversion).
 - Several functions use implicit-int K&R style (`loadClasses()`, `PrintRegInfo()`);
   the root Makefile builds with `-w`, so no warnings surface.
+- **TODO: compress the z-order.** `toTop()` (web/app.js) assigns
+  `z-index: ++topZ` from a counter that starts at 100 and never resets, so
+  raise-to-front grows without bound. The wire layers (`#wires`,
+  `svg.view-wires`) sit at a fixed 100000 to stay above it, which is a
+  ceiling rather than a guarantee — the `x` that removes a wire goes
+  unclickable if the counter ever passes it. The fix is to renumber the
+  stack down to its actual depth on each promotion instead of counting up.
 - The Makefile's `depend` output was generated on a Linux box; the repo is currently
   sitting on a macOS host, but the build targets Linux conventions
   (`ld -shared`, `_init`/`_fini`).

@@ -93,6 +93,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Image_OnEnable);
 
+	SetPropStr(instance, "ReservedIn", "Value");
+	SetPropStr(instance, "ReservedOut", "Value");
+
 	InitPosition(instance);
 	SetPropInt(instance, "W", 320);		/* a default box; the panel can override */
 	SetPropInt(instance, "H", 320);

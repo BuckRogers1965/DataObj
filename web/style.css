@@ -144,8 +144,11 @@ body {
   top: 0; left: 0;
   width: 100%; height: 100%;
   pointer-events: none;
+  /* above anything toTop can hand out (app.js counts up from 100), or
+     the x that removes a wire is unclickable wherever it crosses a
+     control - the layer takes no mouse itself, only .wire-x does */
   overflow: visible;
-  z-index: 45;
+  z-index: 100000;
 }
 
 /* one per view-inner, grown on first use (wireLayerFor, app.js): a wire    */
@@ -157,8 +160,11 @@ svg.view-wires {
   top: 0; left: 0;
   width: 100%; height: 100%;
   pointer-events: none;
+  /* above anything toTop can hand out (app.js counts up from 100), or
+     the x that removes a wire is unclickable wherever it crosses a
+     control - the layer takes no mouse itself, only .wire-x does */
   overflow: visible;
-  z-index: 30;
+  z-index: 100000;
 }
 
 #wires line, svg.view-wires line,
@@ -166,6 +172,12 @@ svg.view-wires {
   stroke: #6b9fe6;
   stroke-width: 2;
   fill: none;              /* a loop is a stroked arc, never a filled shape */
+}
+/* the x-ray renderings: a connection drawn against a stand-in dot rather
+   than against a control you can actually see */
+#wires line.standin, svg.view-wires line.standin,
+#wires path.standin, svg.view-wires path.standin {
+  stroke: #a06be6;
 }
 #wires line.pending, svg.view-wires line.pending,
 #wires path.pending, svg.view-wires path.pending {

@@ -121,6 +121,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)MenuButton_OnEnable);
 
+	SetPropStr(instance, "ReservedIn", "Selected");
+	SetPropStr(instance, "ReservedOut", "Selected");
+
 	InitPosition(instance);
 
 	RegisterInstance(class, instance);

@@ -924,7 +924,7 @@ function makeSelfActivateButton(alias) {
 /* mode's client-local second renderings are gone - a second doorway to     */
 /* the same object is now a real Alias instance, shared and savable; see    */
 /* registerAliasAtom.)                                                      */
-function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
+function registerWidgetAtom(alias, className, props, pos, isCopy, container, reservedIn, reservedOut) {
   const el = document.createElement('div');
   el.className = 'widget-atom';
   toTop(el);
@@ -934,7 +934,6 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
   let control, primaryProp;
   if (className === 'MenuButton') {
     control = makeMenuButtonEl(alias);
-    primaryProp = 'Selected';
   } else if (className === 'Dropdown') {
     /* the dropdown primitive: a native select whose options are the       */
     /* object's own Items property and whose selection is its Value        */
@@ -946,21 +945,20 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
     (liveControls[alias + '.Items'] = liveControls[alias + '.Items'] || []).push({ el: sel, widgetClass: 'MenuItems' });
     send({ cmd: 'subscribe', instance: alias, port: 'Items' });
     control = sel;
-    primaryProp = 'Value';
   } else if (className === 'MoButton') {
     control = makeMoButtonEl(alias);
-    primaryProp = 'Out';
   } else if (className === 'Button') {
     control = makeSelfActivateButton(alias);
-    primaryProp = 'Out';
   } else {
     const valueProp = props.find((p) => p.Name === 'Value');
     const widget = valueProp ? valueProp.Widget : PROP_TEXTOUT;
     control = INPUT_WIDGET_CLASS[widget]
       ? makeSelfControl(alias, 'Value', widget, valueProp && valueProp.Default)
       : makeSelfDisplay(alias, 'Value', widget);
-    primaryProp = 'Value';
   }
+  /* what this control speaks for is the instance's own answer - the same
+     ReservedIn/ReservedOut a shut view answers with, never a class name */
+  primaryProp = reservedOut || reservedIn;
   control.classList.add('widget-atom-control');
   el.appendChild(control);
 
@@ -1287,7 +1285,7 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   /* doc comment) - a node-box's header/body/footer chrome is the opposite   */
   /* of that.                                                                */
   if (WIDGET_CLASSES.has(className)) {
-    registerWidgetAtom(alias, className, props, pos, false, container);
+    registerWidgetAtom(alias, className, props, pos, false, container, reservedIn, reservedOut);
     return;
   }
 
@@ -1601,6 +1599,13 @@ function ensureWireArrow() {
   path.setAttribute('fill', '#6b9fe6');   /* matches the stroke in style.css */
   m.appendChild(path);
   defs.appendChild(m);
+
+  /* the same head in the stand-in colour - a marker cannot inherit the
+     stroke of the line it sits on, so a second colour needs a second one */
+  const s = m.cloneNode(true);
+  s.setAttribute('id', 'wire-arrow-standin');
+  s.firstChild.setAttribute('fill', '#a06be6');
+  defs.appendChild(s);
   root.appendChild(defs);
 }
 
@@ -1608,7 +1613,7 @@ function ensureWireArrow() {
    against the inner controls and against the stand-in dots. Both carry the
    same endpoints, so the x removes the one connection and onDisconnected
    erases every rendering of it. */
-function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl, tag) {
+function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl, tag, viaDot) {
   const key = wireKey(fromAlias, fromPort, toAlias, toPort, tag);
   if (wires.some((w) => w.key === key)) return;   /* a wire spanning two views is announced once per view */
 
@@ -1627,7 +1632,11 @@ function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl, tag) {
      straight segment through it - the shape says "this comes back to me" */
   const loop = fromAlias === toAlias;
   const line = document.createElementNS(SVGNS, loop ? 'path' : 'line');
-  line.setAttribute('marker-end', 'url(#wire-arrow)');
+  /* a rendering anchored on a stand-in dot is the x-ray view of a shut
+     panel, not a wire between two things you can see - coloured apart */
+  const standin = !!viaDot;
+  if (standin) line.classList.add('standin');
+  line.setAttribute('marker-end', standin ? 'url(#wire-arrow-standin)' : 'url(#wire-arrow)');
   svg.appendChild(line);
 
   /* the mid-wire "x": sends disconnect - the disconnected event is the   */
@@ -1745,7 +1754,10 @@ function anchorsFor(alias, port) {
         || (alias === d.viewAlias + '/' + d.spec)
       : (alias === d.viewAlias + '/' + d.spec.slice(0, cut)
          && port === d.spec.slice(cut + 1));
-    if (hit) out.push({ el: d.el, tag: 'dot' + i });
+    /* byName: the dot's spec named this CONTROL, rather than a property
+       on the view itself - only that is standing in for something you
+       cannot see, and only that takes the stand-in colour */
+    if (hit) out.push({ el: d.el, tag: 'dot' + i, byName: alias !== d.viewAlias });
   });
   return out;
 }
@@ -1770,10 +1782,12 @@ function onConnected(fromAlias, fromPort, toAlias, toPort) {
   const froms = anchorsFor(fromAlias, fromPort);
   const tos = anchorsFor(toAlias, toPort);
 
+  const hasDot = (l) => l.some((a) => a.byName);
+
   /* Only a connection touching a stand-in dot is reported - that is a
      handful, not the whole session, so this stays readable. */
   const fk = fromAlias + '.' + fromPort, tk = toAlias + '.' + toPort;
-  if (standInDots[fk] || standInDots[tk]) {
+  if (hasDot(froms) || hasDot(tos)) {
     const show = (list) => list.length
       ? list.map((a) => a.tag).join(', ')
       : 'nothing drawable (panel shut, no dot)';
@@ -1784,13 +1798,19 @@ function onConnected(fromAlias, fromPort, toAlias, toPort) {
       '  lines: ' + (froms.length * tos.length));
   }
 
+  /* the colour belongs to the CONNECTION, not to one drawing of it - a
+     connection standing in for a named control is that colour in every
+     rendering, and everything else stays normal */
+  const viaDot = hasDot(froms) || hasDot(tos);
+
   if (!froms.length || !tos.length) return;
 
   /* one line per pair of anchors: control-to-control when both panels are
      open, dot-to-control, dot-to-dot - all the same one connection */
   for (const f of froms)
     for (const t of tos)
-      drawWire(fromAlias, fromPort, f.el, toAlias, toPort, t.el, f.tag + '-' + t.tag);
+      drawWire(fromAlias, fromPort, f.el, toAlias, toPort, t.el,
+               f.tag + '-' + t.tag, viaDot);
 }
 
 /* the one wire-remover, mirroring onConnected the drawer */

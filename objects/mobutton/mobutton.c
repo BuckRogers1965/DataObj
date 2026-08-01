@@ -181,6 +181,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)MoButton_OnEnable);
 
+	SetPropStr(instance, "ReservedIn", "Value");
+	SetPropStr(instance, "ReservedOut", "Value");
+
 	/* created once per instance life, armed and re-armed on press only    */
 	/* (a fresh CreateTask per press would orphan the previous one)         */
 	local->repeat = CreateTask(ObjGetTaskList());
