@@ -755,7 +755,7 @@ int Comfy_OnIn(NodeObj instance, MsgId message, NodeObj data)
 		snprintf(boxpath, sizeof(boxpath), "%s/Prompt", vpath);
 		box = ResolvePath(boxpath);
 		if (box)
-			SetOrDeliverProp(box, "In", p);
+			SetOrDeliverProp(box, "Value", p);
 	}
 	Comfy_Generate(instance, local);
 	return rtrn_handled;

@@ -1312,7 +1312,7 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 		SetPropInt(submitCtl, "H", 20);
 		SetPropStr(submitCtl, "Label", "Submit");
 		if (luaInst)
-			Connect(submitCtl, "Out", luaInst, "In");
+			Connect(submitCtl, "Value", luaInst, "In");
 	}
 	y += 20 + 30;
 

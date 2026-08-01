@@ -330,7 +330,7 @@ int CharMap_OnPreset(NodeObj instance, MsgId message, NodeObj data)
 		snprintf(boxpath, sizeof(boxpath), "%s/Map", vpath);
 		box = ResolvePath(boxpath);
 		if (box)
-			SetOrDeliverProp(box, "In", text);
+			SetOrDeliverProp(box, "Value", text);
 	}
 	free(text);
 	return rtrn_handled;

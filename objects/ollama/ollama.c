@@ -617,7 +617,7 @@ int Ollama_OnModels(NodeObj instance, MsgId message, NodeObj data)
 		snprintf(boxpath, sizeof(boxpath), "%s/Model", vpath);
 		box = ResolvePath(boxpath);
 		if (box)
-			SetOrDeliverProp(box, "In", name);
+			SetOrDeliverProp(box, "Value", name);
 	}
 	return rtrn_handled;
 }

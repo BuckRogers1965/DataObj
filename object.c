@@ -2334,7 +2334,22 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	fromOwner = fromNode;
 	fromPort = ResolvePort(&fromOwner, from);
 	if (!fromPort) {
-		/* make sure the output port exists on the source */
+		/* ResolvePort says NULL for two different things: the property is
+		   absent, or it is present but its link dangles. Only the first is
+		   safe to invent - writing 0 over the second destroys both the link
+		   and whatever value it was carrying. */
+		if (GetPropNode(fromNode, from))
+		{
+			char dbg[400], fpath[300];
+			snprintf(dbg, sizeof(dbg), "Connect: '%s' has property '%s' but it does not "
+					 "resolve (dangling link) - refusing to overwrite it",
+					 PathOfInstance(fromNode, fpath, sizeof(fpath)) ? fpath
+						: (GetPropStr(fromNode, "Name") ? GetPropStr(fromNode, "Name") : "(unnamed)"),
+					 from);
+			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+			return 0;
+		}
+		/* genuinely absent - make the source property exist */
 		SetPropInt(fromNode, from, 0);
 		fromPort = GetPropNode(fromNode, from);
 	}
@@ -2807,9 +2822,9 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
 		/* Activate port (ActivateOnMsg), a display reflects the property,  */
 		/* an input edits it through the universal default delivery         */
 		if (strcmp(specs[i].controlClass, "Button") == 0)
-			Connect(control, "Out", target, "Activate");
+			Connect(control, "Value", target, "Activate");
 		else if (IsDisplayControlClass(specs[i].controlClass))
-			Connect(target, specs[i].property, control, "In");
+			Connect(target, specs[i].property, control, "Value");
 		else
 			Connect(control, "Value", target, specs[i].property);
 	}

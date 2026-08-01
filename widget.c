@@ -102,7 +102,7 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 	else										/* Checkbox / Textbox */
 	{
 		Connect(c, "Value", target, prop);			/* control edits prop */
-		Widget_Reflect(target, prop, c, "In");		/* prop reflects into control */
+		Widget_Reflect(target, prop, c, "Value");		/* prop reflects into control */
 	}
 
 	return c;

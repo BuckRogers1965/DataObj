@@ -102,8 +102,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)Markdown_Activate);
 
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
+	/* Value IS the control: a wire into it writes it, the hand writes
+	   it, and the write fans out. There is no second copy to keep in
+	   step and nothing to deliver that can overwrite it. */
+	port = GetPropNode(instance, "Value");
 	SetPropLong(port, "OnMsg", (long)Markdown_OnIn);
 
 	SetPropStr(instance, "Enable", "1");
@@ -143,7 +145,6 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishPosition(ClassSelf);
 
 	PublishProp(ClassSelf, "Value", PROP_MARKDOWN, "");
-	PublishProp(ClassSelf, "In", PROP_NULL, "");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
