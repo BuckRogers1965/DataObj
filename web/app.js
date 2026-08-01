@@ -220,6 +220,12 @@ function registerPanel(alias, panelEl, display, onToggle) {
       send({ cmd: 'set-property', instance: alias, prop: 'ReservedViewOpen', value: open ? '1' : '0' });
       if (onToggle) onToggle(open);
       updateWiresFor(alias);
+      /* opening reveals controls that were not drawable a moment ago, so the
+         wires that could only be drawn against a dot can now also be drawn
+         against the control itself. Redrawn from what the engine has already
+         reported - asking it to re-list would re-walk every connection in the
+         session on every single panel open. */
+      if (open && currentMode === 'Connect') redrawKnownWires();
     },
   };
   panels[alias] = rec;
@@ -1049,6 +1055,14 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container) {
 /* particular View happens to be "the palette".                              */
 /* a dot on one side of an icon: in on the left, out on the right. Visual
    only - no handler, no state, nothing behind it. */
+/* the real (instance, property) each stand-in dot speaks for, so a wire
+   the engine reports against the inner control can also be drawn against
+   the dot - the x-ray view of a shut panel */
+let standInDots = [];   // {el, viewAlias, spec} - scanned, never keyed: the
+                        // engine reports an endpoint in whichever spelling the
+                        // spec used, so the match is a comparison, not a lookup
+let knownConnections = {};  // wireKey -> {fromAlias,fromPort,toAlias,toPort} as last reported
+
 function addStandInMark(icon, side, alias, spec) {
   const dot = document.createElement('div');
   dot.className = 'view-dot ' + side;
@@ -1058,6 +1072,7 @@ function addStandInMark(icon, side, alias, spec) {
     onStandInClick(alias, side, spec, dot);
   });
   icon.appendChild(dot);
+  standInDots.push({ el: dot, viewAlias: alias, spec });
 }
 
 function registerView(alias, props, pos, hidden, container, reservedIn, reservedOut) {
@@ -1561,8 +1576,8 @@ function wireLayerFor(fromEl, toEl) {
   return $('wires');
 }
 
-function wireKey(fromAlias, fromPort, toAlias, toPort) {
-  return fromAlias + '.' + fromPort + '>' + toAlias + '.' + toPort;
+function wireKey(fromAlias, fromPort, toAlias, toPort, tag) {
+  return fromAlias + '.' + fromPort + '>' + toAlias + '.' + toPort + (tag ? '#' + tag : '');
 }
 
 /* the arrowhead, defined once in the root overlay and shared by every wire
@@ -1589,9 +1604,22 @@ function ensureWireArrow() {
   root.appendChild(defs);
 }
 
-function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl) {
-  const key = wireKey(fromAlias, fromPort, toAlias, toPort);
+/* tag distinguishes the RENDERINGS of one connection - the same wire drawn
+   against the inner controls and against the stand-in dots. Both carry the
+   same endpoints, so the x removes the one connection and onDisconnected
+   erases every rendering of it. */
+function drawWire(fromAlias, fromPort, fromEl, toAlias, toPort, toEl, tag) {
+  const key = wireKey(fromAlias, fromPort, toAlias, toPort, tag);
   if (wires.some((w) => w.key === key)) return;   /* a wire spanning two views is announced once per view */
+
+/* both ends on the SAME anchor is not a wire: it draws as a zero-length
+   segment, and a zero-length line still renders its marker-end - a bare
+   arrowhead sitting on a dot that has nothing connected to it */
+   if (fromEl === toEl) {
+      console.log('[wire] both ends on one anchor, not drawn: ' +
+        fromAlias + '.' + fromPort + ' -> ' + toAlias + '.' + toPort + '  tag=' + tag);
+      return;
+    }
 
   ensureWireArrow();
   const svg = wireLayerFor(fromEl, toEl);
@@ -1652,12 +1680,28 @@ function updateWire(wire) {
     return;
   }
 
-  wire.line.setAttribute('x1', x1);
-  wire.line.setAttribute('y1', y1);
-  wire.line.setAttribute('x2', x2);
-  wire.line.setAttribute('y2', y2);
-  wire.x.setAttribute('x', (x1 + x2) / 2);
-  wire.x.setAttribute('y', (y1 + y2) / 2);
+  /* neither end runs to a centre: pull each back to where the line crosses
+     its own box and leave a gap, so the wire points AT both things instead
+     of burying itself in the middle of them */
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  let sx = x1, sy = y1, ex = x2, ey = y2;
+  if (len > 8) {
+    const edge = (r) => len * Math.min(
+      Math.abs(dx) > 0.01 ? (r.width / 2) / Math.abs(dx) : Infinity,
+      Math.abs(dy) > 0.01 ? (r.height / 2) / Math.abs(dy) : Infinity) - 4;
+    let ca = edge(a), cb = edge(b);
+    if (ca + cb > len - 6) { const k = (len - 6) / (ca + cb); ca *= k; cb *= k; }
+    sx = x1 + dx / len * ca; sy = y1 + dy / len * ca;
+    ex = x2 - dx / len * cb; ey = y2 - dy / len * cb;
+  }
+
+  wire.line.setAttribute('x1', sx);
+  wire.line.setAttribute('y1', sy);
+  wire.line.setAttribute('x2', ex);
+  wire.line.setAttribute('y2', ey);
+  wire.x.setAttribute('x', (sx + ex) / 2);
+  wire.x.setAttribute('y', (sy + ey) / 2);
 }
 
 function updateWiresFor(alias) {
@@ -1673,25 +1717,92 @@ function updateWiresFor(alias) {
 /* re-entering the mode re-lists. Silently skipped if either end isn't      */
 /* rendered by this client (a closed view's member, hidden plumbing);       */
 /* instances-done re-lists so late-rendered members get their wires.        */
+/* an element EXISTS but is not drawable while it sits inside a closed
+   panel (display:none) - its rect is all zeros, and anchoring a wire to it
+   puts that end in the canvas corner. Existence is not renderedness. */
+function isDrawable(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 || r.height > 0;
+}
+
+/* Every anchor this end can be drawn against: the control itself when its
+   panel is open and it is actually rendered, plus any stand-in dot that
+   speaks for it - so a connection into a shut view still shows, on the dot. */
+function anchorsFor(alias, port) {
+  const out = [];
+  const inst = instances[alias];
+  const own = inst && inst.ports[port];
+  if (own && isDrawable(own)) out.push({ el: own, tag: 'ctl' });
+  /* scan every dot and ask whether it speaks for THIS endpoint: a spec is
+     accepted in more than one spelling and the engine reports whichever one
+     it resolved to, so a computed key misses where a comparison does not */
+  standInDots.forEach((d, i) => {
+    if (!isDrawable(d.el)) return;
+    const cut = d.spec.lastIndexOf('/');
+    const hit = cut < 0
+      ? (d.viewAlias === alias && d.spec === port)
+        || (alias === d.viewAlias + '/' + d.spec)
+      : (alias === d.viewAlias + '/' + d.spec.slice(0, cut)
+         && port === d.spec.slice(cut + 1));
+    if (hit) out.push({ el: d.el, tag: 'dot' + i });
+  });
+  return out;
+}
+
+/* re-attempt every connection already reported: drawWire dedupes by anchor,
+   so this adds the lines that just became drawable and touches nothing else */
+function redrawKnownWires() {
+  for (const k in knownConnections) {
+    const c = knownConnections[k];
+    onConnected(c.fromAlias, c.fromPort, c.toAlias, c.toPort);
+  }
+}
+
 function onConnected(fromAlias, fromPort, toAlias, toPort) {
+  /* remembered whatever the mode is, so opening a panel later can redraw
+     from here instead of asking the engine to re-list the whole session */
+  knownConnections[wireKey(fromAlias, fromPort, toAlias, toPort)] =
+    { fromAlias, fromPort, toAlias, toPort };
+
   if (currentMode !== 'Connect') return;
 
-  const fromInst = instances[fromAlias];
-  const toInst = instances[toAlias];
-  if (!fromInst || !toInst) return;
+  const froms = anchorsFor(fromAlias, fromPort);
+  const tos = anchorsFor(toAlias, toPort);
 
-  const fromDot = fromInst.ports[fromPort];
-  const toDot = toInst.ports[toPort];
-  if (!fromDot || !toDot) return;
+  /* Only a connection touching a stand-in dot is reported - that is a
+     handful, not the whole session, so this stays readable. */
+  const fk = fromAlias + '.' + fromPort, tk = toAlias + '.' + toPort;
+  if (standInDots[fk] || standInDots[tk]) {
+    const show = (list) => list.length
+      ? list.map((a) => a.tag).join(', ')
+      : 'nothing drawable (panel shut, no dot)';
+    console.log(
+      '[wire: stand-in]\n' +
+      '  from : ' + fk + '   anchors: ' + show(froms) + '\n' +
+      '  to   : ' + tk + '   anchors: ' + show(tos) + '\n' +
+      '  lines: ' + (froms.length * tos.length));
+  }
 
-  drawWire(fromAlias, fromPort, fromDot, toAlias, toPort, toDot);
+  if (!froms.length || !tos.length) return;
+
+  /* one line per pair of anchors: control-to-control when both panels are
+     open, dot-to-control, dot-to-dot - all the same one connection */
+  for (const f of froms)
+    for (const t of tos)
+      drawWire(fromAlias, fromPort, f.el, toAlias, toPort, t.el, f.tag + '-' + t.tag);
 }
 
 /* the one wire-remover, mirroring onConnected the drawer */
 function onDisconnected(fromAlias, fromPort, toAlias, toPort) {
-  const key = wireKey(fromAlias, fromPort, toAlias, toPort);
+  delete knownConnections[wireKey(fromAlias, fromPort, toAlias, toPort)];
+
+  /* matched on the connection, not on one drawing of it: the same wire can
+     be rendered against the controls AND against the stand-in dots, and all
+     of them go when it is disconnected */
   wires = wires.filter((w) => {
-    if (w.key !== key) return true;
+    if (!(w.fromAlias === fromAlias && w.fromPort === fromPort
+          && w.toAlias === toAlias && w.toPort === toPort)) return true;
     removeWire(w);
     return false;
   });
