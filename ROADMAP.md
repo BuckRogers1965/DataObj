@@ -149,6 +149,23 @@ everything after this is cheap.
    widget.c is already a full layer (17 exports); the object layer's
    job is registration and composition, so those calls move to
    widget.c's side of the line.*
+
+   *The reason both of those landed wrongly, named: **object.c IS the
+   de-facto superclass** — the place every object inherits from — and
+   with no superclass concept spelled out anywhere, it was the only
+   file that looked general enough to hold anything general. So a JSON
+   parser and widget construction landed in it alongside create,
+   connect, and register.*
+
+   *The test for what belongs: **would a subclass plausibly override
+   it?** Create, destroy, connect, disconnect, send, register,
+   position, path — yes, those are superclass behavior, and
+   `DefaultMessage(superclass, …)` chaining (item 8) is exactly how a
+   subclass would reach them. "Go parse this document", "go build that
+   widget", "go read that file" — no. Nothing subclasses a service, so
+   a service is an instance you send a message to. Applying the test
+   is what turns the debt items above from a cleanup list into one
+   rule, and it is what keeps the next general-looking thing out.*
 4. **Interface publication**: at ClassStart each class registers a
    description of its properties (name, widget
    type, default value). This is the palette's data source and the
