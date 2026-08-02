@@ -743,6 +743,87 @@ rather than rushed.
    intentional kiosk and an accidental one look identical on screen
    (an empty canvas), and only one of them is a surprise.
 
+5. **Clone becomes serialize + deserialize - one path, not two.**
+   Clone and import are the same operation: take a subtree, reproduce
+   it elsewhere, rewire its internal links onto the copies and leave
+   its external ones alone. Export already solves relative addressing,
+   wires and alias targets; `CloneObject` / `CloneConnections` /
+   `CloneAliasNode` / `CloneMintName` / `CloneGroupPass` solve them a
+   second time, separately.
+
+   *This is not hypothetical divergence - the two paths HAD diverged.*
+   Every save/load/clone bug chased on 2026-08-01 existed twice for
+   this reason (the alias binding to its own slider, the wire landing
+   on the copy's members, names minting fresh), and each was fixed on
+   one side without the other. Two copies of one thing always drift;
+   the harness's own `Report` class, copy-pasted into guitest.py and
+   rawtest.py, quietly stopped printing progress dots in one of them.
+   **If two paths must agree, they have to be one path** - not kept in
+   sync, not documented as parallel.
+
+   *What it needs, both already listed rather than new:* a
+   **Deserializer** object so the reading half stops being a hand-rolled
+   parser in object.c (the mirror of Serializer -> Writer), and a
+   memory sink instead of a Writer so a clone serializes to a buffer
+   rather than a file - a wiring change, not a mechanism.
+
+   *Prerequisite, made concrete by the same day's testing:*
+   `CloneInstance` hands the bridge a map of source -> copy, which is
+   how a clone announces what it made. `ImportView` returns only the
+   top, which is exactly why import announces nothing and every test
+   waiting on `instance-created` after an import saw nothing. If clone
+   becomes import, import must announce - item 1 above blocks this one.
+
+   *What it retires:* most of the clone machinery, several hundred
+   lines whose only job is doing what the serializer already does.
+
+6. **The widget table becomes a .flow file.** A `WidgetItem[]` table is
+   a flow written in C: class, name, position, size, and which handler
+   each control's writes reach. Every row is a create-instance plus a
+   connect plus a few property writes - which is a flow file, and
+   `Widget_Build`/`Widget_Ctl`/`Widget_Publish` become "load this file"
+   (`ImportView`, already written).
+
+   *The one thing the table can express that a file cannot is a
+   COMPILED handler* - and that is what the language hosts are for. A
+   behaviour that is a script inside the flow needs no `make` at all,
+   which is the scripted composite widget already proven in
+   widgettest.py, applied to the widget's own panel instead of to a
+   View built by hand. So the split is: C for what genuinely must be
+   compiled - sockets, the fabric, a codec - and a flow file for
+   arrangement plus scripted behaviour.
+
+   *Why it is worth doing rather than merely elegant:* a bug in a
+   widget's layout or logic stops being rebuild-and-restart and becomes
+   editing a file - or editing the widget in the GUI and saving it.
+   Support also gains a second form of "email someone the fix": not
+   only a 15KB .object, but a widget as a file.
+
+7. **Push to definition - re-skinning, and ONLY re-skinning.** Rearrange
+   a widget instance in the GUI, then push that back to the class's flow
+   file so every future instance is built that way. Same verb again:
+   export the instance's view, write it as the class's definition.
+
+   *The cut that makes this safe: layout only.* `X`, `Y`, `W`, `H` and
+   the panel's own coordinates are visual; values, wires and handlers
+   are not, and are never pushed. Nothing a re-skin can do will break an
+   instance, so **live instances can follow immediately** - no version
+   negotiation, no reload, no data migration, no "does this instance
+   still work" question. It is the same as dragging a control inside a
+   panel today, which already has no consequence.
+
+   *This only works because size is pixels on the instance.* Layout is
+   entirely ordinary properties, so "just the visual" is a nameable
+   subset rather than a judgement call, and the whole operation is three
+   property writes per control with no lifecycle involved. Had size
+   stayed baked into the C table, "push only the layout" would not even
+   be expressible - you would be pushing a recompile.
+
+   *Decide deliberately, cheap now and expensive after ten widgets are
+   files:* whether a gesture is editing THIS instance or the class it
+   came from should be visible in the GUI, not implied - you may have
+   moved one control because this one instance needed it.
+
 ## Phase 6 — Federated palettes: web and MCP
 
 The palette stops being "what is compiled in" and becomes "what is
