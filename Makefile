@@ -19,7 +19,7 @@ GOAL=framework
 # parallelize. =auto picks a sensible job count and links the same code.
 # The tree builds warning-free and run.sh enforces that, so a build-time
 # warning is a failure like any other.
-OPT=-O3 -march=native -flto=auto -Idyn -Wall -Wextra
+OPT?=-O3 -march=native -flto=auto -Idyn -Wall -Wextra
 
 # Rule to compile .c files to .o files
 %.o : %.c
@@ -28,6 +28,19 @@ OPT=-O3 -march=native -flto=auto -Idyn -Wall -Wextra
 # Build all targets
 all: $(OBJECTS) libframework.so $(GOAL) subdirs
 	@echo "build complete: $(GOAL) + $(words $(wildcard objects/*/*.object)) objects"
+
+# The same build with flags a debugger can follow: no optimisation, no
+# inlining, and no LTO - which is what turns a backtrace through
+# libframework into a list of function names with no line numbers - plus
+# full debug info and frame pointers.
+#
+#   make debug
+#   gdb --args ./framework -ip 127.0.0.1 -port 8083
+#
+# Only the root build needs it: the object modules already compile -g,
+# which is why their frames show lines and the library's do not.
+debug: export OPT=-O0 -g3 -fno-omit-frame-pointer -fno-inline -Idyn -Wall -Wextra
+debug: clean all
 
 # Rule to handle subdirectories
 # NOT -s: silent mode hid every compile, so a real rebuild and a no-op
