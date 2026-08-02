@@ -24,7 +24,7 @@ $(GOAL): $(OBJECTS)
 	ld  -shared -L../../ -lframework -lssl -lcrypto $(OBJECTS) -o $(GOAL)
 
 clean:
-	rm $(OBJECTS) $(GOAL) > /dev/null 2>&1
+	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives

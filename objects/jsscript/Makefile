@@ -29,7 +29,7 @@ $(GOAL): $(OBJECTS) $(QJS_OBJ)
 	ld  -shared -L../../ -lframework $(OBJECTS) $(QJS_OBJ) -lm -lpthread -o $(GOAL)
 
 clean:
-	rm $(OBJECTS) $(QJS_OBJ) $(GOAL) > /dev/null 2>&1
+	rm -f $(OBJECTS) $(QJS_OBJ) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
