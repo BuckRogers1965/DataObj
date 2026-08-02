@@ -3,8 +3,9 @@
 GUI unit tests: drive the framework's web canvas through a real browser
 and check clone / alias / move / open / close behavior.
 
-Every check documents what was EXPECTED and what was actually OBSERVED,
-in the same print-based spirit as the C modules' own self-tests.
+A passing check prints NOTHING - only failures speak, saying what was
+EXPECTED and what was actually OBSERVED, plus one summary line. Add -v
+to watch every check go by.
 
 Each test stages its artifacts in its own clearly-labelled View
 (CloneTest, AliasTest, ...) with the panels laid out in a grid, never
@@ -29,11 +30,21 @@ CDP_PORT = 9223
 # --------------------------------------------------------------------------
 
 class Report:
-    def __init__(self):
+    """A PASSING TEST PRINTS NOTHING. Only failures speak, and they say
+    everything (what was expected, what was actually observed) - plus one
+    summary line. There will eventually be hundreds of these: a green run
+    must cost a line to read, not a screenful. Pass -v when a human wants
+    to watch every check go by. (Same contract as rawtest.py's Report.)"""
+
+    def __init__(self, label="tests", verbose=False):
         self.results = []
+        self.label = label
+        self.verbose = verbose
 
     def expect(self, name, expected, observed, ok):
         self.results.append((name, expected, observed, bool(ok)))
+        if ok and not self.verbose:
+            return
         print("TEST     %s" % name)
         print("  expected: %s" % expected)
         print("  observed: %s" % observed)
@@ -42,10 +53,8 @@ class Report:
 
     def summary(self):
         failed = [r for r in self.results if not r[3]]
-        print("=" * 60)
-        print("%d tests, %d passed, %d failed" % (len(self.results), len(self.results) - len(failed), len(failed)))
-        for name, expected, observed, _ in failed:
-            print("  FAILED: %s\n    expected: %s\n    observed: %s" % (name, expected, observed))
+        print("%s: %d tests, %d passed, %d failed"
+              % (self.label, len(self.results), len(self.results) - len(failed), len(failed)))
         return len(failed)
 
 
@@ -71,8 +80,8 @@ def make_test_view(t, label):
     t.js("send({cmd:'create-instance',class:'View',as:'%s'})" % alias)
     t.js("send({cmd:'set-property',instance:'%s',prop:'X',value:'%d'})" % (alias, 250 + i * 115))
     t.js("send({cmd:'set-property',instance:'%s',prop:'Y',value:'8'})" % alias)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (alias, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (alias, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (alias, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (alias, py))
     t.wait_js("!!views['%s']" % alias, label + " view")
     t.js("panels['%s'].setOpen(true)" % alias)
     time.sleep(0.6)
@@ -271,8 +280,8 @@ def test_options_internals(t, r):
         "internals panel")
     # the dissection table is TALL (one row per published property) -
     # park it in its own column on the far right, clear of the grid
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'1080'})" % panel_view)
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'60'})" % panel_view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1080'})" % panel_view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'60'})" % panel_view)
     time.sleep(1.5)  # members stream in on open
 
     raw = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
@@ -369,16 +378,20 @@ def test_open_close(t, r):
     the root. The test view is cloned from the palette and RENAMED to
     OpenCloseTest - the label is just the Name property doing its job."""
     t.set_mode('Clone')
+    # ours is the NEW View_N - the shared engine namespace means the raw
+    # suites' leftovers are visible here too, so "any View_N" grabs theirs
+    t.js("window.__preViews = Object.keys(views).join('|')")
     src = t.center_of("instances['/Root/Palette/View']")
     t.pick_place(src["x"], src["y"], 100, 500)  # the free column under the palette
-    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "view clone")
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)"
+                    " && window.__preViews.split('|').indexOf(k) < 0) || false)", "view clone")
     time.sleep(0.6)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'OpenCloseTest'})" % raw)
     view = "/Root/OpenCloseTest"
     t.wait_js("!!views['%s']" % view, "renamed view")
     px, py = next_slot()
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (view, py))
     time.sleep(0.6)
 
     closed = t.js("panels['%s'].el.style.display === 'none'" % view)
@@ -401,7 +414,7 @@ def test_open_close(t, r):
              st and st.get("open") and st.get("parent") == "canvas"
              and st.get("iconShown") and st.get("iconLeft") == icon_before)
 
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px + 40))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px + 40))
     time.sleep(0.8)
     st = t.js("(()=>{const i=instances['%s'];const p=panels['%s'];"
               "return {panelLeft:p.el.style.left, iconLeft:i.el.getBoundingClientRect().left};})()" % (view, view))
@@ -421,19 +434,181 @@ def test_open_close(t, r):
              st and st.get("closed") and st.get("iconShown"))
 
 
+def test_rename_then_manipulate(t, r):
+    """A renamed thing is the same thing: its gestures keep working.
+    Every gesture resolves the CURRENT name at the moment you make it -
+    a handler that remembered the name its view was born with silently
+    stopped writing anything the moment the view was renamed."""
+    # its own view, in the clear column right of the grid and high enough
+    # that the panel's BOTTOM-right resize handle is inside the window
+    # (the real viewport is ~1400x811 - a panel at y=560 has its corner
+    # off the bottom edge, where synthetic clicks hit nothing). Taking a
+    # grid slot would also push every later test's panel down a row.
+    view = '/Root/RenameTest'
+    t.js("send({cmd:'create-instance',class:'View',as:'%s',container:'',x:'660',y:'8'})" % view)
+    t.wait_js("!!views['%s']" % view, "rename test view")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1130'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'300'})" % view)
+    t.js("panels['%s'].setOpen(true)" % view)
+    time.sleep(0.8)
+
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'RenamedLive'})" % view)
+    renamed = '/Root/RenamedLive'
+    t.wait_js("!!views['%s']" % renamed, "renamed view")
+    time.sleep(0.4)
+
+    def drag(el_js, dx, dy):
+        p = t.js("(()=>{const e=%s;const r=e.getBoundingClientRect();"
+                 "return {x:r.left+r.width/2,y:r.top+r.height/2,w:r.width};})()" % el_js)
+        if not p or not p.get("w"):
+            return False   # not rendered/visible - the drag would hit nothing
+        t.mouse("mousePressed", p["x"], p["y"])
+        for i in range(1, 6):
+            t.mouse("mouseMoved", p["x"] + dx * i / 5, p["y"] + dy * i / 5)
+            time.sleep(0.02)
+        t.mouse("mouseReleased", p["x"] + dx, p["y"] + dy)
+        time.sleep(0.6)
+        return True
+
+    t.clear_events()
+    drag("views['%s'].resizeHandle" % renamed, 60, 40)
+    sized = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='property-changed'"
+                 " && m.instance==='%s' && (m.port==='W'||m.port==='H'))"
+                 ".map(m=>m.port+'='+m.value))" % renamed)
+    r.expect("rename: a renamed view still resizes",
+             "dragging the corner writes W and H back under the NEW name",
+             "%s" % sized,
+             sized and len(json.loads(sized)) == 2)
+
+    t.clear_events()
+    drag("views['%s'].header" % renamed, 40, 25)
+    moved = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='property-changed'"
+                 " && m.instance==='%s' && (m.port==='ReservedViewPanelX'||m.port==='ReservedViewPanelY'))"
+                 ".map(m=>m.port+'='+m.value))" % renamed)
+    r.expect("rename: a renamed view's panel still drags",
+             "dragging the titlebar writes PanelX and PanelY back under the NEW name",
+             "%s" % moved,
+             moved and len(json.loads(moved)) == 2)
+
+
+def test_rename_cascades_into_own_options_panel(t, r):
+    """A view's own Options/dissection panel is created INSIDE the view
+    it dissects (Bridge_Internals), nesting one Alias member per
+    published property. Renaming the view through that SAME panel's own
+    Name control must cascade live, with no reload: the view itself
+    relocates, its panel relocates with it (still open), and every
+    member's Container AND Target link follow - not just the path index.
+
+    This reproduces two bugs found live (both server-side, bridge.c):
+    (1) Bridge_Rename/Bridge_RenameName scoped a root-level rename's own
+    instance-renamed event to "" after computing the correct "/Root",
+    but Bridge_ListInstances registers root viewers under "/Root"
+    (Bridge_ViewKey maps "" -> "/" but "/Root" -> "/Root") - so the
+    rename of the view itself never reached anyone live, only a reload
+    (which re-lists from scratch) showed it right.
+    (2) Bridge_Set captured the owner's pre-write alias from
+    Bridge_AliasForInstance's 4-slot static ring, then triggered (via
+    SetOrDeliverProp and the whole-subtree repath) a live property
+    notification for every member ahead of it - each one rotating the
+    SAME ring - so by the time Bridge_RenameName/Bridge_RepathSubtree
+    finally read that pointer for a panel with more than a couple of
+    members, it had been overwritten with some LATER member's own new
+    path. Only the first couple of members ever got their Container and
+    Target actually rewritten; the rest kept stale links (the "little
+    icon under the Name box" - the ReservedViewOpen icon - kept showing
+    the view's OLD name) even though the path index quietly got them
+    all right."""
+    view = '/Root/RenameCascadeTest'
+    t.js("send({cmd:'create-instance',class:'View',as:'%s',container:'',x:'820',y:'8'})" % view)
+    t.wait_js("!!views['%s']" % view, "rename-cascade test view")
+
+    # dissect the VIEW ITSELF - its own options panel is created INSIDE
+    # it, one Alias member per published property (Name, X, Y, the
+    # ReservedViewOpen icon, ...)
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % view)
+    t.click(src["x"], src["y"])
+    panel = t.wait_js(
+        "(Object.keys(panels).find(k=>k.startsWith('%s/') && /Panel_/.test(k)) || false)" % view,
+        "view's own internals panel")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'1080'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'340'})" % panel)
+    time.sleep(1.2)  # members stream in on open
+
+    raw = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
+               ".map(k=>({alias:k,prop:aliasAtoms[k].targetProp})))" % panel)
+    mlist = json.loads(raw) if raw else []
+    before_count = len(mlist)
+    name_member = next((m["alias"] for m in mlist if m["prop"] == "Name"), None)
+    open_member = next((m["alias"] for m in mlist if m["prop"] == "ReservedViewOpen"), None)
+    r.expect("rename-cascade: the dissection table has its members before the rename",
+             "at least Name and ReservedViewOpen among the published members",
+             "%d members, name_member=%s, open_member=%s" % (before_count, name_member, open_member),
+             before_count > 0 and name_member and open_member)
+
+    t.clear_events()
+    # rename through the panel's OWN Name control - the doorway a user
+    # actually types into
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:'RenameCascadeDone'})" % name_member)
+    time.sleep(1.5)
+
+    renamed = '/Root/RenameCascadeDone'
+    renamed_panel = renamed + panel[len(view):]
+    renamed_open_member = open_member.replace(view, renamed, 1)
+
+    live = t.js("JSON.stringify({"
+                "hasNewView: !!views['%s'],"
+                "hasOldView: !!views['%s'],"
+                "panelStillOpen: (()=>{const p=panels['%s'];return !!p && p.el.style.display!=='none';})(),"
+                "memberCount: Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/')).length,"
+                "openTarget: aliasAtoms['%s'] && aliasAtoms['%s'].target,"
+                "openLabel: (()=>{const rec=aliasAtoms['%s'];const l=rec&&rec.slot.querySelector('.instance-icon-label');"
+                "return l&&l.textContent;})()"
+                "})" % (renamed, view, renamed_panel, renamed_panel,
+                        renamed_open_member, renamed_open_member, renamed_open_member))
+    state = json.loads(live) if live else {}
+    r.expect("rename-cascade: the view itself relocates live, no reload",
+             "views['%s'] exists, views['%s'] is gone" % (renamed, view),
+             "%s" % state,
+             state.get("hasNewView") and not state.get("hasOldView"))
+    r.expect("rename-cascade: the view's own options panel stays open and follows",
+             "the dissection panel is still open under its new nested path",
+             "%s" % state,
+             state.get("panelStillOpen"))
+    r.expect("rename-cascade: every member's Container followed (not just the first couple)",
+             "all %d members still resolve under the panel's new path" % before_count,
+             "%s" % state,
+             state.get("memberCount") == before_count)
+    r.expect("rename-cascade: the Open icon's Target link followed, not stale",
+             "%s" % renamed,
+             "%s" % state,
+             state.get("openTarget") == renamed)
+    r.expect("rename-cascade: the Open icon's own label reads the NEW name",
+             "RenameCascadeDone",
+             "%s" % state,
+             state.get("openLabel") == "RenameCascadeDone")
+
+
 def test_lazy_contents(t, r):
     """A closed view's contents are never sent - they stream in on open."""
     t.set_mode('Clone')
     src = t.center_of("instances['/Root/Palette/View']")
-    t.pick_place(src["x"], src["y"], 100, 620)  # the free column under the palette
-    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)) || false)", "lazy view clone")
+    # the free spot under the palette - computed from the palette panel's
+    # real bounds (the engine sizes it to fit its seeds, so it grows as
+    # classes join; a hardcoded y went stale the moment it did)
+    free = t.js("(()=>{const r=panels['/Root/Palette'].el.getBoundingClientRect();"
+                "return {x:100,y:Math.round(r.bottom)+40};})()")
+    t.js("window.__preViews = Object.keys(views).join('|')")
+    t.pick_place(src["x"], src["y"], free["x"], free["y"])
+    raw = t.wait_js("(Object.keys(views).find(k=>/^\\/Root\\/View_\\d+$/.test(k)"
+                    " && window.__preViews.split('|').indexOf(k) < 0) || false)", "lazy view clone")
     time.sleep(0.6)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Name',value:'LazyTest'})" % raw)
     view = "/Root/LazyTest"
     t.wait_js("!!views['%s']" % view, "renamed lazy view")
     px, py = next_slot()
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelX',value:'%d'})" % (view, px))
-    t.js("send({cmd:'set-property',instance:'%s',prop:'PanelY',value:'%d'})" % (view, py))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'%d'})" % (view, px))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'%d'})" % (view, py))
     t.js("panels['%s'].setOpen(true)" % view)
     time.sleep(0.8)
 
@@ -450,6 +625,7 @@ def test_lazy_contents(t, r):
     t.wait_js("typeof instances !== 'undefined' && !!views['%s']" % view, "reboot")
     time.sleep(1.5)
     install_error_trap(t)
+    t.hook_events()   # the reload rebuilt handleEvent - re-hook, later tests count events
     known_before = t.js("!!instances['%s']" % member)
     t.set_mode('Operate')
     src = t.center_of("instances['%s']" % view)
@@ -465,37 +641,391 @@ def test_lazy_contents(t, r):
 # --------------------------------------------------------------------------
 
 
-def test_lua_script(t, r):
-    """A Lua Script object: wire a Pulse into it, its oninput callback
-    counts rising edges and sends the count out its Out port."""
-    view = make_test_view(t, 'ScriptTest')
-    t.set_mode('Clone')
-    src = t.center_of("instances['/Root/Palette/Script']")
-    tgt = inner_center(t, view, -30, -30)
-    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
-    script = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Script_')) || false)" % view, "script clone")
-    src = t.center_of("instances['/Root/Palette/Pulse']")
-    tgt = inner_center(t, view, 30, 40)
-    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
-    pulse = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Pulse_')) || false)" % view, "pulse clone")
+def test_script_pulse(t, r, lang, snippet):
+    """The script pulse generator as a real WIDGET: a ScriptBox (the
+    script widget - dropdown, source box, output box) powered by `lang`,
+    counting pulse edges and speaking out its Out like any coded widget.
+    The raw language host never appears in any view - it lives INSIDE
+    the ScriptBox as plumbing."""
+    view = make_test_view(t, lang + 'PulseTest')
+    box = view + '/Counter'
+    pulse = view + '/P'
+    sink = view + '/Shown'
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'20',y:'20'})" % (box, view))
+    t.js("send({cmd:'create-instance',class:'Pulse',as:'%s',container:'%s',x:'20',y:'90'})" % (pulse, view))
+    t.js("send({cmd:'create-instance',class:'Textbox',as:'%s',container:'%s',x:'20',y:'160'})" % (sink, view))
+    t.wait_js("!!instances['%s']" % sink, "widget parts")
     time.sleep(0.5)
 
-    lua = "local c = 0 oninput(function(v, k) if v == '1' then c = c + 1 send(tostring(c)) end end)"
-    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (script, json.dumps(lua)))
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Language',value:'%s'})" % (box, lang))
+    time.sleep(0.3)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(snippet)))
     t.js("send({cmd:'set-property',instance:'%s',prop:'Interval',value:'150'})" % pulse)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Count',value:'3'})" % pulse)
-    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, script))
-    t.js("send({cmd:'subscribe',instance:'%s',port:'Out'})" % script)
-    time.sleep(0.5)
-    t.clear_events()
-    t.js("send({cmd:'activate',instance:'%s'})" % script)
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, box))
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (box, sink))
+    t.js("send({cmd:'subscribe',instance:'%s',port:'Value'})" % sink)
+    time.sleep(0.4)
+    t.js("send({cmd:'activate',instance:'%s'})" % box)
     t.js("send({cmd:'activate',instance:'%s'})" % pulse)
-    time.sleep(3.5)
-    counts = t.js("JSON.stringify((window.__evts||[]).filter(m=>m.event==='message-flowed' && m.instance==='%s').map(m=>m.value))" % script)
-    r.expect("lua: a script counts pulses and speaks",
-             "the Script's Lua oninput callback fires per pulse edge; counts 1,2,3 emerge from its Out port",
-             "script output: %s" % counts,
-             counts and json.loads(counts) == ["1", "2", "3"])
+    time.sleep(3.0)
+
+    final = t.js("propertyValues['%s.Value']" % sink)
+    r.expect("%s pulse widget: a ScriptBox counts pulses like a coded widget" % lang.lower(),
+             "the %s-powered ScriptBox counts 3 rising edges; the wired Textbox shows 3" % lang,
+             "Textbox shows: %s" % final,
+             final == "3")
+
+
+def test_lua_pulse(t, r):
+    test_script_pulse(t, r, 'Lua',
+        "local c = 0\n"
+        "oninput(function(v, k)\n"
+        "  if v == '1' then\n"
+        "    c = c + 1\n"
+        "    send(tostring(c))\n"
+        "  end\n"
+        "end)\n")
+
+
+def test_js_pulse(t, r):
+    test_script_pulse(t, r, 'JSScript',
+        "var c = 0;\n"
+        "oninput(function(v, k) {\n"
+        "  if (v === '1') {\n"
+        "    c = c + 1;\n"
+        "    send(String(c));\n"
+        "  }\n"
+        "});\n")
+
+
+def test_textbox_any_size(t, r):
+    """The ONE Textbox control holds text of any size at a FIXED size: a
+    ScriptBox's Source box opens at its declared 12x48 (Rows/Cols on the
+    published entry), renders a multi-line script with its newlines
+    (overflow scrolls inside the box - it never resizes by content), and
+    commits an edited multi-line value intact - while an undeclared row
+    (Name) stays one line. Raw twin: scriptboxtest.py already runs
+    multi-line Source through the protocol; this proves presentation."""
+    view = make_test_view(t, 'TextSizeTest')
+    box = view + '/Box'
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'20',y:'20'})" % (box, view))
+    t.wait_js("!!instances['%s']" % box, "scriptbox instance")
+
+    # open the card's panel the way the Operate click does - rows are the
+    # internals view's members, streamed in on open
+    t.js("internalsAskMode['%s']='card'; send({cmd:'internals',instance:'%s'})" % (box, box))
+    t.wait_js("!!(liveControls['%s.Source']||[]).length" % box, "Source control")
+    time.sleep(1.0)  # let the member rows finish streaming
+
+    # the box is big BEFORE any code is typed - the size the OBJECT declared
+    empty = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+                 "return {h:el.clientHeight,w:el.clientWidth};})()" % box)
+    r.expect("textbox: the ScriptBox Source box opens at its declared size",
+             "an empty Source control is already a code-sized area (>=100px tall, >=200px wide)",
+             "empty Source control: %s" % empty,
+             empty and empty["h"] >= 100 and empty["w"] >= 200)
+
+    source = ("-- six lines, one long\n"
+              "local total = 0\n"
+              "for i = 1, 10 do\n"
+              "    total = total + i * i  -- a deliberately long line that needs real width\n"
+              "end\n"
+              "print(total)")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(source)))
+    time.sleep(0.8)
+
+    shown = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+                 "return {val:el.value,h:el.clientHeight};})()" % box)
+    r.expect("textbox: a multi-line value renders with its newlines",
+             "the Source control shows the six-line script verbatim, newlines intact",
+             "control value: %r" % (shown and shown["val"]),
+             shown and shown["val"] == source)
+
+    # the user edits multi-line code in the box; the commit carries it intact
+    edited = "print('one')\nprint('two')\nprint('three')"
+    t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+         "el.value=%s;el.dispatchEvent(new Event('change'));})()" % (box, json.dumps(edited)))
+    time.sleep(0.8)
+    stored = t.js("propertyValues['%s.Source']" % box)
+    r.expect("textbox: an edited multi-line value commits intact",
+             "typing three lines into the box stores all three lines on the instance",
+             "stored Source: %r" % stored,
+             stored == edited)
+
+    # uniformity guard: the same widget on a one-line property stays small
+    name_h = t.js("(()=>{const l=liveControls['%s.Name']||[];if(!l.length)return false;"
+                  "return l[l.length-1].el.clientHeight;})()" % box)
+    r.expect("textbox: a one-line row stays one line",
+             "the Name control on the same panel is compact (<40px tall)",
+             "Name control height: %s" % name_h,
+             name_h and name_h < 40)
+
+
+def test_options_on_panel_control(t, r):
+    """A control INSIDE a panel is an ordinary instance - Options-clicking
+    it opens the CONTROL'S OWN dissection panel (its Target/Label/X/Y laid
+    out), which is how a panel's controls get repositioned to fit a
+    graphics background. Regression guard: clone/alias/options work on
+    controls anywhere, panels included - nothing is blocked."""
+    view = make_test_view(t, 'CtlOptTest')
+    thing = view + '/S'
+    t.js("send({cmd:'create-instance',class:'Slider',as:'%s',container:'%s',x:'20',y:'20'})" % (thing, view))
+    t.wait_js("!!instances['%s']" % thing, "slider")
+
+    # the slider's own dissection panel, parked clear of the grid (opened
+    # last, so it sits topmost where we click)
+    t.js("send({cmd:'internals',instance:'%s'})" % thing)
+    panel = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % thing,
+                      "slider internals")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'880'})" % panel)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'430'})" % panel)
+    time.sleep(1.5)  # members stream in
+
+    member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"
+                  " && aliasAtoms[k].targetProp==='Value') || false)" % panel)
+    r.expect("panel-control options: the panel's Value control is a real instance",
+             "the dissection panel holds an addressable Alias member for Value",
+             "member: %s" % member, bool(member))
+
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % member)
+    t.click(src["x"], src["y"])
+    member_panel = t.wait_js(
+        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % member,
+        "the control's own internals")
+    time.sleep(1.2)  # its members stream in
+
+    shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (member_panel, member_panel))
+    props = t.js("JSON.stringify(Object.keys(aliasAtoms).filter(k=>k.startsWith('%s/'))"
+                 ".map(k=>aliasAtoms[k].targetProp))" % member_panel)
+    plist = json.loads(props) if props else []
+    r.expect("panel-control options: a control opens like anything else",
+             "Options-clicking the Value control opens ITS own panel, laid out with "
+             "the control's own state (Target and X among the members)",
+             "panel %s shown=%s members=%s" % (member_panel, shown, sorted(plist)),
+             member_panel and shown and "Target" in plist and "X" in plist)
+
+    # the SAME members projected as a CARD's rows must not lose their
+    # instance-hood (the reported bug: rows filtered the member away and an
+    # Options click fell through to the card itself)
+    pulse = view + '/P'
+    t.js("send({cmd:'create-instance',class:'Pulse',as:'%s',container:'%s',x:'20',y:'90'})" % (pulse, view))
+    t.wait_js("!!instances['%s']" % pulse, "pulse")
+    t.js("internalsAskMode['%s']='card'; send({cmd:'internals',instance:'%s'})" % (pulse, pulse))
+    card_view = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % pulse,
+                          "pulse card internals")
+    t.js("panels['%s'].setOpen(true)" % pulse)
+    time.sleep(1.5)  # rows stream in
+
+    row_member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"
+                      " && aliasAtoms[k].targetProp==='Interval') || false)" % card_view)
+    pos = t.js("(()=>{const p=panels['%s'];if(!p)return null;"
+               "const rows=[...p.el.querySelectorAll('.prop-row')];"
+               "const r=rows.find(x=>{const l=x.querySelector('label');return l&&l.textContent==='Interval';});"
+               "if(!r)return null;r.scrollIntoView({block:'center'});"
+               "const b=r.getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2};})()" % pulse)
+    t.click(pos["x"], pos["y"])
+    row_panel = t.wait_js(
+        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % row_member,
+        "the row member's own internals")
+    row_shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (row_panel, row_panel))
+    r.expect("panel-control options: a card ROW is the member, not chrome",
+             "Options-clicking the Interval row on a Pulse card opens the Interval "
+             "member's own panel, same as its atom form would",
+             "row member %s -> panel %s shown=%s" % (row_member, row_panel, row_shown),
+             row_member and row_panel and row_shown)
+
+
+def test_gesture_checkbox_counts(t, r):
+    """The whole flow by hand gestures, no dots anywhere: a Checkbox
+    Connect-clicked onto the ScriptBox ICON (landing a wire on an icon
+    means its first in port - the same one-click gesture as any control,
+    panel never opened), the icon clicked again to start a wire (its
+    first out port) landing on a Textbox, then Operate-mode clicks on
+    the checkbox drive the script, which counts rising edges; the count
+    lands in the Textbox."""
+    view = make_test_view(t, 'GestureCount')
+    # roomy enough that the ScriptBox icon's edge dots sit INSIDE the
+    # view (a clipped dot is unclickable - found the hard way)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'W',value:'460'})" % view)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'H',value:'320'})" % view)
+    time.sleep(0.4)
+    cb, box, sink = view + '/C', view + '/B', view + '/T'
+    t.js("send({cmd:'create-instance',class:'Checkbox',as:'%s',container:'%s',x:'30',y:'20'})" % (cb, view))
+    t.js("send({cmd:'create-instance',class:'ScriptBox',as:'%s',container:'%s',x:'120',y:'100'})" % (box, view))
+    t.js("send({cmd:'create-instance',class:'Textbox',as:'%s',container:'%s',x:'30',y:'210'})" % (sink, view))
+    t.wait_js("!!(instances['%s']&&instances['%s']&&instances['%s'])" % (cb, box, sink), "the three parts")
+    time.sleep(0.5)
+
+    # program the script widget over the protocol - typing is the textbox
+    # test's business; this test is about the wires and the clicks
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Language',value:'JSScript'})" % box)
+    time.sleep(0.3)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(
+        "var c = 0;\n"
+        "oninput(function(v, k) {\n"
+        "  if (v === '1') {\n"
+        "    c = c + 1;\n"
+        "    send(String(c));\n"
+        "  }\n"
+        "});\n")))
+    t.js("send({cmd:'activate',instance:'%s'})" % box)
+    time.sleep(0.5)
+
+    t.set_mode('Connect')
+    src = t.center_of("instances['%s']" % cb)
+    t.click(src["x"], src["y"])                      # arms Checkbox.Value
+    ic = t.center_of("instances['%s']" % box)
+    t.click(ic["x"], ic["y"])                        # icon completes as sink -> In
+    t.wait_js("wires.length>=1", "checkbox->scriptbox wire")
+    t.click(ic["x"], ic["y"])                        # icon starts as source -> Out
+    snk = t.center_of("instances['%s']" % sink)
+    t.click(snk["x"], snk["y"])                      # -> connect to Textbox
+    t.wait_js("wires.length>=2", "scriptbox->textbox wire")
+
+    # count: 5 toggles = on,off,on,off,on = three rising edges
+    t.set_mode('Operate')
+    cbc = t.center_of("instances['%s']" % cb)
+    for _ in range(5):
+        t.click(cbc["x"], cbc["y"])
+        time.sleep(0.35)
+    time.sleep(1.0)
+
+    val = t.js("propertyValues['%s.Value']" % sink)
+    r.expect("gesture count: clicking the checkbox counts pulses",
+             "five checkbox clicks are three rising edges; the wired Textbox shows 3",
+             "Textbox shows: %s" % val, val == "3")
+
+
+def test_markdown_renders(t, r):
+    """The Markdown widget RENDERS its text (roadmap Phase 2.7):
+    headings, emphasis, code and lists become real elements, not raw
+    characters - the display half of the coming Help system, and a
+    general rich-text panel control. Engine-side it is a plain display
+    sink; this proves the presentation (and that content is escaped -
+    a '<' in flow data must not become markup)."""
+    view = make_test_view(t, 'MarkdownTest')
+    md = view + '/Doc'
+    t.js("send({cmd:'create-instance',class:'Markdown',as:'%s',container:'%s',x:'20',y:'20'})" % (md, view))
+    t.wait_js("!!instances['%s']" % md, "markdown widget")
+
+    text = ("# Title\n"
+            "Some **bold** and `code`.\n"
+            "- one\n"
+            "- two\n"
+            "```\n"
+            "raw < block >\n"
+            "```")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (md, json.dumps(text)))
+    time.sleep(0.8)
+
+    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
+               "const el=l[l.length-1].el;"
+               "return {h1:(el.querySelector('h1')||{}).textContent,"
+               "bold:(el.querySelector('strong')||{}).textContent,"
+               "lis:el.querySelectorAll('li').length,"
+               "pre:((el.querySelector('pre code')||{}).textContent||'').trim(),"
+               "leaked:el.textContent.includes('**')};})()" % md)
+    r.expect("markdown: text renders as structure, safely",
+             "h1 'Title', bold 'bold', two list items, the fenced block verbatim "
+             "(angle brackets escaped, not parsed), no raw ** anywhere",
+             "%s" % got,
+             got and got["h1"] == "Title" and got["bold"] == "bold"
+             and got["lis"] == 2 and got["pre"] == "raw < block >" and not got["leaked"])
+
+
+def test_html_renders_sandboxed(t, r):
+    """The HTML widget renders real markup - and NEVER executes it
+    (roadmap Phase 2.7): the value lands in a sandboxed frame, so a
+    flow can push tables and layout at a panel but a <script> riding
+    along is inert. Both halves asserted: the table renders, the
+    script's side effect does not happen."""
+    view = make_test_view(t, 'HtmlTest')
+    hv = view + '/Page'
+    t.js("send({cmd:'create-instance',class:'HTML',as:'%s',container:'%s',x:'20',y:'20'})" % (hv, view))
+    t.wait_js("!!instances['%s']" % hv, "html widget")
+
+    payload = ("<h2 id=\"hdr\">Report</h2>"
+               "<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table>"
+               "<script>document.getElementById('hdr').textContent='PWNED';window.__ran=1;</script>")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (hv, json.dumps(payload)))
+    time.sleep(1.2)  # srcdoc load is asynchronous
+
+    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
+               "const f=l[l.length-1].el;"
+               "if(f.tagName!=='IFRAME')return {tag:f.tagName};"
+               "const d=f.contentDocument;if(!d)return 'no doc';"
+               "return {tag:f.tagName,sandbox:f.getAttribute('sandbox'),"
+               "hdr:(d.querySelector('h2')||{}).textContent,"
+               "cells:d.querySelectorAll('td').length,"
+               "ran:!!(f.contentWindow&&f.contentWindow.__ran)};})()" % hv)
+    r.expect("html: markup renders, script does not run",
+             "an IFRAME sandboxed without allow-scripts shows h2 'Report' and 4 table "
+             "cells; the embedded script neither rewrote the h2 nor set its flag",
+             "%s" % got,
+             got and got.get("tag") == "IFRAME" and got.get("sandbox") == "allow-same-origin"
+             and got.get("hdr") == "Report" and got.get("cells") == 4 and not got.get("ran"))
+
+
+def test_connect_wires(t, r):
+    """Presentation of connections (raw twin: connectiontest.py). The
+    gesture sends ONE connect verb and draws nothing itself - the wire
+    appears when the connected event comes back, in the VIEW's own layer
+    (the reported bug drew it into the root). Re-entering Connect mode
+    redraws existing wires from list-connections (the other reported
+    bug: they never came back). The mid-wire x sends disconnect, and the
+    disconnected event is the only remover."""
+    view = make_test_view(t, 'WireTest')
+
+    t.js("send({cmd:'create-instance',class:'Slider',container:'%s',x:'30',y:'25'})" % view)
+    a = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view, "first slider")
+    t.js("send({cmd:'create-instance',class:'Slider',container:'%s',x:'30',y:'95'})" % view)
+    b = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_') && k!=='%s') || false)"
+                  % (view, a), "second slider")
+    time.sleep(0.6)
+    key = "%s.Value>%s.Value" % (a, b)
+
+    t.set_mode('Connect')
+    time.sleep(0.4)
+    pa = t.center_of("instances['%s']" % a)
+    pb = t.center_of("instances['%s']" % b)
+    t.click(pa["x"], pa["y"])
+    time.sleep(0.2)
+    t.click(pb["x"], pb["y"])
+
+    drawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire drawn from the connected event")
+    in_view_layer = t.js("(()=>{const w=wires.find(w=>w.key==='%s');"
+                         "return !!(w && w.svg.classList.contains('view-wires')"
+                         " && w.svg.parentElement===views['%s'].innerEl);})()" % (key, view))
+    r.expect("connect: two clicks, one verb, wire drawn in the view's own layer",
+             "the wire for %s renders in WireTest's inner svg, not the root overlay" % key,
+             "drawn=%s inViewLayer=%s" % (drawn, in_view_layer),
+             drawn and in_view_layer)
+
+    t.set_mode('Operate')
+    time.sleep(0.4)
+    cleared = t.js("!wires.some(w=>w.key==='%s')" % key)
+    t.set_mode('Connect')
+    redrawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire redrawn on re-entering Connect")
+    r.expect("connect: re-entering the mode shows existing wires (the reported bug)",
+             "wires clear on leaving Connect mode and come back from list-connections on re-entry",
+             "cleared=%s redrawn=%s" % (cleared, redrawn),
+             cleared and redrawn)
+
+    px = t.js("(()=>{const w=wires.find(w=>w.key==='%s');if(!w)return null;"
+              "const r=w.x.getBoundingClientRect();"
+              "return {x:r.left+r.width/2,y:r.top+r.height/2};})()" % key)
+    t.click(px["x"], px["y"])
+    removed = t.wait_js("!wires.some(w=>w.key==='%s')" % key, "wire removed by the disconnected event")
+    r.expect("disconnect: the mid-wire x removes the wire via the event",
+             "clicking the x sends disconnect; the disconnected event erases the line everywhere",
+             "removed=%s" % removed,
+             removed)
+
+    t.set_mode('Operate')
+    # lower the panel so it can't sit over anything a later test clicks
+    t.js("panels['%s'].setOpen(false)" % view)
 
 
 def post_mortem(t):
@@ -517,11 +1047,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--app", default=APP)
     ap.add_argument("--cdp", type=int, default=CDP_PORT)
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="print every check, not just the failures")
     args = ap.parse_args()
     APP = args.app
 
     t = attach(args.cdp)
-    r = Report()
+    r = Report("browser GUI", args.verbose)
 
     def guarded(name, fn, *deps_named):
         """One test crashing (a timed-out wait, anything) is ONE failure in
@@ -539,6 +1071,16 @@ def main():
             post_mortem(t)
             return None
 
+    def close_view(label):
+        """Delete a make_test_view's View once every test using it is done -
+        it stops occupying a name and can't leave anything on the shared
+        canvas for a later test (or a human looking at the session) to
+        trip over."""
+        try:
+            t.js("send({cmd:'delete-instance',instance:'/Root/%s'})" % label)
+        except Exception:
+            pass
+
     guarded("boot", lambda: test_boot(t, r))
     pair = guarded("clone", lambda: test_clone(t, r))
     slider, clone2 = pair if pair else (None, None)
@@ -546,11 +1088,39 @@ def main():
     alias = guarded("alias", lambda: test_alias(t, r, slider), ("slider", slider))
     guarded("clone-of-alias", lambda: test_clone_of_alias(t, r, slider, alias), ("slider", slider), ("alias", alias))
     guarded("alias-of-clone", lambda: test_alias_of_clone(t, r, clone2, slider), ("clone2", clone2), ("slider", slider))
+    # CloneTest/AliasTest/CloneAliasTest/AliasCloneTest cross-reference each
+    # other (aliases targeting instances born in an earlier one) - one
+    # group, closed together only once every dependent above has run
+    for label in ("CloneTest", "AliasTest", "CloneAliasTest", "AliasCloneTest"):
+        close_view(label)
+
     guarded("options", lambda: test_options_internals(t, r))
+    close_view("OptionsTest")
     guarded("move", lambda: test_move(t, r))
+    close_view("MoveTest")
     guarded("open-close", lambda: test_open_close(t, r))
+    guarded("rename-manipulate", lambda: test_rename_then_manipulate(t, r))
+    guarded("rename-cascade-options-panel", lambda: test_rename_cascades_into_own_options_panel(t, r))
     guarded("lazy", lambda: test_lazy_contents(t, r))
-    guarded("lua-script", lambda: test_lua_script(t, r))
+    guarded("lua-pulse", lambda: test_lua_pulse(t, r))
+    close_view("luaPulseTest")
+    guarded("js-pulse", lambda: test_js_pulse(t, r))
+    close_view("jsPulseTest")
+    # keep this one LAST of the view-staging tests: its view takes a grid
+    # slot, and inserting a slot ahead of lua-script shifted that test's
+    # panel onto the palette icons it clicks
+    guarded("connect-wires", lambda: test_connect_wires(t, r))
+    close_view("WireTest")
+    guarded("textbox-any-size", lambda: test_textbox_any_size(t, r))
+    close_view("TextSizeTest")
+    guarded("options-on-panel-control", lambda: test_options_on_panel_control(t, r))
+    close_view("CtlOptTest")
+    guarded("gesture-checkbox-count", lambda: test_gesture_checkbox_counts(t, r))
+    close_view("GestureCount")
+    guarded("markdown-renders", lambda: test_markdown_renders(t, r))
+    close_view("MarkdownTest")
+    guarded("html-sandboxed", lambda: test_html_renders_sandboxed(t, r))
+    close_view("HtmlTest")
 
     # last step, every time, pass or fail: put the shared session back in
     # Operate mode so whoever opens a browser next gets a usable canvas

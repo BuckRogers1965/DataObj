@@ -181,7 +181,6 @@ class Raw:
     blocks)."""
 
     def __init__(self, host, port):
-        self.host, self.port = host, port
         self.sock = socket.create_connection((host, port), timeout=5)
         self.sock.settimeout(0.2)
         self.buf = b""
@@ -192,24 +191,6 @@ class Raw:
             self.sock.close()
         except Exception:
             pass
-
-    def reconnect(self):
-        """A load destroys every container this connection had open, so its
-        view state names things that are gone - the socket is live but
-        blind, and nothing inside the new content is announced to it.
-        Drop it so the bridge forgets the session, come back fresh, and
-        take the boot replay as the new picture. The browser does exactly
-        this by reloading the page."""
-        self.close()
-        time.sleep(0.4)
-        self.sock = socket.create_connection((self.host, self.port), timeout=5)
-        self.sock.settimeout(0.2)
-        self.buf = b""
-        self.events = []
-        deadline = time.time() + 2.0      # let the boot replay land
-        while time.time() < deadline:
-            self.pump()
-            time.sleep(0.1)
 
     def send(self, obj):
         self.sock.sendall(json.dumps(obj).encode())
@@ -461,7 +442,7 @@ def test_clone_panel(raw, r, home, source):
 def test_save_load(raw, r, home):
     """Save/Load with named files in saved/: an edit made THROUGH a panel
     member records as the ORIGINAL's fact (the member won't exist at
-    load - internals views are lazily rebuilt, never saved), so the
+    replay - internals views are lazily rebuilt, never recorded), so the
     value survives a save, a delete, and a named load."""
     raw.send({"cmd": "create-instance", "class": "Slider", "as": home + "/SaveMe",
               "container": home, "x": "610", "y": "300"})
@@ -513,28 +494,42 @@ def test_save_load(raw, r, home):
     raw.wait_event(lambda e: e.get("event") == "instance-removed"
                    and e.get("instance") == home + "/SaveMe")
 
-    # load restores IN PLACE: the container's contents are destroyed and
-    # rebuilt from the file under their own recorded names, so SaveMe comes
-    # back at exactly the path it was saved from.
+    # save-flow records the WHOLE session - its own top-level suite home
+    # (the ancestor two levels up from SaveMe) is still live at replay
+    # time, so it mints itself a fresh name too, same as any other taken
+    # "as", and SaveMe's own recorded path follows that rename (correctly,
+    # since bridge.c's Bridge_RemapField now rewrites a descendant's
+    # prefix, not just an exact-match reference). The loaded copy of
+    # SaveMe therefore lands under a fresh SIBLING of the suite home, not
+    # back at `home` itself - search for it the same way
+    # test_load_then_clone_binding already does.
+    known_tops = [m for m, c in container_children(raw, "") if c == "View"]
     raw.send({"cmd": "load-flow", "file": "rawtwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=6)
-    # the load destroyed everything this connection had open - come back
-    # fresh or it cannot see what was just loaded
-    raw.reconnect()
 
     v, found = None, None
     deadline = time.time() + 8.0
     while time.time() < deadline and v != "88":
-        for m, c in container_children(raw, home):
-            if c == "Slider" and m == home + "/SaveMe":
-                found, v = m, raw.value_of(m, "Value")
+        fresh_tops = [m for m, c in container_children(raw, "") if c == "View" and m not in known_tops]
+        for t in fresh_tops:
+            for g, gc in container_children(raw, t):
+                if gc != "View":
+                    continue
+                for m, mc in container_children(raw, g):
+                    if mc == "Slider" and m.endswith("/SaveMe"):
+                        found = m
+                        v = raw.value_of(m, "Value")
+                        if v == "88":
+                            break
+                if v == "88":
+                    break
+            if v == "88":
                 break
         if v != "88":
             time.sleep(0.4)
 
-    r.expect("load: the member-made edit is restored as the original's fact",
-             "%s/SaveMe is back at its own path with Value=88 - the edit went "
-             "through a panel member, but the fact belongs to the slider" % home,
+    r.expect("load: the member-made edit replays as the original's fact",
+             "some loaded copy's SaveMe is back with Value=88 (recorded resolved, not by its doorway)",
              "found=%s Value=%s" % (found, v), v == "88")
 
 
@@ -543,11 +538,11 @@ def test_load_then_clone_binding(raw, r, home):
     of its Value), saved, loaded, then cloned - the copies' aliases must
     bind to their OWN slider, not to the one they were saved from.
 
-    Load restores in place - the container's contents are destroyed and
-    rebuilt from the file under their recorded names - so the view comes
-    back at its own path, and its alias must resolve to its OWN slider
-    rather than the one it was saved from. That binding is what this
-    proves, on the restored view AND on a later clone."""
+    Load merges (it never clears the canvas), so loading a flow whose
+    names are still live names the copy fresh - and every recorded
+    back-reference (the alias's `of`, naming a slider two lines up) has
+    to follow, or the loaded alias binds to the original's slider. That
+    remap is what this proves, on the loaded copy AND on a later clone."""
     raw.send({"cmd": "create-instance", "class": "View", "as": home + "/LrView", "container": home})
     raw.wait_event(lambda e: e.get("event") == "instance-created"
                    and e.get("instance") == home + "/LrView")
@@ -581,7 +576,7 @@ def test_load_then_clone_binding(raw, r, home):
             out.append((e.get("instance"), e.get("class")))
         return out
 
-    def bound_to_own_slider(view, value="55"):
+    def bound_to_own_slider(view):
         """view's Alias must name view's own Slider, and a write through
         it must actually land there - Target is metadata, the link is the
         binding."""
@@ -592,30 +587,52 @@ def test_load_then_clone_binding(raw, r, home):
             return mem, sl, None, False
         tgt = raw.value_of(al, "Target")
         raw.value_of(sl, "Value")          # arm the subscription
-        raw.send({"cmd": "set-property", "instance": al, "prop": "Value", "value": value})
+        raw.send({"cmd": "set-property", "instance": al, "prop": "Value", "value": "55"})
         live = raw.wait_event(lambda e: e.get("event") == "property-changed"
                               and e.get("instance") == sl and e.get("port") == "Value"
-                              and e.get("value") == value, timeout=4)
+                              and e.get("value") == "55", timeout=4)
         return mem, sl, tgt, bool(live)
 
-    # load restores IN PLACE: /Root's contents are destroyed and rebuilt
-    # from the file under their recorded names, so LrView comes back at
-    # its own path, with its own Slider and its Alias bound to that one.
+    # load into the LIVE session: the names are still taken, so the copy
+    # is named fresh - and its alias must follow to the fresh slider.
+    # A save records the WHOLE session, so the replay rebuilds every
+    # earlier test's objects too; the LrView copy is the one view that
+    # comes back holding exactly one Slider and one Alias.
     raw.events = []
     raw.send({"cmd": "load-flow", "file": "lrtwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=6)
-    # the load destroyed everything this connection had open - come back
-    # fresh or it cannot see what was just loaded
-    raw.reconnect()
+    fresh = [e.get("instance") for e in raw.events
+             if e.get("event") == "instance-created" and e.get("class") == "View"]
 
-    copy = home + "/LrView"
-    mem, sl, tgt, live = bound_to_own_slider(copy)
+    # the replay rebuilds this suite's own view(s) too, so the LrView copy
+    # is some number of levels inside whatever came back at the top - and a
+    # container's members are only announced once we list (start viewing)
+    # it, so this has to walk down explicitly rather than assume one level
+    seen, frontier = set(fresh), list(fresh)
+    while frontier:
+        nxt = [m for v in frontier for m, c in members(v) if c == "View" and m not in seen]
+        seen.update(nxt)
+        fresh += nxt
+        frontier = nxt
+
+    copy, mem, sl, tgt, live = None, [], None, None, False
+    for v in fresh:
+        shape = sorted(c for _, c in members(v))
+        if shape == ["Alias", "Slider"]:
+            copy = v
+            mem, sl, tgt, live = bound_to_own_slider(v)
+            break
     r.expect("load: the loaded copy's alias binds to the loaded copy's slider",
-             "the restored Alias targets the restored Slider and a write "
-             "through it lands there",
+             "the copy's Alias targets ITS Slider and a write through it lands there",
              "copy=%s members=%s Target=%s ownSlider=%s liveWrite=%s"
              % (copy, [c for _, c in mem], tgt, sl, live),
-             bool(sl) and tgt == sl and live)
+             bool(copy) and tgt == sl and live)
+
+    orig = members(home + "/LrView")
+    r.expect("load: the merge left the original view alone",
+             "%s/LrView still holds exactly its own Slider + Alias" % home,
+             "%s" % [c for _, c in orig],
+             len(orig) == 2 and sorted(c for _, c in orig) == ["Alias", "Slider"])
 
     # and the reported gesture: clone the view, the clone binds to itself.
     # Land it in a dest view owned by ONLY this test - clone-instance always
@@ -636,9 +653,7 @@ def test_load_then_clone_binding(raw, r, home):
                         and e.get("class") == "View"
                         and e.get("container") == home + "/LrCloneDest")
     v4 = ev.get("instance") if ev else None
-    # the clone was taken from the view checked above, so it already holds
-    # that value - a repeat write is not a change and fans out to nobody
-    mem, sl, tgt, live = bound_to_own_slider(v4, "77") if v4 else ([], None, None, False)
+    mem, sl, tgt, live = bound_to_own_slider(v4) if v4 else ([], None, None, False)
     r.expect("clone after load: the clone's alias drives the clone's own slider",
              "the cloned Alias targets the cloned Slider and the write lands there",
              "clone=%s Target=%s ownSlider=%s liveWrite=%s" % (v4, tgt, sl, live),

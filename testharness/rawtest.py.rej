@@ -1,0 +1,15 @@
+--- testharness/rawtest.py
++++ testharness/rawtest.py
+@@ -24,7 +24,9 @@
+     """The default app boots web-only (main.c) - the raw TCP surface is
+     not a birthright, it's one composition away. If nothing answers on
+     rawport, connect over the WebSocket bridge and BUILD it with the
+-    protocol itself: a TCP and a Bridge (hidden plumbing), wired together,
+-    activated. The transport the raw tests run on is the first thing the
+-    protocol proves it can make."""
++    protocol itself: a TCP and a Bridge, wired together, activated. The
++    transport the raw tests run on is the first thing the protocol proves
++    it can make. They live in /Main with the web flow's own plumbing, NOT
++    on the canvas - load-flow destroys /Root's contents by design, and a
++    transport that sits there gets wiped mid-command."""
+     try:

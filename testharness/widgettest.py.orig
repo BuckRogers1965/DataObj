@@ -59,7 +59,7 @@ def build_widget(raw, home):
 
     # CONTAINER PORTS: the View's own In/Out become the widget's interface
     raw.send({"cmd": "bind-port", "container": view, "port": "In",
-              "target": slider, "targetProp": "Value"})
+              "target": slider, "targetProp": "In"})
     raw.send({"cmd": "bind-port", "container": view, "port": "Out",
               "target": out, "targetProp": "Value"})
 
@@ -120,7 +120,7 @@ def test_container_ports(raw, r, home, view, slider, out):
     make(raw, "Slider", src, home, 300, 40)
     make(raw, "Textbox", sink, home, 300, 100)
     raw.send({"cmd": "connect", "from": src, "fromPort": "Value", "to": view, "toPort": "In"})
-    raw.send({"cmd": "connect", "from": view, "fromPort": "Out", "to": sink, "toPort": "Value"})
+    raw.send({"cmd": "connect", "from": view, "fromPort": "Out", "to": sink, "toPort": "In"})
     time.sleep(0.4)
 
     # drive the EXTERNAL feed; it should flow In -> Input -> script -> Output -> Out -> sink

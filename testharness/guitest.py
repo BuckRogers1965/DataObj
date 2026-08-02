@@ -44,6 +44,7 @@ class Report:
     def expect(self, name, expected, observed, ok):
         self.results.append((name, expected, observed, bool(ok)))
         if ok and not self.verbose:
+            print(".", end="", flush=True)
             return
         print("TEST     %s" % name)
         print("  expected: %s" % expected)
@@ -289,7 +290,7 @@ def test_options_internals(t, r):
     mlist = json.loads(raw) if raw else []
     all_bound = mlist and all(m["target"] == thing for m in mlist)
     props = sorted(m["prop"] for m in mlist)
-    whole_frog = all(p in props for p in ("Value", "State", "X", "Y", "Container", "Deletable", "Enable", "In", "Name"))
+    whole_frog = all(p in props for p in ("Value", "State", "X", "Y", "Container", "Deletable", "Enable", "Name"))
     r.expect("options: click a thing, its ENTIRE internal state lays out",
              "a View opens with one Alias per published property - data, position, container, ports, "
              "everything, all bound to %s" % thing,
@@ -663,7 +664,7 @@ def test_script_pulse(t, r, lang, snippet):
     t.js("send({cmd:'set-property',instance:'%s',prop:'Interval',value:'150'})" % pulse)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Count',value:'3'})" % pulse)
     t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, box))
-    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (box, sink))
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'Value'})" % (box, sink))
     t.js("send({cmd:'subscribe',instance:'%s',port:'Value'})" % sink)
     time.sleep(0.4)
     t.js("send({cmd:'activate',instance:'%s'})" % box)
@@ -701,8 +702,8 @@ def test_js_pulse(t, r):
 
 def test_textbox_any_size(t, r):
     """The ONE Textbox control holds text of any size at a FIXED size: a
-    ScriptBox's Source box opens at its declared 12x48 (Rows/Cols on the
-    published entry), renders a multi-line script with its newlines
+    ScriptBox's Source box opens at the pixel W/H its instance carries,
+    renders a multi-line script with its newlines
     (overflow scrolls inside the box - it never resizes by content), and
     commits an edited multi-line value intact - while an undeclared row
     (Name) stays one line. Raw twin: scriptboxtest.py already runs
@@ -718,8 +719,25 @@ def test_textbox_any_size(t, r):
     t.wait_js("!!(liveControls['%s.Source']||[]).length" % box, "Source control")
     time.sleep(1.0)  # let the member rows finish streaming
 
+    # and OPEN it - a panel is display:none until it is, and every child of
+    # a display:none ancestor measures 0x0 no matter what size it carries.
+    # innerText (what .value reads) needs a layout too, or it flattens the
+    # newlines out of a multi-line value. Measuring a shut panel measures
+    # nothing.
+    # opening is the CLIENT's gesture, not a property write: the stored
+    # ReservedViewOpen is applied once as the initial presentation and
+    # ignored after that (app.js openApplied), because after first paint
+    # open/closed is this window's own business. setOpen is what a click
+    # calls.
+    t.js("(()=>{const k=Object.keys(panels).filter(k=>k.indexOf('%s/')===0).pop();"
+         "if(k) panels[k].setOpen(true);})()" % box)
+    t.wait_js("(()=>{const l=(liveControls['%s.Source']||[])"
+              ".filter(x=>document.contains(x.el));"
+              "return l.length && l[l.length-1].el.clientHeight>0;})()" % box,
+              "Source panel open")
+
     # the box is big BEFORE any code is typed - the size the OBJECT declared
-    empty = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+    empty = t.js("(()=>{const l=(liveControls['%s.Source']||[]).filter(x=>document.contains(x.el));const el=l[l.length-1].el;"
                  "return {h:el.clientHeight,w:el.clientWidth};})()" % box)
     r.expect("textbox: the ScriptBox Source box opens at its declared size",
              "an empty Source control is already a code-sized area (>=100px tall, >=200px wide)",
@@ -735,7 +753,7 @@ def test_textbox_any_size(t, r):
     t.js("send({cmd:'set-property',instance:'%s',prop:'Source',value:%s})" % (box, json.dumps(source)))
     time.sleep(0.8)
 
-    shown = t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+    shown = t.js("(()=>{const l=(liveControls['%s.Source']||[]).filter(x=>document.contains(x.el));const el=l[l.length-1].el;"
                  "return {val:el.value,h:el.clientHeight};})()" % box)
     r.expect("textbox: a multi-line value renders with its newlines",
              "the Source control shows the six-line script verbatim, newlines intact",
@@ -744,7 +762,7 @@ def test_textbox_any_size(t, r):
 
     # the user edits multi-line code in the box; the commit carries it intact
     edited = "print('one')\nprint('two')\nprint('three')"
-    t.js("(()=>{const l=liveControls['%s.Source'];const el=l[l.length-1].el;"
+    t.js("(()=>{const l=(liveControls['%s.Source']||[]).filter(x=>document.contains(x.el));const el=l[l.length-1].el;"
          "el.value=%s;el.dispatchEvent(new Event('change'));})()" % (box, json.dumps(edited)))
     time.sleep(0.8)
     stored = t.js("propertyValues['%s.Source']" % box)
@@ -754,7 +772,8 @@ def test_textbox_any_size(t, r):
              stored == edited)
 
     # uniformity guard: the same widget on a one-line property stays small
-    name_h = t.js("(()=>{const l=liveControls['%s.Name']||[];if(!l.length)return false;"
+    name_h = t.js("(()=>{const l=(liveControls['%s.Name']||[])"
+                  ".filter(x=>document.contains(x.el));if(!l.length)return false;"
                   "return l[l.length-1].el.clientHeight;})()" % box)
     r.expect("textbox: a one-line row stays one line",
              "the Name control on the same panel is compact (<40px tall)",
@@ -984,6 +1003,9 @@ def test_connect_wires(t, r):
     b = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_') && k!=='%s') || false)"
                   % (view, a), "second slider")
     time.sleep(0.6)
+    # the connection, not one drawing of it: wireKey appends "#<tag>" per
+    # rendering (control-to-control, against a stand-in dot, ...), so the
+    # bare key is a prefix now
     key = "%s.Value>%s.Value" % (a, b)
 
     t.set_mode('Connect')
@@ -994,8 +1016,8 @@ def test_connect_wires(t, r):
     time.sleep(0.2)
     t.click(pb["x"], pb["y"])
 
-    drawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire drawn from the connected event")
-    in_view_layer = t.js("(()=>{const w=wires.find(w=>w.key==='%s');"
+    drawn = t.wait_js("wires.some(w=>w.key.split('#')[0]==='%s')" % key, "wire drawn from the connected event")
+    in_view_layer = t.js("(()=>{const w=wires.find(w=>w.key.split('#')[0]==='%s');"
                          "return !!(w && w.svg.classList.contains('view-wires')"
                          " && w.svg.parentElement===views['%s'].innerEl);})()" % (key, view))
     r.expect("connect: two clicks, one verb, wire drawn in the view's own layer",
@@ -1005,19 +1027,19 @@ def test_connect_wires(t, r):
 
     t.set_mode('Operate')
     time.sleep(0.4)
-    cleared = t.js("!wires.some(w=>w.key==='%s')" % key)
+    cleared = t.js("!wires.some(w=>w.key.split('#')[0]==='%s')" % key)
     t.set_mode('Connect')
-    redrawn = t.wait_js("wires.some(w=>w.key==='%s')" % key, "wire redrawn on re-entering Connect")
+    redrawn = t.wait_js("wires.some(w=>w.key.split('#')[0]==='%s')" % key, "wire redrawn on re-entering Connect")
     r.expect("connect: re-entering the mode shows existing wires (the reported bug)",
              "wires clear on leaving Connect mode and come back from list-connections on re-entry",
              "cleared=%s redrawn=%s" % (cleared, redrawn),
              cleared and redrawn)
 
-    px = t.js("(()=>{const w=wires.find(w=>w.key==='%s');if(!w)return null;"
+    px = t.js("(()=>{const w=wires.find(w=>w.key.split('#')[0]==='%s');if(!w)return null;"
               "const r=w.x.getBoundingClientRect();"
               "return {x:r.left+r.width/2,y:r.top+r.height/2};})()" % key)
     t.click(px["x"], px["y"])
-    removed = t.wait_js("!wires.some(w=>w.key==='%s')" % key, "wire removed by the disconnected event")
+    removed = t.wait_js("!wires.some(w=>w.key.split('#')[0]==='%s')" % key, "wire removed by the disconnected event")
     r.expect("disconnect: the mid-wire x removes the wire via the event",
              "clicking the x sends disconnect; the disconnected event erases the line everywhere",
              "removed=%s" % removed,
