@@ -314,7 +314,7 @@ panel (the engine's internals view) shows a `Language` dropdown
 of `ScriptHost=1` classes), a `Source` box and an `Output` box (both the ONE
 `PROP_TEXTBOX` — there is no separate textarea widget; the Textbox
 displays text of any size, and an object declares its own box size as
-`Rows`/`Cols` annotations on its published Interface entry — properties
+pixel `W`/`H` on the instance, like everything else — properties
 are nodes, so no new mechanism), and Run = Activate. Picking a Language SWAPS the inner host
 (the code carries over) — Lua works as an inner language with zero
 changes to script.c because the inner host is created with `CreateObject`

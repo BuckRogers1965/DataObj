@@ -421,7 +421,10 @@ static NodeObj SettingsHome = NULL;
 void SetSettingsHome(NodeObj view){ SettingsHome = view; }
 
 NodeObj GetPaletteView(void){
-	return PaletteView;
+	/* resolve, never return the cached pointer: the palette is ordinary
+	   content, so a load destroys it and restores a NEW node at the same
+	   path. Anything holding the old one is holding freed memory. */
+	return ResolvePath("/Root/Palette");
 }
 
 /* ************************************************************************
@@ -485,7 +488,7 @@ NodeObj GetMainView(NodeObj instance)
 void BuildPalette(void){
 
 	NodeObj library, class, inst;
-	int slot;
+	int slot, pass;
 	char alias[128];
 
 	/* no forced Mode, no Deletable protection: the palette is just a     */
@@ -509,7 +512,7 @@ void BuildPalette(void){
 	   but losing it mid-session costs you every class you can drag out,
 	   so it carries the same ordinary guard the menus do */
 	SetPropStr(PaletteView, "Deletable", "0");
-	SetPropInt(PaletteView, "W", 190);
+	SetPropInt(PaletteView, "W", 290);	/* three 80px columns from x=10, plus slack */
 	SetPropInt(PaletteView, "H", 220);	/* the inner area scrolls; resize to taste */
 
 	Palette = NewNode(INTEGER);
@@ -517,48 +520,55 @@ void BuildPalette(void){
 
 	/* every bootstrap instance defaults to X=0,Y=0 (InitPosition) - left    */
 	/* alone they'd all stack exactly on top of each other inside the        */
-	/* Palette's inner area. A simple two-column grid, just so there is       */
+	/* Palette's inner area. A simple three-column grid, just so there is     */
 	/* something to look at on first boot - completely ordinary X/Y writes,   */
 	/* the user can drag any of them anywhere else afterward like anything    */
 	/* else in a View.                                                        */
 	slot = 0;
 
-	library = GetChild(RegObjList);
-	while (library)
+	/* two passes so the simple things come first: a bare control has no
+	   panel of its own, a widget does (Widget_Publish stamps it). Sorting
+	   here beats sorting by eye every time the palette is opened. */
+	for (pass = 0; pass < 2; pass++)
 	{
-		class = GetChild(library);
-		while (class)
+		library = GetChild(RegObjList);
+		while (library)
 		{
-			if (!IsPaletteExcluded(GetNameStr(class)))
+			class = GetChild(library);
+			while (class)
 			{
-				/* create + name + register in one call - a palette instance
-				   builds its panel (and, e.g., ScriptBox its inner host) in its
-				   deferred build, which needs it to resolve by path like any
-				   placed object */
-				inst = Widget_Create(PaletteView, GetNameStr(class), GetNameStr(class));
-				if (inst && GetMainView(inst)) {
-					SetPropInt(inst, "X", 10 + (slot % 2) * 80);
-					SetPropInt(inst, "Y", 10 + (slot / 2) * 66);
-					slot++;
+				if (GetPropInt(class, "Panel") == pass
+					&& !IsPaletteExcluded(GetNameStr(class)))
+				{
+					/* create + name + register in one call - a palette instance
+					   builds its panel (and, e.g., ScriptBox its inner host) in its
+					   deferred build, which needs it to resolve by path like any
+					   placed object */
+					inst = Widget_Create(PaletteView, GetNameStr(class), GetNameStr(class));
+					if (inst && GetMainView(inst)) {
+						SetPropInt(inst, "X", 10 + (slot % 3) * 80);
+						SetPropInt(inst, "Y", 10 + (slot / 3) * 66);
+						slot++;
 
-					/* the alias is this instance's full path, same         */
-					/* convention as a client-created instance's /Root/...   */
-					/* (createInstance, app.js) - see the doc comment above  */
-					/* and Bridge_Set's Bridge_Rename for what happens if    */
-					/* it ever moves out of here later.                      */
-					snprintf(alias, sizeof(alias), "/Root/Palette/%s", GetNameStr(class));
-					SetPropLong(Palette, alias, (long) inst);
+						/* the alias is this instance's full path, same         */
+						/* convention as a client-created instance's /Root/...   */
+						/* (createInstance, app.js) - see the doc comment above  */
+						/* and Bridge_Set's Bridge_Rename for what happens if    */
+						/* it ever moves out of here later.                      */
+						snprintf(alias, sizeof(alias), "/Root/Palette/%s", GetNameStr(class));
+						SetPropStr(Palette, alias, alias);
+					}
+					else if (inst)
+						/* no main view - not a placeable palette item (an atomic
+						   control lives INSIDE widgets, never on its own). Undo the
+						   create so it is not named/registered into the palette. */
+						Widget_Destroy(inst);
 				}
-				else if (inst)
-					/* no main view - not a placeable palette item (an atomic
-					   control lives INSIDE widgets, never on its own). Undo the
-					   create so it is not named/registered into the palette. */
-					Widget_Destroy(inst);
-			}
 
-			class = GetNextSibling(class);
+				class = GetNextSibling(class);
+			}
+			library = GetNextSibling(library);
 		}
-		library = GetNextSibling(library);
 	}
 }
 
@@ -567,8 +577,10 @@ static NodeObj Chrome;
 /*
  * The app's own topbar chrome (File menu, Mode menu) is not a special
  * client-side concept - it's a small, fixed set of real instances,
- * discovered and addressed exactly the same way the Palette is (a long
- * prop per well-known name -> live NodeObj pointer). "Eat our own dog
+ * discovered and addressed exactly the same way the Palette is (one
+ * property per well-known name, holding the instance's PATH - never a
+ * pointer: a load destroys and rebuilds these like any other content,
+ * so anything cached across it would be reading freed nodes). "Eat our own dog
  * food": these are MenuButton instances like any a user could drag out
  * of the palette for their own app; the only thing that marks them as
  * chrome is which group Bridge_ListInstances reports them under.
@@ -604,7 +616,7 @@ void BuildChrome(void){
 		   cannot delete the menus you drive the session with. Nothing
 		   special about these instances - anything can be marked this way */
 		SetPropStr(fileMenu, "Deletable", "0");
-		SetPropLong(Chrome, "FileMenu", (long) fileMenu);
+		SetPropStr(Chrome, "FileMenu", "/Root/FileMenu");
 	}
 
 	modeMenu = CreateObject(GetRootView(), "MenuButton");
@@ -617,52 +629,8 @@ void BuildChrome(void){
 		SetPropStr(modeMenu, "Items", "Operate,Clone,Alias,Move,Connect,Delete,Options");
 		SetPropStr(modeMenu, "Deletable", "0");
 		SetPropStr(modeMenu, "Selected", "Operate");
-		SetPropLong(Chrome, "ModeMenu", (long) modeMenu);
+		SetPropStr(Chrome, "ModeMenu", "/Root/ModeMenu");
 	}
-}
-
-/*
- * True for the Palette view, FileMenu/ModeMenu, or anything living
- * inside the Palette - framework furniture BuildPalette()/BuildChrome()
- * rebuild identically from the currently-loaded object files every
- * boot ("a restart rebuilds it, so nothing here is precious" -
- * BuildPalette's own comment). Not session content: a save/load round
- * trip must never destroy or re-serialize it (a stale saved snapshot
- * would fight the live, freshly-scanned registry), and a reference TO
- * it from real session content (e.g. MCPSource's own ConnectorPath)
- * must stay an absolute path even when the export root nesting-wise
- * happens to contain it - it's not "inside the view" being exported,
- * it's the fixed furniture every session already has. Palette's own
- * bootstrap instances (MCPSource et al) are deliberately NOT marked
- * Deletable="0" themselves (BuildPalette: "everything in it deletes
- * like anything else") - only the Palette view and the two Chrome
- * menus carry that guard - so this checks containment under Palette,
- * not a per-instance flag.
- */
-int IsSessionFurniture(NodeObj inst)
-{
-	NodeObj chrome, palette;
-	char    path[300], palettePath[300];
-	int     n;
-
-	if (!inst)
-		return 0;
-
-	palette = GetPaletteView();
-	if (inst == palette)
-		return 1;
-
-	chrome = GetChrome();
-	if (chrome && (inst == (NodeObj) GetPropLong(chrome, "FileMenu")
-				|| inst == (NodeObj) GetPropLong(chrome, "ModeMenu")))
-		return 1;
-
-	if (!palette || !PathOfInstance(palette, palettePath, sizeof(palettePath))
-		|| !PathOfInstance(inst, path, sizeof(path)))
-		return 0;
-
-	n = (int) strlen(palettePath);
-	return strncmp(path, palettePath, n) == 0 && path[n] == '/';
 }
 
 /* walk the registry looking for a registered class by name */
@@ -1453,7 +1421,10 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 		if (lb && lb[0])
 			SetOrDeliverProp(inst, "Label", lb);
 
-		snprintf(dbg, sizeof(dbg), "IMPORT-ALIASES-PASS: alias '%s' -> ('%s','%s') done", alias, of, prop);
+		/* three paths into one line: bound each so the whole always fits */
+		snprintf(dbg, sizeof(dbg),
+				 "IMPORT-ALIASES-PASS: alias '%.140s' -> ('%.140s','%.140s') done",
+				 alias, of, prop);
 		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
 	}
 	DebugPrint("IMPORT-ALIASES-PASS done", __FILE__, __LINE__, IMPORT);
@@ -1604,8 +1575,6 @@ static void DestroyContentsAsync(NodeObj container, void (*onDone)(NodeObj conta
 			continue;
 		if (strncmp(pbuf, prefix, preLen) != 0)
 			continue;
-		if (IsSessionFurniture(mem))
-			continue;	/* Palette/Chrome - rebuilt at boot, not session content */
 		SetPropLong(snap, pbuf, (long) mem);
 		n++;
 	  }

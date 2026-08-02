@@ -40,7 +40,10 @@ LoadObject (char *name, int depth)
 	ClassHandle = dlopen(hereName, RTLD_LAZY);
 	if (!ClassHandle) {
 		//fputs(dlerror(), stderr);
-		snprintf((char *)&DebugMsg, BUFFLEN-10, "Failed to load %s", hereName);
+		/* hereName is as big as DebugMsg, so the prefix cannot also fit -
+		   bound the path explicitly rather than let it truncate blind */
+		snprintf((char *)&DebugMsg, BUFFLEN-10, "Failed to load %.*s",
+				 (int)(BUFFLEN - 30), hereName);
 		DebugPrint ( (char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 		return 0;
 	} else {

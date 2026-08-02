@@ -348,7 +348,7 @@ static NodeObj Bridge_ResolveAlias(InstanceData *local, char *alias)
 	if (inst)
 		return inst;
 
-	return (NodeObj) GetPropLong(GetChrome(), alias);
+	return ResolvePath(GetPropStr(GetChrome(), alias));
 }
 
 /*
@@ -381,7 +381,7 @@ static char *Bridge_AliasForInstance(InstanceData *local, NodeObj inst)
 
 	/* chrome instances go by their short well-known names */
 	for (entry = GetNextProp(GetChrome()); entry; entry = GetNextSibling(entry))
-		if ((NodeObj) GetValueLong(entry) == inst)
+		if (ResolvePath(GetValueStr(entry)) == inst)
 			return GetNameStr(entry);
 
 	return NULL;
@@ -671,7 +671,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 	char *existing, *name, *curAlias, *slash;
 	char *escOf, *escView;
 	char buf[600];
-	int row = 0;
+	int row = 0, y = 12;
 
 	inst = Bridge_ResolveAlias(local, of);
 	if (!inst)
@@ -775,8 +775,25 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 				snprintf(dbg, sizeof(dbg), "INTERNALS:   member for '%s' -> container '%s'", name, viewAlias);
 				DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 			}
-			SetPropInt(member, "X", 14);
-			SetPropInt(member, "Y", 12 + row * 44);
+			/* the size its OBJECT declared, in pixels (Widget_Publish carries
+			   the widget table's w/h onto the entry). A property with no table
+			   row - Name, X, Container - gets the panel's own one-line row. */
+			{
+				int mw = GetPropInt(prop, "W");
+				int mh = GetPropInt(prop, "H");
+
+				if (mw <= 0) mw = 272;	/* the 300-wide panel, inset both sides */
+				if (mh <= 0) mh = 30;
+
+				SetPropInt(member, "X", 14);
+				SetPropInt(member, "Y", y);
+				SetPropInt(member, "W", mw);
+				SetPropInt(member, "H", mh);
+
+				/* stack: rows are no longer a fixed pitch, because a code box
+				   is not the same height as a one-line name */
+				y += mh + 14;
+			}
 			row++;
 
 			Bridge_FreshAlias(local, viewAlias, "Alias", memberAlias, sizeof(memberAlias));
@@ -784,7 +801,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			Bridge_SetNameFromAlias(member, memberAlias);
 		}
 
-		snprintf(num, sizeof(num), "%d", 50 + row * 44);
+		snprintf(num, sizeof(num), "%d", y + 38);
 		SetOrDeliverProp(view, "H", num);
 
 		SetPropStr(inst, "_Internals", viewAlias);
@@ -2610,7 +2627,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	{
 		NodeObj entry = GetNextProp(GetPalette());
 		while (entry) {
-			RegisterPath(GetNameStr(entry), (NodeObj) GetValueLong(entry));
+			/* the entry's name IS the path; resolve it rather than trusting a
+			   stored pointer, which a load would have invalidated */
+			RegisterPath(GetNameStr(entry), ResolvePath(GetValueStr(entry)));
 			entry = GetNextSibling(entry);
 		}
 		RegisterPath("/Root/Palette", GetPaletteView());

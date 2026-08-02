@@ -314,6 +314,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	Widget_Port(instance, "InnerPrint", "0", (void *)ScriptBox_OnInnerPrint);
 	Widget_Port(instance, "InnerOut",   "0", (void *)ScriptBox_OnInnerOut);
 
+	/* which control stands in for this widget at each end of a wire, so it
+	   can be wired at its closed icon: what arrives is In, what it says is
+	   Out - both ordinary properties it already has. Same declaration
+	   tcpport makes for TxData/RxData. */
+	SetPropStr(instance, "ReservedIn",  "In");
+	SetPropStr(instance, "ReservedOut", "Out");
+
 	(void) first;
 
 	InitPosition(instance);

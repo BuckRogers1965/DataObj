@@ -123,8 +123,8 @@ right — don't undo them.
 
 8. **The object sets sizes, not CSS.** The Help panel and box sizes come from
    the shared `HELP_W`/`HELP_H`/`HELP_W_OFF`/`HELP_H_OFF` defines
-   (`object.h`). A `Textbox` sizes by `Rows`/`Cols`; `Markdown`/`HTML` honor
-   declared `W`/`H`. Content scrolls inside a fixed size — nothing resizes to
+   (`object.h`). Every control sizes by the pixel `W`/`H` its instance
+   carries — a `Textbox` no differently from `Markdown`/`HTML`. Content scrolls inside a fixed size
    its content.
 
 9. **Updating a property's own mirrored value from inside its handler** —

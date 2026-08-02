@@ -171,8 +171,6 @@ static NodeObj NextContainerChild(char *path, NodeObj after)
 						seen = 1;
 					continue;
 				}
-				if (IsSessionFurniture(inst))
-					continue;	/* Palette/Chrome - rebuilt at boot, not session content */
 				c = GetPropStr(inst, "Container");
 				if (c && strcmp(c, path) == 0)
 					return inst;
@@ -183,21 +181,14 @@ static NodeObj NextContainerChild(char *path, NodeObj after)
 /* a value INSIDE the exported view is written relative to it (the leading root
    path stripped), so the export is parentable anywhere; a value OUTSIDE it (an
    external link) keeps its absolute path. Non-path values never match the root,
-   so they pass through untouched. A reference into the Palette/Chrome (session
-   furniture, IsSessionFurniture) is always external too, even when it happens
-   to nest under the export root (a whole-session save's root IS /Root, and
-   Palette is textually "inside" that) - it isn't part of "the view" being
-   exported, it's the fixed furniture every session already has, so relativizing
-   it serves no purpose and just corrupts the reference on import (only wires/
-   alias targets get re-absolutized; an ordinary data property that happens to
-   hold a path, like MCPSource's own ConnectorPath, does not). */
+   so they pass through untouched. Only wires and alias targets get
+   re-absolutized on import; an ordinary data property that happens to hold a
+   path, like MCPSource's own ConnectorPath, does not. */
 static char *RelTo(InstanceData *local, char *val)
 {
 	int n;
 
 	if (!local->root || !val)
-		return val;
-	if (IsSessionFurniture(ResolvePath(val)))
 		return val;
 	n = (int) strlen(local->root);
 	if (strcmp(val, local->root) == 0)

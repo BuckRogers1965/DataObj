@@ -336,9 +336,8 @@ body.mode-connect .view-dot { display: block; }
   cursor: auto;
 }
 
-/* the Textbox: the ONE text control, any size of text. Its box comes from  */
-/* the object's declared Rows/Cols floor plus its content (app.js sets      */
-/* rows/width), so no width here; monospace so columns of code line up      */
+/* the Textbox: the ONE text control, any size of text. Its box is the W/H  */
+/* its instance carries, so no width here; monospace so code lines up       */
 .textbox {
   background: #1a1b20;
   border: 1px solid #3a3d47;

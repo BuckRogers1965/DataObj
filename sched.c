@@ -262,6 +262,24 @@ DeleteTask(TaskPtr task){
 	/* Remove task from any list it is in */
 	DeactivateTask(task);
 
+	/* and it must not be left on the POOL either: RemoveTask parks a
+	   retired entry there for GetTask to hand out again, so freeing one
+	   that was retired earlier leaves the pool pointing at freed memory -
+	   the next SndMsg then arms a task whose owner is whatever reused the
+	   block. (comfyui/stablediffusion both RemoveTask their poll+retry on
+	   failure and DeleteTask them at teardown, which is exactly that.) */
+	{
+		TaskPtr *link = &owner->pool;
+
+		while (*link) {
+			if (*link == task) {
+				*link = task->next;
+				break;
+			}
+			link = &(*link)->next;
+		}
+	}
+
 	/* about to free task - insertHint must never point at freed memory   */
 	if (owner->insertHint == task)
 		owner->insertHint = NULL;

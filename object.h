@@ -66,13 +66,6 @@ void BuildPalette(void);
 NodeObj GetChrome(void);
 void BuildChrome(void);
 
-/* true for the Palette view, FileMenu/ModeMenu, or anything living
-   inside the Palette - framework furniture rebuilt identically every
-   boot, never session content (never exported/destroyed by save/load,
-   never counted as "inside the view" for a relative-path reference to
-   it from real content). See the doc comment on the definition. */
-int IsSessionFurniture(NodeObj inst);
-
 /* remove an instance for good - UnRegisterInstance plus DelNode. Callers */
 /* that also track the instance by alias (Bridge) must drop their own      */
 /* reference too; this only unwinds the registry/tree side.                */

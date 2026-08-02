@@ -292,11 +292,18 @@ static int Widget_PropType(const char *cls)
 
 void Widget_Publish(NodeObj class, WidgetItem *table)
 {
-	int i;
+	int     i;
+	NodeObj entry;
 
 	if (!class || !table)
 		return;
 
+	/* a class that publishes from a table builds a PANEL - it holds other
+	   instances. The bare controls publish their own handful of properties
+	   directly and never come through here, so this separates the two with
+	   no list and no per-object opt-in: whoever uses the table says so by
+	   using it. BuildPalette reads it to lay the simple ones out first. */
+	SetPropInt(class, "Panel", 1);
 	for (i = 0; table[i].cls; i++)
 	{
 		WidgetItem *t = &table[i];
@@ -306,8 +313,19 @@ void Widget_Publish(NodeObj class, WidgetItem *table)
 
 		/* everything subscribable: one direction, value pushed to whoever
 		   subscribes. `def` is the class default (the instance re-sets it). */
-		PublishProp(class, t->prop, Widget_PropType(t->cls),
-					t->def ? t->def : "");
+		entry = PublishProp(class, t->prop, Widget_PropType(t->cls),
+							t->def ? t->def : "");
+
+		/* the row already says how big this control is, in pixels - carry it
+		   onto the published entry so anything PLACING this property (the
+		   internals panel, say) can give it the size its object declared
+		   instead of guessing. Properties are nodes, so the entry just
+		   carries two more. */
+		if (entry && (t->w || t->h))
+		{
+			SetPropInt(entry, "W", t->w);
+			SetPropInt(entry, "H", t->h);
+		}
 	}
 }
 

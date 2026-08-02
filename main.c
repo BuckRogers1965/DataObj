@@ -232,7 +232,7 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 			/* Import handling - an ordinary property wired to an       */
 			/* ordinary port, same as anything else (see                */
 			/* Bridge_OnFileCmd's doc comment, bridge.c)                 */
-			FileMenu = (NodeObj) GetPropLong(GetChrome(), "FileMenu");
+			FileMenu = ResolvePath(GetPropStr(GetChrome(), "FileMenu"));
 			if (FileMenu) {
 				SetPropLong(WebBridge, "FileMenu", (long) FileMenu);
 				Connect(FileMenu, "Selected", WebBridge, "FileCmd");

@@ -318,8 +318,8 @@ per-property or per-object opt-in.
    help text, same one-panel mechanism as everything else.
    **Dual use: the same help feeds tooltips.** The per-property lines
    of that documentation land as annotations on the published
-   Interface entries (the same annotation mechanism Rows/Cols already
-   uses), and every panel row and control renders its entry's line as
+   Interface entries (properties are nodes, so annotating one is the
+   existing mechanism), and every panel row and control renders its entry's line as
    its tooltip — hover any control and its one-line doc is right
    there, click Help and the full README opens. One source on the
    class, two presentations; the tooltip text is never written a
@@ -574,8 +574,8 @@ shouldn't have been recreated in the first place.)
    its appearance as ordinary properties, and the BRIDGE dynamically
    generates each control's custom CSS by translating those properties
    — the client applies what it's handed and decides nothing (the same
-   law as engine-stamped `Widget`). The Rows/Cols annotations on
-   ScriptBox's published Source/Output entries (July 2026) are the
+   law as engine-stamped `Widget`). The pixel `W`/`H` a widget's own
+   controls carry are the
    seed of this, currently translated client-side; the general
    mechanism moves that translation into the bridge and opens it to
    every styling fact — size, color, font, geometry, background
@@ -592,15 +592,15 @@ shouldn't have been recreated in the first place.)
    work already happening rather than needing a dedicated push:**
    1. *Audit, read-only, zero risk*: inventory which current visual
       facts already have SOME property backing (LabelPos -> the
-      `atom-label-*` class swap; ScriptBox's Rows/Cols -> its own box
+      `atom-label-*` class swap; a Textbox's W/H -> its own box
       sizing) versus which are still 100% CSS-class-driven with no
       property behind them at all (color, font, border, background).
       Answers "how much of this is already true" before changing
       anything.
-   2. *Move ScriptBox's own Rows/Cols translation into the bridge* -
-      already explicitly the seed case above, already client-side
-      today, so this is the smallest real step: one existing
-      client-side translation relocated, not a new mechanism invented.
+   2. *Move a widget's own W/H translation into the bridge* - already
+      explicitly the seed case above, already client-side today, so
+      this is the smallest real step: one existing client-side
+      translation relocated, not a new mechanism invented.
       Proves the bridge-side translation path once, on something that
       already works end to end.
    3. *One new visual fact, on whatever widget is already being built
@@ -713,6 +713,35 @@ rather than rushed.
    indistinguishable to the user.
 3. **Nesting and versioning**: composites inside composites; every
    library already carries a UUID, composites get one too.
+4. **Kiosk save: a flow that ships as the whole app.** Arrange the
+   session the way it should ship - one panel at the front, no
+   palette, no menus, everything wired to it - and save. Loading
+   that flow gives you exactly that and nothing else: the app runs,
+   there is no chrome to wander into, and every input goes to the
+   panel.
+
+   *There is nothing to build. The mechanism is already exact:* the
+   menus and the palette are ordinary instances in `/Root`
+   (`BuildPalette`/`BuildChrome` only bootstrap them on a first run
+   with nothing saved), a save records `/Root` including or excluding
+   them according to what is there, and a load destroys `/Root`'s
+   contents and restores the file. Delete the chrome, save, and the
+   file IS the kiosk. This is "the app is an empty view" arriving:
+   shipping a different product is a different flow, never a
+   different binary.
+
+   *Corollary - do not protect anything from the load's destroy.* A
+   guard that keeps the menus alive (say, honouring `Deletable="0"`
+   in DestroyContentsAsync) makes a kiosk impossible, and the
+   "you can no longer reach File -> Load" worry is answered
+   out-of-band instead: the raw bridge lives in `/Main`, outside the
+   canvas, so a load of `/Root` never touches it and a kiosked
+   session is still drivable over the protocol.
+
+   *Worth having, not as a guard but as a fact:* when a load's
+   destroy removes an instance carrying `Deletable="0"`, log it. An
+   intentional kiosk and an accidental one look identical on screen
+   (an empty canvas), and only one of them is a surprise.
 
 ## Phase 6 — Federated palettes: web and MCP
 

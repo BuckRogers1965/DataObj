@@ -409,11 +409,6 @@ function parseInterface(interfaceNode) {
     Name: nodeProp(p, 'Name'),
     Widget: parseInt(nodeProp(p, 'Widget'), 10),
     Default: nodeProp(p, 'Default'),
-    /* an object can declare its own box size on the published entry       */
-    /* (ScriptBox's Source is 12x48) - carried here so the control renders  */
-    /* the declared, fixed size                                              */
-    Rows: parseInt(nodeProp(p, 'Rows'), 10) || 0,
-    Cols: parseInt(nodeProp(p, 'Cols'), 10) || 0,
   }));
 }
 
@@ -773,23 +768,18 @@ document.addEventListener('click', () => {
 /* the authoritative server-side value, not just its own optimistic      */
 /* write - anything else driving this same property (another client, a  */
 /* Connect()ed source) shows up here too, the same way selfDisplays does */
-function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit) {
+function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit, sizeAlias) {
   const el = buildValueControl(widgetClass, defaultValue, onCommit);
-  /* a PLACED Textbox control (its own Value) sizes to its instance's pixel   */
-  /* W/H - the box the panel that placed it gave it. But a Textbox standing   */
-  /* in for ANOTHER object's property (the options/dissection table) must NOT */
-  /* grab that object's W/H: that is the whole widget's size. It takes the    */
-  /* box its class declared, or the default.                                  */
-  if (widgetClass === 'Textbox' && subscribeProp === 'Value') {
-    (liveControls[subscribeAlias + '.W'] = liveControls[subscribeAlias + '.W'] || []).push({ el, widgetClass: 'AtomW' });
-    (liveControls[subscribeAlias + '.H'] = liveControls[subscribeAlias + '.H'] || []).push({ el, widgetClass: 'AtomH' });
-    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'W' });
-    send({ cmd: 'subscribe', instance: subscribeAlias, port: 'H' });
-  } else if (widgetClass === 'Textbox') {
-    const inst = instances[subscribeAlias];
-    const pub = inst && (classes[inst.className] || []).find((p) => p.Name === subscribeProp);
-    if (pub && pub.Cols) el.style.width = pub.Cols + 'ch';
-    if (pub && pub.Rows) el.style.height = pub.Rows + 'lh';
+  /* a Textbox is a pixel box: it takes the W/H of the instance it IS - its   */
+  /* own when it renders its own Value, the Alias member's when it stands in  */
+  /* for another object's property. Never the TARGET's: that is the whole     */
+  /* widget's size, not this box's.                                            */
+  if (widgetClass === 'Textbox') {
+    const owner = sizeAlias || subscribeAlias;
+    (liveControls[owner + '.W'] = liveControls[owner + '.W'] || []).push({ el, widgetClass: 'AtomW' });
+    (liveControls[owner + '.H'] = liveControls[owner + '.H'] || []).push({ el, widgetClass: 'AtomH' });
+    send({ cmd: 'subscribe', instance: owner, port: 'W' });
+    send({ cmd: 'subscribe', instance: owner, port: 'H' });
   }
   send({ cmd: 'subscribe', instance: subscribeAlias, port: subscribeProp });
   /* more than one rendering can subscribe to the same alias.prop (an       */
@@ -962,8 +952,8 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
   control.classList.add('widget-atom-control');
   el.appendChild(control);
 
-  /* a Markdown/HTML box takes the size its OBJECT declares (W/H), the same */
-  /* way a Textbox takes Rows/Cols - the panel that placed it sets its size, */
+  /* a Markdown/HTML box takes the size its OBJECT declares (W/H) - the     */
+  /* panel that placed it sets its size,                                     */
   /* so it fits whatever container it was built into. Subscribed like any    */
   /* value and pushed on subscribe.                                          */
   if (className === 'Markdown' || className === 'HTML' || className === 'Image') {
@@ -1981,7 +1971,7 @@ function renderAliasControl(alias) {
   /* writes go through the alias's own "Value" slot - the doorway - so     */
   /* the alias's own Name/Container/X/Y are never touched                  */
   const el = bindLiveControl(rec.target, rec.targetProp, widgetClass, propertyValues[rec.target + '.' + rec.targetProp],
-    (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v }));
+    (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v }), alias);
   el.classList && el.classList.add('widget-atom-control');
   rec.slot.appendChild(el);
   rec.control = el;
