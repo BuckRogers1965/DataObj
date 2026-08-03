@@ -936,7 +936,11 @@ static char *ImportCreate(char *className, char *nodeName,
 	}
 	if (!alias || !alias[0] || (!force && ResolvePath(alias)))
 	{
-		ImportFreshName(cpath, className, fresh, sizeof(fresh));
+		/* the name is KNOWN - a view called Connect stays called Connect.
+		   Only uniqueness is in question here, so suffix the name it has
+		   (Connect_1) rather than mint from the class and lose it (View_1). */
+		ImportFreshName(cpath, (ident && ident[0]) ? ident : className,
+						fresh, sizeof(fresh));
 		alias = fresh;
 	}
 
