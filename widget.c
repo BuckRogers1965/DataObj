@@ -11,16 +11,43 @@
 
 typedef int (*WidgetActivate)(NodeObj, MsgId, NodeObj);
 
+/* set by Widget_Create: 1 when it handed back something that was already
+   there instead of making it. Read it on the very next line - this is a
+   hand-off to the caller that would otherwise re-apply the table's layout
+   over values a load just restored, and the fabric is single threaded. */
+int Widget_Adopted = 0;
+
 NodeObj Widget_Create(NodeObj container, char *cls, char *name)
 {
 	char cpath[256], path[320];
-	NodeObj inst = CreateObject(container, cls);
+	NodeObj inst, existing;
 
-	if (!inst)
-		return NULL;
+	Widget_Adopted = 0;
 
 	if (!name || !name[0])
 		name = cls;
+
+	/* if it is already there, it IS the one. A load restores a widget's
+	   panel from the file, and the widget's own build then runs over it -
+	   that build exists to put back what a file cannot carry: the compiled
+	   handlers and wires, which are LONG properties the serializer drops on
+	   purpose. Making a second set instead would leave the restored one
+	   inert and the new one empty, which is exactly the blank help panel. */
+	if (PathOfInstance(container, cpath, sizeof(cpath)))
+	{
+		snprintf(path, sizeof(path), "%s/%s", cpath, name);
+		existing = ResolvePath(path);
+		if (existing)
+		{
+			Widget_Adopted = 1;
+			return existing;
+		}
+	}
+
+	inst = CreateObject(container, cls);
+	if (!inst)
+		return NULL;
+
 	SetPropStr(inst, "Name", name);
 
 	/* register its path so it resolves like any placed object - now it can
@@ -73,15 +100,24 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 {
 	/* create, name (after its property), and register the control in one call */
 	NodeObj c = Widget_Create(container, cls, prop);
+	int     made = !Widget_Adopted;
+
 	if (!c)
 		return NULL;
 
-	SetPropInt(c, "X", x);
-	SetPropInt(c, "Y", y);
-	SetPropInt(c, "W", w);					/* w/h ARE the size, Textbox too */
-	SetPropInt(c, "H", h);
-	if (prop && prop[0])
-		SetPropStr(c, "Label", prop);
+	/* geometry and label are the TABLE's opinion, and only for a control
+	   this call actually made. An adopted one came from a load carrying
+	   the arrangement someone saved, and that wins - the build is here for
+	   the wiring below, which is what a file cannot carry. */
+	if (made)
+	{
+		SetPropInt(c, "X", x);
+		SetPropInt(c, "Y", y);
+		SetPropInt(c, "W", w);					/* w/h ARE the size, Textbox too */
+		SetPropInt(c, "H", h);
+		if (prop && prop[0])
+			SetPropStr(c, "Label", prop);
+	}
 
 	if (strcmp(cls, "MoButton") == 0)
 		Connect(c, "Value", target, prop);			/* a command: press writes prop */
@@ -112,8 +148,12 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 NodeObj Widget_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h)
 {
 	NodeObj v = Widget_Create(panel, "View", name);
+	int     made = !Widget_Adopted;
+
 	if (!v)
 		return NULL;
+	if (!made)
+		return v;				/* already there: its saved geometry stands */
 	SetPropInt(v, "X", x);
 	SetPropInt(v, "Y", y);
 	SetPropInt(v, "W", w);

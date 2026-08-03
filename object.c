@@ -1932,7 +1932,33 @@ static NodeObj CloneObject(NodeObj source)
 /* straight off it, no adapter, no reverse handler lookup.               */
 void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handler){
 
-	NodeObj sub = NewNode(INTEGER);
+	NodeObj sub;
+
+	/* ONE wire, not two: the same sink and port recorded twice on one
+	   source delivers every message twice. This is reached with the record
+	   already present whenever a widget's build re-makes wiring that a load
+	   already restored - and a hand cannot draw the same wire twice either.
+	   A later call carrying a real handler upgrades the record: that is how
+	   a restored wire (Callback 0, the universal default) gets its compiled
+	   handler back, since the pointer itself is never saved. */
+	for (sub = GetNextProp(fromPort); sub; sub = GetNextSibling(sub))
+	{
+		char *p;
+
+		if (!CmpName(sub, "Subscriber"))
+			continue;
+		if ((NodeObj) GetPropLong(sub, "Instance") != toNode)
+			continue;
+		p = GetPropStr(sub, "Port");
+		if ((!p && !toPort) || (p && toPort && strcmp(p, toPort) == 0))
+		{
+			if (handler)
+				SetPropLong(sub, "Callback", handler);
+			return;
+		}
+	}
+
+	sub = NewNode(INTEGER);
 	SetName(sub, "Subscriber");
 	SetPropLong(sub, "Instance", (long)toNode);
 	if (toPort)
