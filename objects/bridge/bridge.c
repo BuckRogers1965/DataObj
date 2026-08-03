@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 
 #include "node.h"
 #include "object.h"
@@ -2369,19 +2370,96 @@ int Bridge_Activate(NodeObj instance, MsgId message, NodeObj data)
 /*
  * Flows live in one place: the saved/ directory next to the framework
  * (created on first save). A flow name is a bare filename - no paths,
- * no escaping the directory - and gets its .flow extension appended
- * when missing. Anything suspicious falls back to "session".
+ * no escaping the directory - and anything suspicious falls back to
+ * "session".
+ *
+ * A SAVE never writes over an existing file: it appends
+ * _YYYYMMDD_HHMMSS, so every save is its own version. A LOAD given a
+ * bare name opens the newest version of it; given a name ending in
+ * .flow it opens exactly that file. The stamp is fixed width and zero
+ * padded, so lexicographic order IS chronological - "newest" is just
+ * the greatest filename, with nothing to parse and no metadata kept
+ * anywhere.
+ *
+ * Retention is deliberately absent: saved/ grows until someone removes
+ * files, and for now that is a person with rm. When it earns a policy
+ * it should be a CONFIGURABLE one - "keep the last N versions" and/or
+ * "keep anything newer than N days" - carried as ordinary properties on
+ * whatever object owns saving, not as a constant compiled in here.
  */
+static void Bridge_FlowStamp(char *out, int outlen)
+{
+	time_t    now = time(NULL);
+	struct tm tmv;
+
+	localtime_r(&now, &tmv);
+	strftime(out, (size_t) outlen, "%Y%m%d_%H%M%S", &tmv);
+}
+
+/* where a NEW save goes - a fresh version every time */
+static void Bridge_FlowPathNew(char *name, char *out, int outlen)
+{
+	char stamp[32];
+	int  len;
+
+	if (!name || !name[0] || strchr(name, '/') || strstr(name, ".."))
+		name = "session";
+
+	/* an explicit .flow is taken verbatim: the caller named an exact file
+	   and gets to overwrite it if that is what they meant */
+	len = (int) strlen(name);
+	if (len > 5 && strcmp(name + len - 5, ".flow") == 0)
+	{
+		snprintf(out, outlen, "saved/%s", name);
+		return;
+	}
+
+	Bridge_FlowStamp(stamp, sizeof(stamp));
+	snprintf(out, outlen, "saved/%s_%s.flow", name, stamp);
+}
+
+/* which file a name RESOLVES to: the newest version of a bare name, or
+   the exact file if one was named. Falls back to saved/<name>.flow so a
+   flow written before saves were versioned still loads. */
 static void Bridge_FlowPath(char *name, char *out, int outlen)
 {
-	int len;
+	DIR           *d;
+	struct dirent *e;
+	char           best[256];
+	int            len;
 
 	if (!name || !name[0] || strchr(name, '/') || strstr(name, ".."))
 		name = "session";
 
 	len = (int) strlen(name);
 	if (len > 5 && strcmp(name + len - 5, ".flow") == 0)
+	{
 		snprintf(out, outlen, "saved/%s", name);
+		return;
+	}
+
+	best[0] = '\0';
+	d = opendir("saved");
+	if (d)
+	{
+		while ((e = readdir(d)) != NULL)
+		{
+			int el = (int) strlen(e->d_name);
+
+			if (el <= len + 5 || strncmp(e->d_name, name, (size_t) len) != 0)
+				continue;
+			if (e->d_name[len] != '_')
+				continue;
+			if (strcmp(e->d_name + el - 5, ".flow") != 0)
+				continue;
+			if (strcmp(e->d_name, best) > 0)
+				snprintf(best, sizeof(best), "%s", e->d_name);
+		}
+		closedir(d);
+	}
+
+	if (best[0])
+		snprintf(out, outlen, "saved/%s", best);
 	else
 		snprintf(out, outlen, "saved/%s.flow", name);
 }
@@ -2438,7 +2516,7 @@ void Bridge_ExportFlow(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	mkdir("saved", 0755);
-	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+	Bridge_FlowPathNew(GetPropStr(command, "file"), path, sizeof(path));
 	ExportView(view, path);
 	Bridge_ReplyEvent(instance, local, "flow-saved", "file", path);
 }

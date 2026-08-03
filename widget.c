@@ -6,6 +6,7 @@
 #include "object.h"
 #include "callback.h"
 #include "sched.h"
+#include "DebugPrint.h"
 #include "widget.h"
 
 typedef int (*WidgetActivate)(NodeObj, MsgId, NodeObj);
@@ -153,25 +154,54 @@ static char *Widget_ReadFile(char *path)
    box's Value (resolved by path, so the write lands where the client subscribes) */
 static int Widget_OnHelpOpen(NodeObj view, MsgId message, NodeObj data)
 {
-	char vpath[256], mpath[320];
+	char vpath[256], mpath[320], dbg[420];
 	NodeObj box;
 	char *file, *md;
 
 	if (message == msg_eof || !GetValueInt(data))
 		return rtrn_handled;			/* only on OPEN (-> 1) */
 
+	/* every way this can give up says so: help that silently fails to
+	   appear is indistinguishable from help that has nothing to say */
 	file = GetPropStr(view, "HelpFile");
-	if (!file || !file[0] || !PathOfInstance(view, vpath, sizeof(vpath)))
+	if (!file || !file[0])
+	{
+		DebugPrint("HELP: opened, but the view carries no HelpFile",
+				   __FILE__, __LINE__, ERROR);
 		return rtrn_handled;
+	}
+	if (!PathOfInstance(view, vpath, sizeof(vpath)))
+	{
+		snprintf(dbg, sizeof(dbg), "HELP: the help view has no path, so its "
+				 "HelpText box cannot be found (HelpFile '%.200s')", file);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return rtrn_handled;
+	}
+
 	snprintf(mpath, sizeof(mpath), "%s/HelpText", vpath);
 	box = ResolvePath(mpath);
 	if (!box)
+	{
+		snprintf(dbg, sizeof(dbg), "HELP: no HelpText box at '%.250s'", mpath);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 		return rtrn_handled;
+	}
 
 	md = Widget_ReadFile(file);
-	SetPropStr(box, "Value", md ? md : "");
-	if (md)
-		free(md);
+	if (!md)
+	{
+		snprintf(dbg, sizeof(dbg), "HELP: could not read '%.250s' (cwd-relative)", file);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		SetPropStr(box, "Value", "");
+		return rtrn_handled;
+	}
+
+	snprintf(dbg, sizeof(dbg), "HELP: loaded '%.200s' (%d bytes) into '%.150s'",
+			 file, (int) strlen(md), mpath);
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+
+	SetPropStr(box, "Value", md);
+	free(md);
 	return rtrn_handled;
 }
 

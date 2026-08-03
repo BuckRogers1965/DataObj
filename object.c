@@ -934,7 +934,7 @@ static char *ImportCreate(char *className, char *nodeName,
 		snprintf(desired, sizeof(desired), "%s/%s", cpath, ident);
 		alias = desired;
 	}
-	if (!alias || !alias[0] || (ResolvePath(alias) && !force))
+	if (!alias || !alias[0] || (!force && ResolvePath(alias)))
 	{
 		ImportFreshName(cpath, className, fresh, sizeof(fresh));
 		alias = fresh;
