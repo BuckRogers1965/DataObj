@@ -214,6 +214,11 @@ function registerPanel(alias, panelEl, display, onToggle) {
       /* arriving initial Open value must never override it               */
       rec.openApplied = true;
       panelEl.style.display = open ? display : 'none';
+      /* opening puts it on top - always. The pointerdown handler raises
+         whatever you click, so the panel you opened this one FROM is
+         already above it, and a sub-view would come up behind its own
+         parent looking like it never opened. */
+      if (open) toTop(panelEl);
       /* tell the engine the panel opened/closed - an object may react to  */
       /* its own panel opening (e.g. load help on open). The engine        */
       /* DELIVERS this to any Open handler; it does not persist the state. */
