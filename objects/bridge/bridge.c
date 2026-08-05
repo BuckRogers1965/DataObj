@@ -2616,23 +2616,46 @@ void Bridge_ImportFlow(NodeObj instance, InstanceData *local, NodeObj command)
 
 /* {"cmd":"list-flows"} - one targeted flow-file event per .flow in      */
 /* saved/, then flows-done: what a client's file dialog lists            */
+#define FLOW_LIST_MAX	4096
+
+static int Bridge_FlowCmp(const void *a, const void *b)
+{
+	return strcmp(*(char * const *) a, *(char * const *) b);
+}
+
 void Bridge_ListFlows(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	DIR *d;
 	struct dirent *e;
-	int len;
+	char **names;
+	int len, count = 0, i;
+
+	/* readdir hands them over in whatever order the filesystem feels like,
+	   which is no order at all. Sorted, a save's stamp (_YYYYMMDD_HHMMSS)
+	   already reads chronologically, so plain alphabetical groups every
+	   version of a flow together, oldest to newest. */
+	names = malloc(FLOW_LIST_MAX * sizeof(char *));
 
 	d = opendir("saved");
 	if (d)
 	{
-		while ((e = readdir(d)) != NULL)
+		while ((e = readdir(d)) != NULL && count < FLOW_LIST_MAX)
 		{
 			len = (int) strlen(e->d_name);
 			if (len > 5 && strcmp(e->d_name + len - 5, ".flow") == 0)
-				Bridge_ReplyEvent(instance, local, "flow-file", "file", e->d_name);
+				names[count++] = strdup(e->d_name);
 		}
 		closedir(d);
 	}
+
+	qsort(names, count, sizeof(char *), Bridge_FlowCmp);
+
+	for (i = 0; i < count; i++)
+	{
+		Bridge_ReplyEvent(instance, local, "flow-file", "file", names[i]);
+		free(names[i]);
+	}
+	free(names);
 
 	Bridge_ReplyEvent(instance, local, "flows-done", "file", "");
 }

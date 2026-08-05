@@ -66,7 +66,12 @@ typedef struct InstanceData
 	char   *buf;		/* the emit buffer, flushed out Out in chunks */
 	int     buflen, bufcap;
 
-	char   *root;		/* the export root path - internal links are relative to it */
+	/* the export root path - internal links are written relative to it. A
+	   COPY, never a pointer into the node's value: any property write during
+	   the walk (RegisterPath's LastMember, for one) can move that buffer, and
+	   a stale root matches nothing - so every internal path came out absolute,
+	   silently, and the imported copy wired itself to the original. */
+	char    root[320];
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -188,7 +193,7 @@ static char *RelTo(InstanceData *local, char *val)
 {
 	int n;
 
-	if (!local->root || !val)
+	if (!local->root[0] || !val)
 		return val;
 	n = (int) strlen(local->root);
 	if (strcmp(val, local->root) == 0)
@@ -390,7 +395,7 @@ int Serializer_Activate(NodeObj instance, MsgId message, NodeObj data)
 		DebugPrint("Serializer: Root does not resolve to a node", __FILE__, __LINE__, ERROR);
 		return rtrn_dropped;
 	}
-	local->root = rootpath;		/* internal links are written relative to this */
+	snprintf(local->root, sizeof(local->root), "%s", rootpath);
 
 	/* start a fresh walk */
 	local->depth = 0;

@@ -9,6 +9,12 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "widget.h"
+#include "objects/network/tcp.h"	/* the TCP object's interface - all this panel knows of it */
+
+/* THIS PANEL'S base for its socket's callbacks. The object adds the ordinal
+   from tcp.h, so a panel holding several objects gives each a different base
+   and tells their replies apart in one handler. */
+#define TCPPORT_CALLBACK	0x6000
 
 /*
 
@@ -45,7 +51,7 @@ object.
 typedef struct InstanceData
 {
 	int     enabled;	/* the ONLY gate on the commands */
-	NodeObj inner;		/* the TCP engine instance we drive */
+	NodeObj inner;		/* the TCPSocket this panel owns and drives */
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -62,6 +68,96 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 
 static void TCPPort_Log(NodeObj instance, char *category, char *text);
 static WidgetItem TCPPortPanel[];
+
+/* the interface's var access (tcp.h): the id is the message and the node
+   carries the value - one with a value SETS, an empty one is FILLED IN */
+static void TCPPort_SetVar(NodeObj sock, MsgId var, char *value)
+{
+	NodeObj v;
+
+	if (!sock)
+		return;
+
+	v = NewNode(STRING);
+	SetValueStr(v, (value && value[0]) ? value : "0");
+	DeliverMsg(sock, "Msg", var, v);
+	DelNode(v);
+}
+
+static void TCPPort_SetVarInt(NodeObj sock, MsgId var, int value)
+{
+	char buf[24];
+
+	snprintf(buf, sizeof(buf), "%d", value);
+	TCPPort_SetVar(sock, var, buf);
+}
+
+static int TCPPort_GetVarInt(NodeObj sock, MsgId var)
+{
+	NodeObj v;
+	int got;
+
+	if (!sock)
+		return 0;
+
+	v = NewNode(STRING);
+	SetValueStr(v, "");
+	DeliverMsg(sock, "Msg", var, v);
+	got = GetValueInt(v);
+	DelNode(v);
+	return got;
+}
+
+/* the reference's New(class, msgID, owner): one socket for this panel's life,
+   private - no path, no container, nothing else can reach it */
+static NodeObj TCPPort_NewSocket(NodeObj instance)
+{
+	NodeObj lib, cls, args, sock = NULL;
+	msgobj instanceStart;
+	char *name;
+
+	for (lib = GetChild(GetRegObjList()); lib && !sock; lib = GetNextSibling(lib))
+		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+		{
+			name = GetNameStr(cls);
+			if (!name || strcmp(name, "TCPSocket"))
+				continue;
+
+			instanceStart = (msgobj) GetPropLong(cls, "InstanceStart");
+			if (!instanceStart)
+				break;
+
+			args = NewNode(INTEGER);
+			SetPropLong(args, "Owner", (long) instance);
+			SetPropLong(args, "MsgBase", TCPPORT_CALLBACK);
+			SetPropStr(args, "Callback", "SocketCallback");
+			instanceStart(cls, msg_initialize, args);
+			DelNode(args);
+
+			sock = (NodeObj) GetPropLong(cls, "LastInstance");
+			break;
+		}
+
+	if (!sock)
+		DebugPrint("TCPPort: the TCPSocket class is not loaded",
+				   __FILE__, __LINE__, ERROR);
+	return sock;
+}
+
+/* the security vars, set together before a start */
+static void TCPPort_Security(NodeObj instance, NodeObj sock)
+{
+	if (!GetPropInt(instance, "SslEnable"))
+	{
+		TCPPort_SetVarInt(sock, TCP_SECURITY_MODE_VAR, 0);
+		return;
+	}
+
+	TCPPort_SetVarInt(sock, TCP_SECURITY_MODE_VAR, 1);
+	TCPPort_SetVar(sock, TCP_SECURITY_CERT_VAR, GetPropStr(instance, "SslCert"));
+	TCPPort_SetVar(sock, TCP_SECURITY_KEY_VAR, GetPropStr(instance, "SslKey"));
+	/* SslPass has no var in the interface - the box is inert */
+}
 
 static void TCPPort_SetState(NodeObj instance, char *state)
 {
@@ -154,51 +250,28 @@ static void TCPPort_DoListen(NodeObj instance)
 	if (GetPropInt(instance, "AccumulateRx"))
 		SetPropStr(instance, "RxData", "");
 
-	if (local->inner)
-		DeleteInstance(local->inner);
-
-	/* the engine belongs to this panel - created inside it. Named and
-	   path-registered (Widget_Create, not plain CreateObject) - without
-	   this it had a Container but no Name, so it dumped "Instance has no
-	   name" on every list-instances call system-wide (see scriptbox.c's
-	   Inner host, the same bug, fixed the same way). */
-	local->inner = Widget_Create(instance, "TCP", "Inner");
 	if (!local->inner)
 	{
-		DebugPrint("TCPPort: the TCP class is not loaded", __FILE__, __LINE__, ERROR);
 		TCPPort_SetState(instance, ST_IDLING);
 		return;
 	}
 
+	TCPPort_SetVarInt(local->inner, TCP_CONNECTION_MODE_VAR, TCP_SERVER);
 	port = GetPropStr(instance, "Port");
-	SetOrDeliverProp(local->inner, "LocalPort", port ? port : "8080");
+	TCPPort_SetVar(local->inner, TCP_LOCAL_PORT_VAR, port ? port : "8080");
+	TCPPort_Security(instance, local->inner);
 
-	/* hand the engine the security settings before activating it - the    */
-	/* context is built once, at listen time (tcp.c, Tcp_Activate)         */
-	if (GetPropInt(instance, "SslEnable"))
-	{
-		SetOrDeliverProp(local->inner, "Secure", "1");
-		SetOrDeliverProp(local->inner, "SslCert", GetPropStr(instance, "SslCert"));
-		SetOrDeliverProp(local->inner, "SslKey",  GetPropStr(instance, "SslKey"));
-		SetOrDeliverProp(local->inner, "SslPass", GetPropStr(instance, "SslPass"));
-	}
+	TCPPort_SetVarInt(local->inner, TCP_CURRENT_CONNECTION_VAR, 0);
+	TCPStart(local->inner);
 
-	Connect(local->inner, "Out", instance, "InnerRx");
-	ActivateInstance(local->inner);
+	/* whether TLS actually came up is not something the object reports - a
+	   failure arrives on the callback as TCP_ERROR_CALLBACK and puts this
+	   panel back to IDLING */
+	SetPropStr(instance, "SslStatus", GetPropInt(instance, "SslEnable") ? "1" : "0");
 
-	/* the engine refuses to listen at all if secure was asked for and TLS */
-	/* could not start - never quietly serve in the clear                   */
-	if (GetPropInt(instance, "SslEnable") && !GetPropInt(local->inner, "Secured"))
-	{
-		TCPPort_Log(instance, "ErrorMsgs", "TLS failed to start - not listening");
-		SetPropStr(instance, "SslStatus", "0");
-		DeleteInstance(local->inner);
-		local->inner = NULL;
-		TCPPort_SetState(instance, ST_IDLING);
-		return;
-	}
+	/* the port it took, so a Port of 0 shows what was actually bound */
+	SetPropInt(instance, "Port", TCPPort_GetVarInt(local->inner, TCP_LOCAL_PORT_VAR));
 
-	SetPropStr(instance, "SslStatus", GetPropInt(local->inner, "Secured") ? "1" : "0");
 	TCPPort_SetState(instance, ST_LISTEN);
 }
 
@@ -214,10 +287,7 @@ static void TCPPort_DoClose(NodeObj instance)
 	TCPPort_SetState(instance, ST_CLOSING);
 
 	if (local->inner)
-	{
-		DeleteInstance(local->inner);
-		local->inner = NULL;
-	}
+		TCPStop(local->inner);		/* the socket stays; only the wire closes */
 
 	TCPPort_SetState(instance, local->enabled ? ST_IDLING : ST_DISABLED);
 }
@@ -241,8 +311,9 @@ static void TCPPort_DoSend(NodeObj instance)
 
 	chunk = NewNode(STRING);
 	SetName(chunk, "Data");
-	SetValueStr(chunk, tx);
-	DeliverMsg(local->inner, "In", msg_send, chunk);
+	SetValueStrLen(chunk, tx, (int) strlen(tx));
+	TCPSendData(local->inner, (int) strlen(tx), chunk);
+	DelNode(chunk);
 
 	if (GetPropInt(instance, "ClearOnSend"))
 		SetPropStr(instance, "TxData", "");
@@ -282,15 +353,8 @@ int TCPPort_OnOpen(NodeObj instance, MsgId message, NodeObj data)
 	   Host Name box at the Port box. The connect is non-blocking, so
 	   OPENING is a real state we sit in until the engine reports it is
 	   Connected (watched in TCPPort_Tick). */
-	if (local->inner)
-		DeleteInstance(local->inner);
-
-	/* the engine belongs to this panel - created inside it (Widget_Create,
-	   named/path-registered - see the Listen-side comment above) */
-	local->inner = Widget_Create(instance, "TCP", "Inner");
 	if (!local->inner)
 	{
-		DebugPrint("TCPPort: the TCP class is not loaded", __FILE__, __LINE__, ERROR);
 		TCPPort_SetState(instance, ST_IDLING);
 		return rtrn_handled;
 	}
@@ -302,58 +366,92 @@ int TCPPort_OnOpen(NodeObj instance, MsgId message, NodeObj data)
 	{
 		TCPPort_Log(instance, "ErrorMsgs", "Open needs a Host Name");
 		DebugPrint("TCPPort: Open with no HostName", __FILE__, __LINE__, ERROR);
-		DeleteInstance(local->inner);
-		local->inner = NULL;
 		TCPPort_SetState(instance, ST_IDLING);
 		return rtrn_handled;
 	}
 
-	SetOrDeliverProp(local->inner, "RemoteAddr", host);
-	SetOrDeliverProp(local->inner, "RemotePort", port ? port : "80");
+	TCPPort_SetVarInt(local->inner, TCP_CONNECTION_MODE_VAR, TCP_CLIENT);
+	TCPPort_SetVar(local->inner, TCP_REMOTE_HOST_VAR, host);
+	TCPPort_SetVar(local->inner, TCP_REMOTE_PORT_VAR, port ? port : "80");
+	TCPPort_Security(instance, local->inner);
 
-	if (GetPropInt(instance, "SslEnable"))
-	{
-		SetOrDeliverProp(local->inner, "Secure", "1");
-		SetOrDeliverProp(local->inner, "SslCert", GetPropStr(instance, "SslCert"));
-		SetOrDeliverProp(local->inner, "SslKey",  GetPropStr(instance, "SslKey"));
-		SetOrDeliverProp(local->inner, "SslPass", GetPropStr(instance, "SslPass"));
-	}
+	TCPStart(local->inner);
 
-	Connect(local->inner, "Out", instance, "InnerRx");
-	ActivateInstance(local->inner);
-
+	/* OPENING until the object says a connection happened - its
+	   TCP_NEW_CONNECTION_CALLBACK, or TCP_ERROR_CALLBACK if it did not */
 	TCPPort_SetState(instance, ST_OPENING);
 	TCPPort_Log(instance, "TraceMsgs", "connecting");
-
-	/* watch the engine's Connected line so OPENING becomes CONNECTED     */
-	/* without anyone polling in a handler                                 */
-	Connect(local->inner, "Connected", instance, "InnerUp");
 
 	return rtrn_handled;
 }
 
-/* the engine's Connected line: OPENING -> CONNECTED when the non-blocking
-   connect completes (or back to IDLING if it failed) */
-int TCPPort_OnInnerUp(NodeObj instance, MsgId message, NodeObj data)
+/* Everything the object says arrives here, as TCPPORT_CALLBACK + the ordinal
+   from tcp.h. This panel keeps its own state; it never reads the object's. */
+int TCPPort_OnSocketCallback(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+	NodeObj copy;
+	char *value, *cur, *buf;
+	int len;
 
-	if (!local || message == msg_eof)
+	if (!local)
 		return rtrn_handled;
 
-	if (GetValueInt(data))
+	switch (message - TCPPORT_CALLBACK)
 	{
-		SetPropStr(instance, "SslStatus",
-				   GetPropInt(local->inner, "Secured") ? "1" : "0");
+	case TCP_NEW_CONNECTION_CALLBACK:
+		TCPPort_Log(instance, "TraceMsgs", "a peer connected");
 		TCPPort_SetState(instance, ST_CONNECTED);
-	}
-	else if (TCPPort_IsState(instance, ST_OPENING))
-	{
-		TCPPort_Log(instance, "ErrorMsgs", "connect failed");
-		TCPPort_SetState(instance, ST_IDLING);
-	}
+		return rtrn_handled;
 
-	return rtrn_handled;
+	case TCP_REMOTE_CONNECTION_CLOSED_CALLBACK:
+		/* a peer going away means "back to listening" - but not over a
+		   Close or a disable, which are this panel's own doing */
+		if (local->enabled
+			&& !TCPPort_IsState(instance, ST_CLOSING)
+			&& !TCPPort_IsState(instance, ST_DISABLED)
+			&& !TCPPort_IsState(instance, ST_IDLING))
+			TCPPort_SetState(instance, ST_LISTEN);
+		return rtrn_handled;
+
+	case TCP_ERROR_CALLBACK:
+		value = data ? GetValueStr(data) : NULL;
+		TCPPort_Log(instance, "ErrorMsgs", value ? value : "socket error");
+		if (TCPPort_IsState(instance, ST_OPENING) || TCPPort_IsState(instance, ST_LISTEN))
+			TCPPort_SetState(instance, ST_IDLING);
+		return rtrn_handled;
+
+	case TCP_RECEIVED_DATA_CALLBACK:
+		value = data ? GetValueStr(data) : NULL;
+		if (!value)
+			return rtrn_handled;
+
+		TCPPort_SetState(instance, ST_CONNECTED);
+
+		if (GetPropInt(instance, "AccumulateRx"))
+		{
+			cur = GetPropStr(instance, "RxData");
+			len = (int)strlen(cur ? cur : "") + (int)strlen(value) + 1;
+			buf = malloc(len);
+			snprintf(buf, len, "%s%s", (cur && cur[0]) ? cur : "", value);
+			SetPropStr(instance, "RxData", buf);
+			free(buf);
+		}
+		else
+			SetPropStr(instance, "RxData", value);
+
+		SetPropStr(instance, "RxReady", "1");
+		SetPropInt(instance, "BytesReady", (int)strlen(GetPropStr(instance, "RxData")));
+
+		copy = NewNode(STRING);
+		SetName(copy, "Data");
+		SetValueStr(copy, value);
+		SndMsg(instance, "Out", msg_send, copy);
+		return rtrn_handled;
+
+	default:
+		return rtrn_dropped;
+	}
 }
 
 int TCPPort_OnListen(NodeObj instance, MsgId message, NodeObj data)
@@ -698,14 +796,16 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "ReservedIn",  "TxData");
 	SetPropStr(instance, "ReservedOut", "RxData");
 	Widget_Port(instance, "In",      "", (void *)TCPPort_OnIn);
-	Widget_Port(instance, "InnerRx", "", (void *)TCPPort_OnInnerRx);
-	Widget_Port(instance, "InnerUp", "", (void *)TCPPort_OnInnerUp);
+	Widget_Port(instance, "SocketCallback", "", (void *)TCPPort_OnSocketCallback);
 
 	/* Auto Send is driven by the Transmit box CHANGING: an internal port wired
 	   to TxData's own change, so typing in the box and writing it through In
 	   both auto-send the same way. Not published - plumbing, not a control. */
 	Widget_Port(instance, "TxChanged", "", (void *)TCPPort_OnTxChanged);
 	Connect(instance, "TxData", instance, "TxChanged");
+
+	/* one socket for this panel's life, handed this panel's callback base */
+	local->inner = TCPPort_NewSocket(instance);
 
 	InitPosition(instance);
 
@@ -803,20 +903,20 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 
-	/* local->inner is NOT deleted here - it is a real, path-registered
-	   instance (Widget_Create) living under this panel's own path, so
-	   whenever THIS instance dies through the one path anything dies
-	   through (Bridge_Delete, bridge.c), that call has already
-	   snapshotted the whole subtree - this instance AND inner, as two
-	   independent entries - before deleting either. Deleting inner here
-	   too would race that same snapshot's own turn to reach inner's
-	   entry (see scriptbox.c's InstanceEnd, the same bug, confirmed by a
-	   SIGABRT the first time anything deleted a ScriptBox). Re-Listen and
-	   re-Open swapping the engine while this panel stays alive are the
-	   one time inner genuinely needs an explicit delete - both already do
-	   exactly that, on their own. */
+	/* the socket is this panel's private state - no path, no container,
+	   nothing else holds a reference - so nothing else will ever free it.
+	   That is the whole reason the old note here said the opposite: back
+	   when it was a path-registered member, deleting it here raced the
+	   subtree teardown that also owned it. */
 	if (local)
+	{
+		if (local->inner)
+		{
+			TCPStop(local->inner);
+			DeleteInstance(local->inner);
+		}
 		free(local);
+	}
 
 	return rtrn_handled;
 }

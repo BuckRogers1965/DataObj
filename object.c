@@ -90,6 +90,7 @@ NodeObj ResolvePath(char * path)
    anchors its own namespace, and a Bridge is handed the root of the
    session it serves and walks it like any other view.  */
 NodeObj FindClass(char * classname);	/* defined below */
+static int NameTakenIn(char *name, char *containerPath);	/* defined below */
 
 NodeObj CreateRoot(char * name)
 {
@@ -886,18 +887,43 @@ static char *IJ_Str(char **pp)
 	return out;
 }
 
-/* an unused path like <prefix>/<Base>_N - server-generated, since a deep
-   clone or an import names things no caller asked for individually */
-static void ImportFreshName(char *prefix, char *base, char *out, int outlen)
+/* THE rule for a name the server mints: the base with any trailing _N
+   stripped, then the lowest free _k in the container. A clone and an import
+   both use it, so View_2 becomes View_3 and never View_2_1.
+   Why it matters beyond tidiness: View_2 is a PREFIX of View_2_1, and every
+   path remap in an import is a prefix rewrite - so a suffixed name makes the
+   copy's members indistinguishable from the source's, and the copy comes up
+   wired to the original. Re-numbering keeps the two paths disjoint. */
+void MintFreshName(char *base, char *containerPath, char *out, int outlen)
 {
-	int n;
+	char stem[200], full[400];
+	int len, k;
 
-	for (n = 1; n < 100000; n++)
+	snprintf(stem, sizeof(stem), "%s", (base && base[0]) ? base : "Thing");
+
+	len = (int) strlen(stem);
+	while (len > 0 && stem[len - 1] >= '0' && stem[len - 1] <= '9')
+		len--;
+	if (len > 0 && len < (int) strlen(stem) && stem[len - 1] == '_')
+		stem[len - 1] = 0;
+
+	for (k = 1; k < 100000; k++)
 	{
-		snprintf(out, outlen, "%s/%s_%d", (prefix && prefix[0]) ? prefix : "/Root", base, n);
-		if (!ResolvePath(out))
+		snprintf(out, outlen, "%s_%d", stem, k);
+		snprintf(full, sizeof(full), "%s/%s",
+				 (containerPath && containerPath[0]) ? containerPath : "/Root", out);
+		if (!NameTakenIn(out, containerPath) && !ResolvePath(full))
 			return;
 	}
+}
+
+/* an unused path like <prefix>/<Base>_N, from that one rule */
+static void ImportFreshName(char *prefix, char *base, char *out, int outlen)
+{
+	char name[200];
+
+	MintFreshName(base, prefix, name, sizeof(name));
+	snprintf(out, outlen, "%s/%s", (prefix && prefix[0]) ? prefix : "/Root", name);
 }
 
 /* create one instance the way a live create-instance would (naming,
@@ -2123,24 +2149,10 @@ static int NameTakenIn(char *name, char *containerPath)
 /* Slider_1_1), and a view "CloneAliasTest" becomes CloneAliasTest_1.        */
 static void CloneMintName(NodeObj source, char *containerPath, char *out, int outlen)
 {
-	char base[200];
 	char *nm = GetPropStr(source, "Name");
 	char *b  = (nm && nm[0]) ? nm : GetNameStr(GetParent(source));
-	int len, k;
 
-	snprintf(base, sizeof(base), "%s", b ? b : "Thing");
-	len = (int) strlen(base);
-	while (len > 0 && base[len - 1] >= '0' && base[len - 1] <= '9')
-		len--;
-	if (len > 0 && len < (int) strlen(base) && base[len - 1] == '_')
-		base[len - 1] = 0;
-
-	for (k = 1; k < 100000; k++)
-	{
-		snprintf(out, outlen, "%s_%d", base, k);
-		if (!NameTakenIn(out, containerPath))
-			return;
-	}
+	MintFreshName(b, containerPath, out, outlen);
 }
 
 /* an alias is a link, not a data snapshot - CloneObject can't copy it.  */

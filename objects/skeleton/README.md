@@ -106,110 +106,151 @@ properties by name.
 
 ---
 
-## 4. Writing a plain object (no panel)
+## 4. Writing an object (no panel)
 
-Copy `objects/udp` - two files, `udp.c` and a `Makefile`, no `widget.h`. Its
-interface is the header comment, and that is the whole documentation an object
-needs: what you send it, what you set on it, what you subscribe to.
+Copy `objects/udp` - `udp.h`, `udp.c`, a Makefile. `objects/network/tcp.c`
+is the bigger example (connections, TLS, client and server).
 
-**The interface is nodes, and nothing else:**
+**The interface is a HEADER, and the header is the whole of it.** Write it
+FIRST, before any behaviour exists, because it is the thing that must not
+change:
 
-| what | how | example |
-|---|---|---|
-| a verb | a property carrying an `OnMsg` handler - deliver a message to it and it acts | `Send` |
-| configuration | an ordinary property, read when it matters | `LocalPort`, `RemoteAddr` |
-| state to read | an ordinary property the object writes | `Listening` |
-| something happened | `SndMsg(instance, "<node>", msg_send, data)` - whoever cares subscribes | `Received` |
+```c
+#define MAX_MSG_SIZE 65535          /* limits */
 
-**There is no `In`, no `Out`, and no direction.** A datagram, a chunk, a
-reading is a *message*, not a value parked in a property, and the node it goes
-out of is just the node the subscriber list lives on. Name nodes for what they
-are (`Send`, `Received`, `Clock`, `Enable`), never for which way something
-flows. The reply address rides on the message when it needs to: a UDP datagram
-arrives carrying its sender's `RemoteAddr`/`RemotePort`, so
-`Connect(Udp,"Received",Udp,"Send")` is a complete echo server.
+enum {                              /* verbs, then vars - one id space */
+    UDP_SEND_PACKET_MSG=USER_MESSAGE_BASE,
+    UDP_START_MSG,
+    UDP_STOP_MSG,
 
-**The rest of the shape:**
+    UDP_REMOTE_HOST_VAR,
+    UDP_REMOTE_PORT_VAR,
+    UDP_LISTEN_PORT_VAR
+};
 
-- **`Enable`** - `1`/`0`, and *every* handler honors it. If the thing can be
-  restarted, make `Enable=1` restart it (the UDP engine reopens its socket);
-  if activation is genuinely one-shot, say so in the header comment (TCP).
-- **One task for the instance's whole life.** `CreateTask` once, re-arm with
-  `AddTaskMilli` **from inside the task's own callback**, `DeleteTask` in
-  `InstanceEnd` before freeing `local`. A task created per activation is the
-  leak `testharness/leaktest.py` exists to catch.
-- **Poll, drain, re-arm.** Take *everything* waiting each tick (a loop until
-  `EAGAIN`), not one item - several arrive between ticks.
-- **`SndMsg` takes ownership** of the data node; do not `DelNode` it after.
-  Forwarding a message you received means sending a fresh copy.
-- **Filter only `msg_eof`.** See lesson 12 - `message != msg_send` swallows
-  every ordinary property write.
-- **Binary-safe payloads**: `SetValueStrLen` plus a `Length` property, so
-  embedded NULs survive.
-- `ClassStart` publishes the interface with `PublishProp`; `_init`/`_fini`
-  register the library node (Company, UUID, Version, Dependencies).
+#define UDPSendPacket(pUDP,size,message) ((void)(size), DeliverMsg(pUDP, "Msg", UDP_SEND_PACKET_MSG, (message)))
+#define UDPStart(pUDP) DeliverMsg(pUDP, "Msg", UDP_START_MSG, 0L)
+#define UDPStop(pUDP)  DeliverMsg(pUDP, "Msg", UDP_STOP_MSG, 0L)
+```
+
+`USER_MESSAGE_BASE` (callback.h) is where an object's own ids start, clear of
+the framework's. A driver includes this header and can then say exactly these
+things and nothing else.
+
+**No struct in the header.** The instance data is defined in the `.c` only, so
+a driver holding the node has a `long` it cannot cast: no layout, no size, no
+fields. That is what lets the implementation change to anything at will.
+
+**One entry, one message function.** The instance carries a single `"Msg"`
+property whose `OnMsg` is the object's message function, and it switches on the
+ids - the reference's `ObjectMessageFunc`:
+
+```c
+switch (message) {
+case UDP_START_MSG:       return Udp_Start(instance, local);
+case UDP_SEND_PACKET_MSG: return Udp_SendPacket(instance, local, data);
+case UDP_REMOTE_HOST_VAR: ...      /* a var id is a message too */
+}
+```
+
+**A var is set and read with the same id**: a data node carrying a value SETS
+it, an empty node is FILLED IN with the current value. That is the reference's
+SETVARIABLE/GETVARIABLE pair, and it needs no second call.
+
+**State lives in the object's own struct, never in properties.** No
+`LocalPort` property, no `Connected` readback, no `Enable`, no `Activate`
+hook - `Start` and `Stop` are verbs in the header, and a second entrance to a
+verb is just a way to get them out of step. `PublishProp` is called **zero**
+times: the palette and the clients see nothing, because there is nothing they
+may touch. An object's whole property list is `Msg`, plus the framework's own
+`State` and `local`.
+
+**Replies go where the creator said**, handed over at creation:
+`InstanceStart(class, msg_initialize, data)` reads `Owner` (the creator's
+node), `MsgBase` (the id the creator chose) and `Callback` (the name of the
+creator's own port), and every callback is delivered as `MsgBase + ordinal`.
+The object names no callback of its own. The base belongs to the OWNER, so
+something holding a TCP and a UDP gives each a different one and tells their
+replies apart in a single handler.
+
+**Answer failures on the callback, never with a property.** `TCPStart`'s BOOL
+does not survive the trip, so a start that fails reports itself
+(`TCP_ERROR_CALLBACK`, or an EOF on the reply). A stop the driver asked for
+says nothing - it already knows, and a queued answer would land after the next
+start and undo it.
+
+**Why this is not fussiness:** anything you expose *will* be used, and then it
+is a contract you never meant to sign. `tcp.c` published `In`, `Out`,
+`Connected`, `Secured`, `LocalAddr` and a `Conn` tag; within weeks `main.c`,
+`router`, `http`, `websocket`, `bridge`, `tcpport`, `mcpsource` and `tplink`
+all depended on them, which is why fixing it is a seven-file change instead of
+a one-file change.
+
+The rest of the shape: `Enable`-style gating belongs to widgets, not here; one
+task for the instance's whole life, re-armed **from inside its own callback**;
+`DeleteTask` in `InstanceEnd`; drain everything waiting each tick; `SndMsg`
+takes ownership of its data, `DeliverMsg` does not (it is synchronous, so the
+caller frees).
 
 ---
 
-## 5. A widget that drives an engine (the pair)
+## 5. A widget that drives an object (the pair)
 
-`objects/udpport` over `objects/udp` is the worked example; read it beside
-`objects/tcpport`. The panel is an ordinary widget (sections 1-3) plus these
-rules, every one of which was a bug first.
+`objects/udpport` over `objects/udp`, and `objects/tcpport` over
+`objects/network` - read those two.
 
-**The engine is private state, not a member.**
+**The widget includes the object's header and speaks only its ids.**
 
 ```c
-class  = <registry walk for the class by name>;        /* GetRegObjList -> libs -> classes */
-start  = (msgobj) GetPropLong(class, "InstanceStart");
-start(class, msg_initialize, NULL);
-engine = (NodeObj) GetPropLong(class, "LastInstance");
-Connect(engine, "Received", instance, "Callback");     /* your callback, handed over once */
+#include "objects/udp/udp.h"
+#define UDP_CALLBACK 0x5001        /* THIS panel's id for THIS object */
 ```
 
-Not `CreateObject` (it requires a location, and this thing has none) and not
-`Widget_Create` (that makes it a path-registered member sitting on the canvas -
-visible, addressable, wireable, and wrong). It lives on your `local` struct,
-nothing else knows it exists, so **you** must `DeleteInstance` it in
-`InstanceEnd`. Drive it by message: `SetOrDeliverProp(engine,"Enable","1")`,
-`DeliverMsg(engine,"Send",msg_send,chunk)`. Read back what it **achieved**
-(`Listening`), never what was asked for.
+**The object it drives is private state on the widget's own struct.** Not a
+member, not a child, not something with a name - and there is no such thing as
+an "Inner". Make it through the class's own `InstanceStart`, which is the
+framework's equivalent of `New(GetNamedClass("UDP"), UDP_CALLBACK, pDev)`:
 
-**Setup is armed at BIRTH, and it is the only thing that decides what the panel
-says.** In `InstanceStart`: `CreateTask`, then arm a one-shot ~300ms out. Not in
-`Activate` - a loaded or imported instance never gets an `Activate` (nothing
-runs on a load), so those are exactly the instances that would come up with no
-setup at all. What setup does:
+```c
+/* walk the registry for the class (GetRegObjList -> libraries -> classes) */
+args = NewNode(INTEGER);
+SetPropLong(args, "Owner",   (long) instance);   /* this panel */
+SetPropLong(args, "MsgBase", UDP_CALLBACK);      /* this panel's id for it */
+SetPropStr (args, "Callback", "Callback");       /* this panel's own port */
+instanceStart(cls, msg_initialize, args);
+DelNode(args);
+local->udpInstance = (NodeObj) GetPropLong(cls, "LastInstance");
+```
 
-1. clear the momentary commands (`Start`/`Stop` back to `"0"`);
-2. force the resting presentation **unconditionally** - lamps to stopped,
-   readouts dark - with no comparison against what the file said;
-3. close the engine for real if it is somehow open, rather than declaring it
-   shut;
-4. *then* honor the auto option: `if (AutoStart && Enable)` press the command
-   (`SetOrDeliverProp(instance,"Start","1")`), so one path does the starting.
+**Not `CreateObject`** (it requires a location, and this has none) and **not
+`Widget_Create`** (that makes it a named, path-registered member sitting on the
+canvas - visible, addressable, wireable, and wrong). It has no path, so nothing
+in the session can reach it; the only reference is the one on your struct, so
+**you** destroy it in `InstanceEnd`.
 
-**Watch your own state.** A load installs its values *after* your panel is up,
-so subscribe to your own state property (`Connect(instance,"On",instance,
-"StateWatch")`) and, when a claim disagrees with what the engine is doing,
-**re-arm setup** rather than correcting inline - a correction made inside a
-fan-out re-enters through the other lamp and crashes the load.
+**The widget keeps its own state.** It has the boxes and the lamps, so it knows
+what it asked for; it never reads state back out of the object, because there
+is nothing to read. `pData->state` in the reference is exactly this. When a
+start fails, the object says so on the callback and the widget corrects itself.
 
-**Guard the arming with a flag** (`local->pending`, cleared when the callback
-fires). Arming an already-armed task inserts it twice and corrupts the
-scheduler's list - see lesson 14; this is the same rule with the flag spelled
-out, because the callback can now be armed from birth, from `Activate`, and from
-the state watch.
+**One callback handler**, switching on `base + ordinal`:
 
-**Commands are momentary.** After acting, write the command property back to
-`"0"`. Leaving `"1"` makes the press part of saved state, and on load it fans
-out to the panel's own MoButton, which sees a 0->1 edge and re-emits it down its
-wire as a genuine press - the widget starts itself with nobody asking.
+```c
+switch (message - TCPPORT_CALLBACK) {
+case TCP_NEW_CONNECTION_CALLBACK:  ...
+case TCP_RECEIVED_DATA_CALLBACK:   ...
+case TCP_ERROR_CALLBACK:           ...
+}
+```
 
-**Trace every decision, with the values it read.** These paths fail silently
-and invisibly; a one-line trace helper per decision (`UDPPort_Trace`) turns "it
-does nothing" into a log that names the value that was wrong. Debug it while
-you write it, not after someone reports it.
+**Setup is armed at BIRTH**, in `InstanceStart`, on a one-shot task guarded by
+a flag - not in `Activate`, because a loaded or imported instance never gets
+one. Setup clears the momentary commands, forces the resting presentation
+UNCONDITIONALLY (whatever the file said), stops the object for real, and only
+then honours the auto option by pressing the command a person would press.
+
+**Commands are momentary**: write the command property back to `"0"` after
+acting, or the press becomes saved state and a load re-presses it.
 
 ---
 

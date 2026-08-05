@@ -46,13 +46,25 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 int Textbox_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+	NodeObj announce;
 	char *value;
 
 	if (!local || !local->enabled)
 		return rtrn_dropped;
 
 	value = GetValueStr(data);
-	SetPropStr(instance, "Value", value ? value : "");
+
+	/* A write is a write. SetPropStr would apply its change test and drop
+	   a repeat, so the same text typed twice reached nothing subscribed -
+	   and for a box that TRIGGERS something (a packet to send, a string to
+	   re-encode) a repeated value is not a non-event. Store it without the
+	   test, then announce it, so every write is exactly one delivery. */
+	SetValueStr(GetPropNode(instance, "Value"), value ? value : "");
+
+	announce = NewNode(STRING);
+	SetName(announce, "Value");
+	SetValueStr(announce, value ? value : "");
+	SndMsg(instance, "Value", msg_send, announce);
 
 	return rtrn_handled;
 }

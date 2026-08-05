@@ -1,3 +1,16 @@
+/*****************************************************************/
+// Module:  tcp.c
+//
+// Purpose: the TCP object - objects/demo/TCPObject ported onto this
+//          framework, keeping its shape: ONE message function switching on
+//          the ids in tcp.h, all of its state in its own struct, and its
+//          callbacks going to the {owner, base, port} it was handed at
+//          creation. The owner picks the base, so an owner holding several
+//          objects tells their replies apart.
+//
+//          tcp.h is the whole interface. Nothing else is reachable: no
+//          configuration properties, no state properties, no second way in.
+/*****************************************************************/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,120 +34,108 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "dyn/buff.h"
-
-/*
-
-TCP object, ported from the VNOS TCPObject (see TCPObject.c in this
-directory for the reference implementation this descends from).
-
-Server mode, any number of simultaneous connections:
-
-	LocalPort	the port to listen on
-	Out		bytes received from a peer go out here as messages,
-			each carrying a Conn property identifying which one
-	In		messages arriving here are buffered and sent to a peer -
-			a Conn property picks which one, or broadcasts to
-			every connected peer if it's absent/0
-	Enable		1 enables, 0 shuts the server down completely
-
-TCPObject.c's own ring is the model for this - a linked list of active
-connections serviced by one shared polling task - but the reference
-takes a shortcut its own comment admits: when a listening socket accepts,
-it repurposes ITS OWN ring entry for the new client ("for now we can only
-service one connection at a time") instead of giving the accepted
-connection a ring entry of its own. That shortcut is exactly what's fixed
-here: the listening socket keeps listening, and every accepted connection
-gets its own entry in local->conns, so a second, third, thousandth peer
-connecting never displaces the ones already being serviced.
-
-A polling task runs every POLL_MS milliseconds: it accepts every waiting
-connection (not just one - a listening socket can hand out several in a
-single tick), then for each connection in local->conns: receives what
-that peer sent (each recv becomes one message out Out, tagged with that
-connection's Conn id), and drains that connection's own send buffer to
-it. When a peer closes we send msg_eof out Out tagged with just that
-Conn id and remove it from the list - the only signal anything sitting
-on top of TCP gets that THIS ONE peer is gone (as opposed to the server
-itself shutting down, below, which sends an untagged msg_eof meaning
-everyone is gone). Objects that carry per-connection state across a
-sequence of peers (WebSocket's handshake flag, Router's sniffed mode,
-a Bridge's login) key it off Conn and reset just that Conn's entry on
-this, not the Enable-driven shutdown below.
-
-Enable=0 is a full shutdown, not a pause: every connection's socket
-closes, the listening socket closes, an untagged (Conn 0, meaning
-"everyone") msg_eof goes out Out, and the polling task is not re-armed,
-so the object stops holding the program open. This is the wiring for a
-timed server: connect a pulse to Enable and the falling edge shuts it
-down.
-
-Payloads carry a Length property beside the data (SetValueStrLen/
-GetValueLen in node.c) so embedded NULs survive - needed once anything
-binary sits on top of this, a WebSocket frame's masking key being the
-first example. A plain text payload with no Length property falls back
-to strlen(), same as before.
-
-Client mode is still to come, the reference TCPObject.c has the
-connecting state machine for it.
-
-*/
+#include "tcp.h"
 
 #define TCP_CHUNK_SIZE 2048
 #define POLL_MS 10
 
-/* one accepted peer - local->conns is the head of a linked list of      */
-/* these, the "ring" TCPObject.c's own comments describe, minus the      */
-/* single-connection shortcut its accept path took                       */
+enum { OFF, ON };
+
+/* one connection - the reference's ring, minus its single-connection
+   shortcut: the listening socket keeps listening and every accepted peer
+   gets its own entry */
 typedef struct Connection
 {
 	int    fd;
 	buff   sendbuf;
-	int    peerClosed;	/* peer half-closed (recv==0); finish draining sendbuf, don't discard it */
-	long   id;		/* never 0 and never reused - 0 is reserved to mean "every connection" */
-	SSL   *ssl;		/* the TLS session, NULL on a plain connection */
-	int    handshaking;	/* SSL_accept has not completed yet (non-blocking) */
+	int    peerClosed;
+	long   id;					/* 1..N; 0 is the server/client instance */
+	SSL   *ssl;
+	int    handshaking;
 	struct Connection *next;
 } Connection;
 
 typedef struct InstanceData
 {
-	int        listenfd;
+	int         listenfd;
+	int         connectfd;		/* a client connect in flight */
 	Connection *conns;
-	long       nextConnId;
-	TaskObj    task;
-	int        active;
-	int        enabled;
-	int        scheduled;
-	SSL_CTX   *ctx;		/* the TLS context, NULL when insecure */
-	int        secure;	/* Secure was on at activation */
-	int        clientMode;	/* RemoteAddr was set: connect out, don't listen */
-	int        connectfd;	/* the socket a client connect is in flight on */
+	long        nextConnId;
+	int         state;			/* OFF / ON */
+	TaskObj     task;
+	int         scheduled;		/* the poll is armed - arming a linked task
+								   corrupts the scheduler's task list */
+
+	/* the vars, private: reachable only through the ids in tcp.h */
+	char        remoteHost[256];
+	int         remotePort;
+	int         localPort;
+	long        currentConn;
+	int         connCount;
+	int         maxConns;
+	int         mode;			/* TCP_CLIENT / TCP_SERVER */
+	int         securityMode;
+	char        cert[256];
+	char        key[256];
+
+	SSL_CTX    *ctx;
+
+	/* the reference's New(class, msgID, owner): who to tell, the base id THEY
+	   chose for these replies, and the port on them it lands on */
+	NodeObj     owner;
+	int         msgBase;
+	char        callback[64];
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
+static int  Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason);
+static int  Tcp_Start(NodeObj instance, InstanceData * local);
+static int  Tcp_Stop(NodeObj instance, InstanceData * local);
+static void Tcp_SetNonBlocking(int fd);
+
 /* every loadable object must export this, the loader checks for it */
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
-	DebugPrint ( "TCP handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
+	(void) instance; (void) message; (void) data;
 	return rtrn_handled;
 }
 
-void Tcp_SetNonBlocking(int fd);	/* defined below, used by the client path */
+/* ---- the callbacks: base + the ordinal from tcp.h ------------------- */
+
+static void Tcp_Callback(NodeObj instance, InstanceData * local, int ordinal,
+						 long connId, char * payload, int length)
+{
+	NodeObj chunk;
+
+	(void) instance;
+
+	if (!local->owner || !local->callback[0])
+		return;
+
+	/* which connection this concerns - the reference's
+	   TCP_CURRENT_CONNECTION_VAR, set before the callback goes out */
+	local->currentConn = connId;
+
+	chunk = NewNode(STRING);
+	SetName(chunk, "Data");
+	if (payload && length > 0)
+		SetValueStrLen(chunk, payload, length);
+
+	DeliverMsg(local->owner, local->callback, local->msgBase + ordinal, chunk);
+	DelNode(chunk);		/* DeliverMsg is synchronous: ours to free */
+}
+
+static void Tcp_Error(NodeObj instance, InstanceData * local, char * what)
+{
+	DebugPrint(what, __FILE__, __LINE__, ERROR);
+	Tcp_Callback(instance, local, TCP_ERROR_CALLBACK, local->currentConn,
+				 what, (int) strlen(what));
+}
 
 /* ---- TLS ------------------------------------------------------------ */
-/* Ported from the VNOS reference (objects/demo/TCPObject/TCPObject.c),   */
-/* which was a SECURE cross-platform TCP object: a server context built   */
-/* from a PEM certificate and key, an SSL session per accepted peer, and  */
-/* SSL_read/SSL_write in place of recv/send. Brought up to OpenSSL 3:     */
-/* TLS_server_method for SSLv23_server_method, and the library's own      */
-/* implicit init instead of SSL_load_error_strings/SSLeay_add_*.          */
-/* The handshake is completed across poll ticks rather than in one call,  */
-/* because these sockets are non-blocking (the original's single          */
-/* SSL_accept assumed it would finish immediately).                        */
 
-/* the last OpenSSL error, as a line for the log */
 static void Tcp_SslError(char *what)
 {
 	char buf[300];
@@ -145,19 +146,10 @@ static void Tcp_SslError(char *what)
 	DebugPrint(buf, __FILE__, __LINE__, ERROR);
 }
 
-/* build the server context from the instance's Cert/Key. Returns 0 and   */
-/* logs loudly on any failure - a secure server that quietly serves in    */
-/* the clear is the one outcome worse than not starting.                   */
-static int Tcp_SslContext(NodeObj instance, InstanceData *local)
+static int Tcp_SslContext(InstanceData * local)
 {
-	char *cert = GetPropStr(instance, "SslCert");
-	char *key  = GetPropStr(instance, "SslKey");
-	char *pass = GetPropStr(instance, "SslPass");
-
-	if (local->clientMode && (!cert || !cert[0]))
+	if (local->mode == TCP_CLIENT && !local->cert[0])
 	{
-		/* a client presents no certificate of its own - just make the
-		   context and let the handshake verify the server's */
 		local->ctx = SSL_CTX_new(TLS_client_method());
 		if (!local->ctx)
 		{
@@ -167,26 +159,22 @@ static int Tcp_SslContext(NodeObj instance, InstanceData *local)
 		return 1;
 	}
 
-	if (!cert || !cert[0] || !key || !key[0])
+	if (!local->cert[0] || !local->key[0])
 	{
-		DebugPrint("TCP TLS: Secure is on but SslCert/SslKey are not set",
+		DebugPrint("TCP TLS: security is on but the cert/key are not set",
 				   __FILE__, __LINE__, ERROR);
 		return 0;
 	}
 
-	local->ctx = SSL_CTX_new(local->clientMode ? TLS_client_method()
-												: TLS_server_method());
+	local->ctx = SSL_CTX_new(local->mode == TCP_CLIENT ? TLS_client_method()
+													  : TLS_server_method());
 	if (!local->ctx)
 	{
 		Tcp_SslError("could not create the TLS context");
 		return 0;
 	}
 
-	/* a key file may be encrypted - the panel's SslPass unlocks it */
-	if (pass && pass[0])
-		SSL_CTX_set_default_passwd_cb_userdata(local->ctx, pass);
-
-	if (SSL_CTX_use_certificate_file(local->ctx, cert, SSL_FILETYPE_PEM) <= 0)
+	if (SSL_CTX_use_certificate_file(local->ctx, local->cert, SSL_FILETYPE_PEM) <= 0)
 	{
 		Tcp_SslError("certificate file rejected");
 		SSL_CTX_free(local->ctx);
@@ -194,7 +182,7 @@ static int Tcp_SslContext(NodeObj instance, InstanceData *local)
 		return 0;
 	}
 
-	if (SSL_CTX_use_PrivateKey_file(local->ctx, key, SSL_FILETYPE_PEM) <= 0)
+	if (SSL_CTX_use_PrivateKey_file(local->ctx, local->key, SSL_FILETYPE_PEM) <= 0)
 	{
 		Tcp_SslError("private key file rejected");
 		SSL_CTX_free(local->ctx);
@@ -214,29 +202,34 @@ static int Tcp_SslContext(NodeObj instance, InstanceData *local)
 	return 1;
 }
 
-/* drive a non-blocking handshake forward; 1 when it has completed */
 static int Tcp_SslHandshake(Connection *conn)
 {
-	int rc, err;
+	int rc = SSL_do_handshake(conn->ssl), err;
 
-	rc = SSL_do_handshake(conn->ssl);	/* accept or connect - the side was set already */
 	if (rc == 1)
 	{
 		conn->handshaking = 0;
-		DebugPrint("TCP TLS: handshake complete.", __FILE__, __LINE__, OBJMSGHANDLING);
 		return 1;
 	}
 
 	err = SSL_get_error(conn->ssl, rc);
 	if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
-		return 0;			/* not finished; try again next tick */
+		return 0;
 
 	Tcp_SslError("handshake failed");
 	conn->peerClosed = 1;
 	return 0;
 }
 
-/* read/write that don't care whether the connection is secure */
+static void Tcp_SslClose(Connection *conn)
+{
+	if (!conn->ssl)
+		return;
+	SSL_shutdown(conn->ssl);
+	SSL_free(conn->ssl);
+	conn->ssl = NULL;
+}
+
 static int Tcp_ConnRecv(Connection *conn, char *buffer, int len)
 {
 	if (conn->ssl)
@@ -251,14 +244,14 @@ static int Tcp_ConnRecv(Connection *conn, char *buffer, int len)
 				return -1;
 			}
 			if (err == SSL_ERROR_ZERO_RETURN)
-				return 0;		/* peer closed the TLS session cleanly */
+				return 0;
 			errno = EIO;
 			return -1;
 		}
 		return rc;
 	}
 
-	return (int)recv(conn->fd, buffer, len, 0);
+	return (int) recv(conn->fd, buffer, len, 0);
 }
 
 static int Tcp_ConnSend(Connection *conn, char *block, int len)
@@ -280,28 +273,17 @@ static int Tcp_ConnSend(Connection *conn, char *block, int len)
 		return rc;
 	}
 
-	return (int)send(conn->fd, block, len, 0);
+	return (int) send(conn->fd, block, len, 0);
 }
 
 /* ---- client mode ---------------------------------------------------- */
-/* The connecting state machine TCPObject.c sketched but never finished -
-   its own comment on the EINPROGRESS case reads "once we allow this to be
-   non blocking, we will need to check for this in it's own loop". This is
-   that loop: connect() returns immediately, and the poll task asks the
-   socket each tick whether it has finished, so a connect to a dead host
-   costs one getsockopt per tick instead of stalling the whole core.
-
-   Hostname resolution is the one blocking call left (getaddrinfo), so a
-   NUMERIC address never blocks at all, and a name says loudly that it is
-   about to block. That is what async-dns/ exists to retire, and it should
-   land with this. */
 
 static int Tcp_ResolveInto(char *addr, struct sockaddr_in *out)
 {
 	struct addrinfo hints, *res = NULL;
 
 	if (inet_aton(addr, &out->sin_addr))
-		return 1;			/* numeric: no lookup, no blocking */
+		return 1;
 
 	DebugPrint("TCP client: resolving a HOSTNAME blocks the core until it "
 			   "answers - use an IP, or wire async-dns", __FILE__, __LINE__, ERROR);
@@ -318,32 +300,25 @@ static int Tcp_ResolveInto(char *addr, struct sockaddr_in *out)
 	return 1;
 }
 
-/* start a non-blocking connect; 1 if it is under way (or already done) */
-static int Tcp_ConnectStart(NodeObj instance, InstanceData *local)
+static int Tcp_ConnectStart(NodeObj instance, InstanceData * local)
 {
 	struct sockaddr_in addr;
-	char *host = GetPropStr(instance, "RemoteAddr");
-	int port = GetPropInt(instance, "RemotePort");
-	int fd;
-
-	if (!port)
-		port = GetPropInt(instance, "LocalPort");
+	int fd, port = local->remotePort ? local->remotePort : local->localPort;
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons((unsigned short)port);
+	addr.sin_port = htons((unsigned short) port);
 
-	if (!host || !host[0] || !Tcp_ResolveInto(host, &addr))
+	if (!local->remoteHost[0] || !Tcp_ResolveInto(local->remoteHost, &addr))
 	{
-		DebugPrint("TCP client: RemoteAddr is empty or will not resolve",
-				   __FILE__, __LINE__, ERROR);
+		Tcp_Error(instance, local, "TCP client: the remote host is empty or will not resolve");
 		return 0;
 	}
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0)
 	{
-		DebugPrint("TCP client: could not make a socket", __FILE__, __LINE__, ERROR);
+		Tcp_Error(instance, local, "TCP client: could not make a socket");
 		return 0;
 	}
 
@@ -353,18 +328,17 @@ static int Tcp_ConnectStart(NodeObj instance, InstanceData *local)
 		&& errno != EINPROGRESS && errno != EWOULDBLOCK)
 	{
 		close(fd);
-		DebugPrint("TCP client: connect refused outright", __FILE__, __LINE__, ERROR);
+		Tcp_Error(instance, local, "TCP client: connect refused outright");
 		return 0;
 	}
 
-	local->connectfd = fd;		/* EINPROGRESS is the normal path - finish in the poll */
-	DebugPrint("TCP client: connecting.", __FILE__, __LINE__, OBJMSGHANDLING);
+	local->connectfd = fd;
 	return 1;
 }
 
-/* has the in-flight connect finished? adopt it as an ordinary Connection
-   when it has, so every read/write/close path below works unchanged */
-static void Tcp_ConnectPoll(NodeObj instance, InstanceData *local)
+/* the connecting state machine the reference sketched: ask the socket each
+   tick whether it finished, so a dead host costs one getsockopt per tick */
+static void Tcp_ConnectPoll(NodeObj instance, InstanceData * local)
 {
 	Connection *conn;
 	socklen_t len = sizeof(int);
@@ -375,17 +349,16 @@ static void Tcp_ConnectPoll(NodeObj instance, InstanceData *local)
 	FD_ZERO(&wfds);
 	FD_SET(local->connectfd, &wfds);
 	tv.tv_sec = 0;
-	tv.tv_usec = 0;			/* poll, never wait - this is the shared core */
+	tv.tv_usec = 0;
 
 	if (select(local->connectfd + 1, NULL, &wfds, NULL, &tv) <= 0)
-		return;			/* still connecting; try again next tick */
+		return;
 
 	if (getsockopt(local->connectfd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err)
 	{
 		close(local->connectfd);
 		local->connectfd = -1;
-		SetPropStr(instance, "Connected", "0");
-		DebugPrint("TCP client: connect failed.", __FILE__, __LINE__, ERROR);
+		Tcp_Error(instance, local, "TCP client: connect failed");
 		return;
 	}
 
@@ -400,7 +373,6 @@ static void Tcp_ConnectPoll(NodeObj instance, InstanceData *local)
 	local->conns = conn;
 	local->connectfd = -1;
 
-	/* a secure client speaks TLS from its side of the wire */
 	if (local->ctx)
 	{
 		conn->ssl = SSL_new(local->ctx);
@@ -412,60 +384,371 @@ static void Tcp_ConnectPoll(NodeObj instance, InstanceData *local)
 		}
 	}
 
-	SetPropStr(instance, "Connected", "1");
+	Tcp_Callback(instance, local, TCP_NEW_CONNECTION_CALLBACK, conn->id, NULL, 0);
 	DebugPrint("TCP client: connected.", __FILE__, __LINE__, OBJMSGHANDLING);
 }
 
-/* tear down one connection's TLS session */
-static void Tcp_SslClose(Connection *conn)
-{
-	if (!conn->ssl)
-		return;
-
-	SSL_shutdown(conn->ssl);
-	SSL_free(conn->ssl);
-	conn->ssl = NULL;
-}
-
-void Tcp_SetNonBlocking(int fd)
+static void Tcp_SetNonBlocking(int fd)
 {
 	fcntl(fd, F_SETFL, O_NONBLOCK);
 }
 
-/* scheduler callback: accept everyone waiting, service every connection, re-arm */
-int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
+/* ---- the verbs ------------------------------------------------------ */
+
+/* TCP_START_MSG */
+static int Tcp_Start(NodeObj instance, InstanceData * local)
+{
+	struct sockaddr_in addr;
+	int one = 1;
+
+	if (local->state == ON)
+		return rtrn_dropped;
+
+	if (local->securityMode && !Tcp_SslContext(local))
+	{
+		Tcp_Error(instance, local, "TCP: security was asked for but TLS could not start");
+		return rtrn_dropped;
+	}
+
+	if (local->mode == TCP_CLIENT)
+	{
+		if (!Tcp_ConnectStart(instance, local))
+			return rtrn_dropped;
+	}
+	else
+	{
+		if (local->localPort < 1 || local->localPort > 65535)
+		{
+			Tcp_Error(instance, local, "TCP: no usable local port");
+			return rtrn_dropped;
+		}
+
+		local->listenfd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (local->listenfd < 0)
+		{
+			Tcp_Error(instance, local, "TCP: could not create a socket");
+			return rtrn_dropped;
+		}
+
+		setsockopt(local->listenfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+		memset(&addr, 0, sizeof(addr));
+		addr.sin_family = AF_INET;
+		addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		addr.sin_port = htons((unsigned short) local->localPort);
+
+		if (bind(local->listenfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+		{
+			close(local->listenfd);
+			local->listenfd = -1;
+			Tcp_Error(instance, local, "TCP: could not bind the port");
+			return rtrn_dropped;
+		}
+
+		if (listen(local->listenfd, 25) < 0)
+		{
+			close(local->listenfd);
+			local->listenfd = -1;
+			Tcp_Error(instance, local, "TCP: could not listen on the port");
+			return rtrn_dropped;
+		}
+
+		Tcp_SetNonBlocking(local->listenfd);
+	}
+
+	if (!local->task)
+		local->task = CreateTask(ObjGetTaskList());
+	if (!local->scheduled)
+	{
+		AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
+		local->scheduled = 1;
+	}
+
+	local->state = ON;
+	SetPropInt(instance, "State", Running);
+	DebugPrint("TCP started.", __FILE__, __LINE__, OBJMSGHANDLING);
+	return rtrn_handled;
+}
+
+/* TCP_STOP_MSG */
+static int Tcp_Stop(NodeObj instance, InstanceData * local)
+{
+	Connection *conn, *next;
+
+	if (local->state == OFF)
+		return rtrn_dropped;
+
+	for (conn = local->conns; conn; conn = next)
+	{
+		next = conn->next;
+		Tcp_SslClose(conn);
+		if (conn->fd >= 0)
+			close(conn->fd);
+		buffDestroy(conn->sendbuf);
+		free(conn);
+	}
+	local->conns = NULL;
+
+	if (local->listenfd >= 0)
+		close(local->listenfd);
+	local->listenfd = -1;
+
+	if (local->connectfd >= 0)
+		close(local->connectfd);
+	local->connectfd = -1;
+
+	if (local->ctx)
+	{
+		SSL_CTX_free(local->ctx);
+		local->ctx = NULL;
+	}
+
+	local->connCount = 0;
+	local->state = OFF;
+	SetPropInt(instance, "State", Stopping);
+
+	DebugPrint("TCP stopped.", __FILE__, __LINE__, OBJMSGHANDLING);
+	return rtrn_handled;
+}
+
+/* TCP_SEND_DATA_MSG - to TCP_CURRENT_CONNECTION_VAR, or to every open peer
+   when that is 0. LENGTH FIRST: GetValueLen converts the value when it is not
+   already a string (data.c), which reallocates it and leaves an earlier
+   pointer stale. */
+static int Tcp_SendData(NodeObj instance, InstanceData * local, NodeObj data)
+{
+	Connection *conn;
+	char * str;
+	int length;
+
+	(void) instance;
+
+	if (local->state == OFF || !data)
+		return rtrn_dropped;
+
+	length = GetValueLen(data);
+	str = GetValueStr(data);
+	if (!length && str)
+		length = (int) strlen(str);
+
+	if (!str || length <= 0)
+		return rtrn_dropped;
+
+	if (local->currentConn)
+	{
+		for (conn = local->conns; conn; conn = conn->next)
+			if (conn->id == local->currentConn)
+			{
+				buffAdd(conn->sendbuf, str, length);
+				return rtrn_handled;
+			}
+		return rtrn_dropped;
+	}
+
+	for (conn = local->conns; conn; conn = conn->next)
+		buffAdd(conn->sendbuf, str, length);
+
+	return rtrn_handled;
+}
+
+/* TCP_CLOSE_CONNECTION_MSG - one connection, server mode only */
+static int Tcp_CloseConnection(InstanceData * local, long id)
+{
+	Connection *conn;
+
+	for (conn = local->conns; conn; conn = conn->next)
+		if (conn->id == id)
+		{
+			conn->peerClosed = 1;	/* drains what is queued, then closes */
+			return rtrn_handled;
+		}
+
+	return rtrn_dropped;
+}
+
+/* a var id: a node carrying a value SETS it, an empty one is FILLED IN -
+   the reference's SETVARIABLE/GETVARIABLE pair. Everything except
+   TCP_CURRENT_CONNECTION_VAR is refused while the object is started. */
+static int Tcp_Variable(InstanceData * local, MsgId var, NodeObj data)
+{
+	char * value;
+	int    setting;
+
+	if (!data)
+		return rtrn_dropped;
+
+	value = GetValueStr(data);
+	setting = value && value[0];
+
+	if (setting && local->state == ON && var != TCP_CURRENT_CONNECTION_VAR)
+		return rtrn_dropped;
+
+	switch (var)
+	{
+	case TCP_REMOTE_HOST_VAR:
+		if (setting)
+			snprintf(local->remoteHost, sizeof(local->remoteHost), "%s", value);
+		else
+			SetValueStr(data, local->remoteHost);
+		return rtrn_handled;
+
+	case TCP_REMOTE_PORT_VAR:
+		if (setting)
+			local->remotePort = GetValueInt(data);
+		else
+			SetValueInt(data, local->remotePort);
+		return rtrn_handled;
+
+	case TCP_LOCAL_PORT_VAR:
+		if (setting)
+			local->localPort = GetValueInt(data);
+		else
+			SetValueInt(data, local->localPort);
+		return rtrn_handled;
+
+	case TCP_CURRENT_CONNECTION_VAR:
+		if (setting)
+			local->currentConn = GetValueInt(data);
+		else
+			SetValueInt(data, (int) local->currentConn);
+		return rtrn_handled;
+
+	case TCP_CONNECTION_COUNT_VAR:		/* get only */
+		if (setting)
+			return rtrn_dropped;
+		SetValueInt(data, local->connCount);
+		return rtrn_handled;
+
+	case TCP_MAX_CONNECTIONS_VAR:
+		if (setting)
+		{
+			int n = GetValueInt(data);
+			local->maxConns = (n > 0 && n <= MAX_CONNECTS) ? n : MAX_CONNECTS;
+		}
+		else
+			SetValueInt(data, local->maxConns);
+		return rtrn_handled;
+
+	case TCP_CONNECTION_MODE_VAR:
+		if (setting)
+		{
+			int m = GetValueInt(data);
+			if (m != TCP_CLIENT && m != TCP_SERVER)
+				return rtrn_dropped;
+			local->mode = m;
+		}
+		else
+			SetValueInt(data, local->mode);
+		return rtrn_handled;
+
+	case TCP_SECURITY_MODE_VAR:
+		if (setting)
+			local->securityMode = GetValueInt(data) ? 1 : 0;
+		else
+			SetValueInt(data, local->securityMode);
+		return rtrn_handled;
+
+	case TCP_SECURITY_CERT_VAR:
+		if (setting)
+			snprintf(local->cert, sizeof(local->cert), "%s", value);
+		else
+			SetValueStr(data, local->cert);
+		return rtrn_handled;
+
+	case TCP_SECURITY_KEY_VAR:
+		if (setting)
+			snprintf(local->key, sizeof(local->key), "%s", value);
+		else
+			SetValueStr(data, local->key);
+		return rtrn_handled;
+
+	default:
+		return rtrn_dropped;
+	}
+}
+
+/* THE message function - the reference's ObjectMessageFunc, switching on the
+   ids in tcp.h. This is the object's only entrance. */
+int Tcp_MessageFunc(NodeObj instance, MsgId message, NodeObj data)
+{
+	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+
+	if (!local)
+		return rtrn_dropped;
+
+	switch (message)
+	{
+	case TCP_SEND_DATA_MSG:
+		return Tcp_SendData(instance, local, data);
+
+	case TCP_START_MSG:
+		return Tcp_Start(instance, local);
+
+	case TCP_STOP_MSG:
+		return Tcp_Stop(instance, local);
+
+	case TCP_CLOSE_CONNECTION_MSG:
+		return Tcp_CloseConnection(local, data ? GetValueInt(data) : 0);
+
+	case TCP_REMOTE_HOST_VAR:
+	case TCP_REMOTE_PORT_VAR:
+	case TCP_LOCAL_PORT_VAR:
+	case TCP_CURRENT_CONNECTION_VAR:
+	case TCP_CONNECTION_COUNT_VAR:
+	case TCP_MAX_CONNECTIONS_VAR:
+	case TCP_CONNECTION_MODE_VAR:
+	case TCP_SECURITY_MODE_VAR:
+	case TCP_SECURITY_CERT_VAR:
+	case TCP_SECURITY_KEY_VAR:
+		return Tcp_Variable(local, message, data);
+
+	default:
+		return rtrn_dropped;
+	}
+}
+
+/* ---- the poll ------------------------------------------------------- */
+
+static int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 {
 	char buffer[TCP_CHUNK_SIZE + 1];
 	char * block;
 	unsigned int length;
 	int bytes, sent, fd;
-	NodeObj chunk;
 	struct sockaddr_in peer;
 	socklen_t peerlen;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 	Connection *conn, **link;
 
+	(void) taskdata;
+
 	if (reason == task_deactivate)
 		return rtrn_handled;
-
-	if (!local || !local->active)
+	if (!local)
 		return rtrn_dropped;
 
 	local->scheduled = 0;
 
-	/* a client connect in flight finishes here, never in a blocking wait */
+	if (local->state == OFF)
+		return rtrn_dropped;
+
 	if (local->connectfd >= 0)
 		Tcp_ConnectPoll(instance, local);
 
-	/* accept every connection currently waiting, not just one - several  */
-	/* can show up between poll ticks, and the listening socket itself    */
-	/* never stops listening to service them                              */
+	/* accept everyone waiting, up to TCP_MAX_CONNECTIONS_VAR */
 	for (; local->listenfd >= 0; )
 	{
 		peerlen = sizeof(peer);
 		fd = accept(local->listenfd, (struct sockaddr *)&peer, &peerlen);
 		if (fd < 0)
 			break;
+
+		if (local->connCount >= local->maxConns)
+		{
+			close(fd);
+			Tcp_Error(instance, local, "TCP: refused a connection, at the maximum");
+			continue;
+		}
 
 		Tcp_SetNonBlocking(fd);
 
@@ -478,10 +761,8 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 		conn->handshaking = 0;
 		conn->next = local->conns;
 		local->conns = conn;
+		local->connCount++;
 
-		/* a secure server wraps every accepted peer in a TLS session -    */
-		/* the handshake finishes across ticks, since the fd is non-       */
-		/* blocking (TCPObject.c's SSL_new/set_fd/accept, done right)      */
 		if (local->ctx)
 		{
 			conn->ssl = SSL_new(local->ctx);
@@ -499,19 +780,18 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 			}
 		}
 
-		DebugPrint ( "TCP accepted a connection.", __FILE__, __LINE__, OBJMSGHANDLING);
+		/* the reference lets an owner refuse by returning 0 here; a handler's
+		   verdict does not come back through DeliverMsg, so an owner that does
+		   not want this peer answers with TCPCloseConnection instead */
+		Tcp_Callback(instance, local, TCP_NEW_CONNECTION_CALLBACK, conn->id, NULL, 0);
 	}
 
-	/* service every accepted connection */
+	/* service every connection */
 	link = &local->conns;
 	while (*link)
 	{
 		conn = *link;
 
-		/* receive: each recv becomes one message out the Out port,   */
-		/* tagged with which connection it came from                  */
-		/* a session still shaking hands can carry no application data  */
-		/* yet - drive it forward and leave the rest of this tick alone */
 		if (conn->fd >= 0 && conn->handshaking)
 		{
 			Tcp_SslHandshake(conn);
@@ -527,39 +807,20 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 			bytes = Tcp_ConnRecv(conn, buffer, TCP_CHUNK_SIZE);
 
 			if (bytes > 0)
-			{
-				/* binary-safe: recv'd bytes may contain embedded NULs (a  */
-				/* WebSocket masking key, for instance) - the exact count  */
-				/* travels as a Length property beside the data itself     */
-				chunk = NewNode(STRING);
-				SetName(chunk, "Data");
-				SetValueStrLen(chunk, buffer, bytes);
-				SetPropInt(chunk, "Length", bytes);
-				SetPropLong(chunk, "Conn", conn->id);
-				SndMsg(instance, "Out", msg_send, chunk);
-			}
+				Tcp_Callback(instance, local, TCP_RECEIVED_DATA_CALLBACK,
+							 conn->id, buffer, bytes);
 			else if (bytes == 0)
-			{
-				/* the peer half-closed (their write side; recv==0 is EOF on   */
-				/* OUR read side, nothing more about their read side) - a      */
-				/* client that finishes sending before reading its response    */
-				/* (nc -q does exactly this) is completely ordinary, not gone. */
-				/* Closing outright here would abandon whatever is still       */
-				/* queued in sendbuf mid-transfer. Only the drain step below,  */
-				/* once sendbuf is actually empty, closes for real.            */
-				conn->peerClosed = 1;
-			}
+				conn->peerClosed = 1;	/* half-closed: drain, then close */
 			else if (errno != EAGAIN && errno != EWOULDBLOCK)
 			{
 				Tcp_SslClose(conn);
 				close(conn->fd);
 				conn->fd = -1;
-				conn->peerClosed = 1;	/* fall through: close-and-remove below, sendbuf is moot with fd gone */
-				DebugPrint ( "TCP receive error, connection dropped.", __FILE__, __LINE__, ERROR);
+				conn->peerClosed = 1;
+				Tcp_Error(instance, local, "TCP: receive error, connection dropped");
 			}
 		}
 
-		/* drain this connection's own send buffer to its peer */
 		if (conn->fd >= 0 && buffGetLength(conn->sendbuf) > 0)
 		{
 			length = buffGetBlockFromTail(conn->sendbuf, &block, TCP_CHUNK_SIZE);
@@ -577,35 +838,28 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 						close(conn->fd);
 						conn->fd = -1;
 						conn->peerClosed = 1;
-						DebugPrint ( "TCP send error, connection dropped.", __FILE__, __LINE__, ERROR);
+						Tcp_Error(instance, local, "TCP: send error, connection dropped");
 					}
 				}
-				else if ((unsigned int)sent < length)
-				{
-					/* put the unsent part back at the front */
+				else if ((unsigned int) sent < length)
 					buffGetUndoTail(conn->sendbuf, length - sent);
-				}
 			}
 		}
 
-		/* the peer half-closed (or errored) and everything queued for it */
-		/* has now gone out - safe to actually close, tell downstream just */
-		/* this one connection is done, and drop it from the list          */
 		if (conn->peerClosed && (conn->fd < 0 || buffGetLength(conn->sendbuf) == 0))
 		{
 			Tcp_SslClose(conn);
 			if (conn->fd >= 0)
 				close(conn->fd);
 
-			chunk = NewNode(STRING);
-			SetName(chunk, "Data");
-			SetPropLong(chunk, "Conn", conn->id);
-			SndMsg(instance, "Out", msg_eof, chunk);
+			Tcp_Callback(instance, local, TCP_REMOTE_CONNECTION_CLOSED_CALLBACK,
+						 conn->id, NULL, 0);
 
 			*link = conn->next;
 			buffDestroy(conn->sendbuf);
 			free(conn);
-			DebugPrint ( "TCP peer closed the connection.", __FILE__, __LINE__, OBJMSGHANDLING);
+			if (local->connCount > 0)
+				local->connCount--;
 			continue;
 		}
 
@@ -618,299 +872,44 @@ int Tcp_Poll(NodeObj instance, NodeObj taskdata, int reason)
 	return rtrn_handled;
 }
 
-/* subscription callback: buffer whatever arrives, the poll task sends it. */
-/* A Conn property picks one connection; absent or 0 broadcasts to every   */
-/* connected peer - what a Bridge's own shared-view event traffic wants,   */
-/* so every viewer sees the same thing, while a targeted reply (an HTTP    */
-/* response, a WebSocket handshake) reaches only the peer that asked.      */
-int Tcp_OnIn(NodeObj instance, MsgId message, NodeObj data)
-{
-	char * str;
-	int length;
-	long connId;
-	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
-	Connection *conn;
+/* ---- lifecycle ------------------------------------------------------ */
 
-	if (!local || !local->active)
-		return rtrn_dropped;
-
-	if (message != msg_send)
-		return rtrn_dropped;
-
-	/* a Length property means the sender already knows its exact byte  */
-	/* count (raw bytes that may hold embedded NULs, a WebSocket frame  */
-	/* for instance) - fall back to strlen for a plain text message     */
-	str = GetValueStr(data);
-	length = GetPropInt(data, "Length");
-	if (!length && str)
-		length = strlen(str);
-
-	if (!str || length <= 0)
-		return rtrn_handled;
-
-	connId = GetPropLong(data, "Conn");
-
-	if (connId)
-	{
-		for (conn = local->conns; conn; conn = conn->next)
-			if (conn->id == connId)
-			{
-				buffAdd(conn->sendbuf, str, length);
-				break;
-			}
-	}
-	else
-	{
-		for (conn = local->conns; conn; conn = conn->next)
-			buffAdd(conn->sendbuf, str, length);
-	}
-
-	return rtrn_handled;
-}
-
-/* control callback: a 0 on the Enable line is a full shutdown */
-int Tcp_OnEnable(NodeObj instance, MsgId message, NodeObj data)
-{
-	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
-
-	if (!local || message != msg_send)
-		return rtrn_dropped;
-
-	if (GetValueInt(data))
-	{
-		local->enabled = 1;
-		SetValueStr(GetPropNode(instance, "Enable"), "1");
-		/* re-enabling a shut down server does not restart it, */
-		/* activation is one shot for now                       */
-	}
-	else
-	{
-		local->enabled = 0;
-		SetValueStr(GetPropNode(instance, "Enable"), "0");
-
-		if (local->active)
-		{
-			Connection *conn, *next;
-
-			for (conn = local->conns; conn; conn = next)
-			{
-				next = conn->next;
-				Tcp_SslClose(conn);
-				if (conn->fd >= 0)
-					close(conn->fd);
-				buffDestroy(conn->sendbuf);
-				free(conn);
-			}
-			local->conns = NULL;
-
-			if (local->listenfd >= 0)
-			{
-				close(local->listenfd);
-				local->listenfd = -1;
-			}
-
-			/* the TLS context dies with the server it belonged to */
-			if (local->ctx)
-			{
-				SSL_CTX_free(local->ctx);
-				local->ctx = NULL;
-			}
-			SetPropStr(instance, "Secured", "0");
-
-			local->active = 0;
-			SetPropInt(instance, "State", Stopping);
-
-			/* untagged (Conn 0): every connection is gone, not just one, */
-			/* and the poll task, already armed, sees active 0 and stops  */
-			SndMsg(instance, "Out", msg_eof, NULL);
-
-			DebugPrint ( "TCP server shut down by its Enable line.", __FILE__, __LINE__, OBJMSGHANDLING);
-		}
-	}
-
-	return rtrn_handled;
-}
-
-/* bind, listen, and start the polling task */
-int Tcp_Activate(NodeObj instance, MsgId message, NodeObj data)
-{
-	int port, one = 1;
-	char * bindaddr;
-	struct sockaddr_in addr;
-	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
-
-	if (!local || local->active)
-		return rtrn_dropped;
-
-	/* CLIENT MODE: a RemoteAddr means dial out rather than listen. The
-	   connect is non-blocking and completes in the poll task, so the two
-	   modes share every read/write/close path below - a connection is a
-	   connection however it was made. */
-	{
-		char *remote = GetPropStr(instance, "RemoteAddr");
-		local->clientMode = (remote && remote[0]) ? 1 : 0;
-	}
-
-	if (local->clientMode)
-	{
-		local->secure = GetPropInt(instance, "Secure") ? 1 : 0;
-		if (local->secure && !Tcp_SslContext(instance, local))
-		{
-			DebugPrint("TCP client: secure requested but TLS could not start",
-					   __FILE__, __LINE__, ERROR);
-			return rtrn_dropped;
-		}
-
-		if (!Tcp_ConnectStart(instance, local))
-			return rtrn_dropped;
-
-		if (!local->task)
-			local->task = CreateTask(ObjGetTaskList());
-		local->active = 1;
-		SetPropInt(instance, "State", Running);
-		SetPropStr(instance, "Secured", local->ctx ? "1" : "0");
-
-		AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
-		local->scheduled = 1;
-		return rtrn_handled;
-	}
-
-	port = GetPropInt(instance, "LocalPort");
-	if (port < 1 || port > 65535)
-	{
-		DebugPrint ( "TCP has no usable LocalPort.", __FILE__, __LINE__, ERROR);
-		return rtrn_dropped;
-	}
-
-	local->listenfd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (local->listenfd < 0)
-	{
-		DebugPrint ( "TCP could not create a socket.", __FILE__, __LINE__, ERROR);
-		return rtrn_dropped;
-	}
-
-	/* let the port be reused right away between runs */
-	setsockopt(local->listenfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	/* LocalAddr picks the interface to listen on (e.g. 127.0.0.1); */
-	/* absent or empty means all interfaces, same as 0.0.0.0        */
-	bindaddr = GetPropStr(instance, "LocalAddr");
-	if (bindaddr && strlen(bindaddr))
-	{
-		addr.sin_addr.s_addr = inet_addr(bindaddr);
-		if (addr.sin_addr.s_addr == INADDR_NONE)
-		{
-			DebugPrint ( "TCP has an unusable LocalAddr.", __FILE__, __LINE__, ERROR);
-			close(local->listenfd);
-			local->listenfd = -1;
-			return rtrn_dropped;
-		}
-	}
-
-	addr.sin_port = htons(port);
-
-	if (bind(local->listenfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-	{
-		close(local->listenfd);
-		local->listenfd = -1;
-		DebugPrint ( "TCP could not bind its port.", __FILE__, __LINE__, ERROR);
-		return rtrn_dropped;
-	}
-
-	if (listen(local->listenfd, 25) < 0)
-	{
-		close(local->listenfd);
-		local->listenfd = -1;
-		DebugPrint ( "TCP could not listen on its port.", __FILE__, __LINE__, ERROR);
-		return rtrn_dropped;
-	}
-
-	Tcp_SetNonBlocking(local->listenfd);
-
-	/* a secure server builds its TLS context here, once, before the       */
-	/* first peer arrives. If Secure is on and the context cannot be       */
-	/* built, DO NOT fall back to serving in the clear - refuse to start.  */
-	local->secure = GetPropInt(instance, "Secure") ? 1 : 0;
-	if (local->secure && !Tcp_SslContext(instance, local))
-	{
-		close(local->listenfd);
-		local->listenfd = -1;
-		SetPropInt(instance, "State", Starting);
-		DebugPrint("TCP: secure mode requested but TLS could not start - not listening",
-				   __FILE__, __LINE__, ERROR);
-		return rtrn_dropped;
-	}
-
-	/* one task struct for the instance's whole life - see leaktest.py */
-	if (!local->task)
-		local->task = CreateTask(ObjGetTaskList());
-	local->active = 1;
-	SetPropInt(instance, "State", Running);
-	SetPropStr(instance, "Secured", local->ctx ? "1" : "0");
-
-	AddTaskMilli(local->task, POLL_MS, (FuncPtr)Tcp_Poll, msg_send, instance);
-	local->scheduled = 1;
-
-	DebugPrint ( "TCP server is listening.", __FILE__, __LINE__, OBJMSGHANDLING);
-
-	return rtrn_handled;
-}
-
+/* `data` is the reference's New(class, msgID, owner): the creator's node, the
+   BASE id it chose for these callbacks, and the port they arrive on. */
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance, port;
 	InstanceData * local = malloc(sizeof(InstanceData));
+	char * cb;
 
+	(void) message;
+
+	memset(local, 0, sizeof(InstanceData));
 	local->listenfd = -1;
-	local->conns = NULL;
-	local->nextConnId = 0;
-	local->task = NULL;
-	local->active = 0;
-	local->enabled = 1;
-	local->scheduled = 0;
-	local->ctx = NULL;
-	local->secure = 0;
-	local->clientMode = 0;
 	local->connectfd = -1;
+	local->state = OFF;
+	local->localPort = 8080;
+	local->maxConns = MAX_CONNECTS;
+	local->mode = TCP_SERVER;
+
+	if (data)
+	{
+		local->owner = (NodeObj) GetPropLong(data, "Owner");
+		local->msgBase = (int) GetPropLong(data, "MsgBase");
+		cb = GetPropStr(data, "Callback");
+		if (cb)
+			strncpy(local->callback, cb, sizeof(local->callback) - 1);
+	}
 
 	instance = NewNode(INTEGER);
-	SetName(instance, "TCP");
-	SetPropInt(instance, "LocalPort", 8080);
-	WatchableProp(instance, "LocalPort");
-
-	/* TLS: the VNOS reference's SecurityMode and its PEM cert/key. Off by */
-	/* default; when on, the cert and key must load or the server refuses  */
-	/* to listen at all rather than quietly serving in the clear.          */
-	/* client mode: set RemoteAddr (and RemotePort) and this object dials
-	   out instead of listening - the reference's TCP_CLIENT mode */
-	SetPropStr(instance, "RemoteAddr", "");
-	SetPropInt(instance, "RemotePort", 0);
-	SetPropStr(instance, "Connected", "0");
-
-	SetPropStr(instance, "Secure", "0");
-	SetPropStr(instance, "SslCert", "");
-	SetPropStr(instance, "SslKey", "");
-	SetPropStr(instance, "SslPass", "");
-	SetPropStr(instance, "Secured", "0");	/* readback: TLS actually running */
+	SetName(instance, "TCPSocket");
 	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
-	SetPropInt(instance, "Out", 0);		/* received bytes go out here */
 	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)Tcp_Activate);
 
-	/* input port: messages arriving here are sent to the peer */
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long)Tcp_OnIn);
-
-	/* enable port: a 0 on this line shuts the server down */
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long)Tcp_OnEnable);
+	/* the object's one entrance: every id in tcp.h arrives here */
+	SetPropStr(instance, "Msg", "");
+	port = GetPropNode(instance, "Msg");
+	SetPropLong(port, "OnMsg", (long)Tcp_MessageFunc);
 
 	RegisterInstance(class, instance);
 
@@ -921,29 +920,13 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
 	if (local)
 	{
-		Connection *conn, *next;
-
-		/* stop the poll task before freeing local, or a still-scheduled */
-		/* task fires later with a dangling instance pointer as its data */
 		if (local->task)
 			DeleteTask(local->task);
-
-		for (conn = local->conns; conn; conn = next)
-		{
-			next = conn->next;
-			Tcp_SslClose(conn);
-			if (conn->fd >= 0)
-				close(conn->fd);
-			buffDestroy(conn->sendbuf);
-			free(conn);
-		}
-
-		if (local->listenfd >= 0)
-			close(local->listenfd);
-		if (local->ctx)
-			SSL_CTX_free(local->ctx);
+		Tcp_Stop(instance, local);
 		free(local);
 	}
 
@@ -952,43 +935,33 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
-	NodeObj class;
+	NodeObj class = NewNode(INTEGER);
 	struct sigaction handle;
+
+	(void) message; (void) data;
 
 	/* a peer disappearing mid send must not kill the process */
 	memset(&handle, 0, sizeof(handle));
 	handle.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &handle, NULL);
 
-	class = NewNode(INTEGER);
-	SetName(class, "TCP");
+	SetName(class, "TCPSocket");
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 
 	ClassSelf = RegisterClass(library, class);
 
-	PublishProp(ClassSelf, "LocalPort", PROP_TEXTBOX, "8080");
-	PublishProp(ClassSelf, "RemoteAddr", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "RemotePort", PROP_TEXTBOX, "0");
-	PublishProp(ClassSelf, "Connected", PROP_LED, "0");
-	PublishProp(ClassSelf, "Secure", PROP_CHECKBOX, "0");
-	PublishProp(ClassSelf, "SslCert", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "SslKey", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "SslPass", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "Secured", PROP_LED, "0");
-	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "In", PROP_NULL, "");
-	PublishProp(ClassSelf, "Out", PROP_NULL, "");
-	PublishProp(ClassSelf, "State", PROP_LED, "1");
+	/* nothing is published: the interface is tcp.h, not a set of properties */
 
 	return rtrn_handled;
 }
 
 int ClassEnd(NodeObj library, MsgId message, NodeObj data)
 {
+	(void) message; (void) data;
+
 	UnRegisterClass(library, ClassSelf);
 	ClassSelf = NULL;
-
 	return rtrn_handled;
 }
 
@@ -996,7 +969,7 @@ void _init()
 {
 	NodeObj temp = NewNode(INTEGER);
 
-	SetName(temp, "TCP");
+	SetName(temp, "TCPSocket");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c660");
 	SetPropStr(temp, "Version", "1.0");

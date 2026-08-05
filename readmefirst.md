@@ -176,6 +176,45 @@ and app.js got smaller.
 **If it matters, it's in the engine; the GUI only asks and shows.**
 When a feature feels like it wants JavaScript, that feeling is the bug.
 
+## Before you build an object or a widget: read objects/skeleton/README.md
+
+The law splits in two on this side of the bridge, and it is the same law:
+
+- An **object** is behaviour. Its interface is a HEADER - `objects/udp/udp.h`,
+  `objects/network/tcp.h` - holding limits, an enum of verb and var ids from
+  `USER_MESSAGE_BASE`, and the macros that send them. No struct, so the
+  instance data cannot even be cast; no configuration properties; no state
+  readbacks; `PublishProp` called zero times. The instance carries ONE `"Msg"`
+  entry whose message function switches on the ids, and its replies go to the
+  `{owner, base, port}` handed over at creation - the owner picks the base, so
+  one owner holding several objects tells their replies apart.
+- A **widget** is presentation. It is a View of controls wired to its own
+  properties, it holds no behaviour, and when it drives an object that object
+  is **private state on its own struct** - no name, no path, no container,
+  nothing else can address it, and the widget destroys it. There is no such
+  thing as an "Inner": a named, path-registered member is a member, not an
+  engine.
+- **I/O comes as a pair**: `objects/udp` + `objects/udpport`,
+  `objects/network` + `objects/tcpport`. The panel holds no socket and the
+  object knows no panel; either is replaceable without the other, and a script
+  or a flow drives the same object the same way a person does.
+
+That is this document's law one layer down: **a panel is to its object what the
+browser is to the session** - it asks and it shows. And the reason opacity is
+not fussiness: anything exposed *will* be depended on. `tcp.c` published
+`In`/`Out`/`Connected`/`Secured`/`LocalAddr` and a `Conn` tag, and eight
+modules now rely on them, which is why undoing it needs a shim
+(`objects/tcpshim`, scaffolding, delete it when the last driver is converted).
+
+Write the header FIRST, port it verbatim if one exists, and implement to it -
+`objects/demo/*` carries a real interface per object, and those are the
+contracts, not the `.c` files beside them.
+
+`objects/skeleton/README.md` is the template and the lesson list for both
+kinds. Read it before writing either, and add to it when something new bites.
+
+---
+
 ## Status (2026-07-15): the repair list is executed
 
 All five repairs landed, each proven raw-first (testharness/rawtest.py,
