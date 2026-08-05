@@ -451,3 +451,102 @@ Working-discipline notes (these cost the most time):
 See FINDINGS.md for the still-open items: the read-through-a-link gap
 (an alias writes through but reads back None) and the InstanceStart
 settings-control timing.
+
+## Status (2026-08-04): the redundant entities, and building over a load
+
+A long session across the widgets, the harness, and save/load. Nearly
+every bug was a thing that existed twice - two copies of one value, two
+categories of instance, two sets of the same controls - and the repair
+was always deletion, never reconciliation.
+
+1. **`In` and `Out` on a control were a second copy of `Value`.** Every
+   control carried them and nothing needed them: a control's value IS its
+   property, and any node is subscribable. Removing them from all twelve
+   controls fixed a list of unrelated-looking bugs at once. There is no
+   port species here - `In`/`Out`/`Enable` are names - and the only thing
+   "reserved In/Out" means is a RENDERING: a stand-in dot drawn at a
+   control's edge so a reader can see which way the flow goes. It is
+   drawn in a different colour precisely because it is not a wire the
+   engine knows about. Presentation may invent a picture. It may not
+   invent an entity.
+
+2. **"Chrome" was a fake category, and it ate an hour of the user's
+   work.** The palette and the menus were marked session furniture and
+   excluded from save, from load, and from teardown. But the palette IS
+   content - the user arranges it, and a saved flow must come back
+   arranged the way it was saved. The category was a few lines in three
+   places and it silently discarded the thing a save exists for. It is
+   deleted: the palette and both menus are ordinary instances in `/Root`,
+   saved and restored like anything else, and the code that builds a
+   default palette runs only when there is nothing to restore. A category
+   whose whole purpose is to let one consumer skip things is the
+   special-case smell in its purest form.
+
+3. **A build runs OVER what a load restored, never beside it.** The
+   serializer drops LONG-typed properties on purpose: pointers (`local`,
+   `OnMsg`, `Activate`, task handles) are per-process facts that cannot
+   mean anything in a file. So a widget's build is not redundant after a
+   load - it exists to put back exactly what a file cannot carry. What it
+   must not do is make a SECOND set. `Widget_Create` is now get-or-create
+   (`Widget_Adopted` reports which happened): an adopted control keeps
+   the geometry the load restored - the file is the user's arrangement
+   and it wins - while the build re-makes the wiring. Building a parallel
+   set instead left the restored panel inert and the new one empty, which
+   is what a blank help panel is. `AddSubscription` now refuses a
+   duplicate `{Instance, Port}` on one source and upgrades a restored
+   record's Callback in place, so re-running a build cannot make every
+   message arrive twice.
+
+4. **A container gaining a member is invisible, and that is the real
+   gap.** A node's VALUE change fans out to its subscribers; a node
+   gaining a CHILD does not. Containment is a property on the child, so
+   the news travels to whoever was watching that child - nobody, for
+   something that did not exist a moment ago. That is why an MCP agent
+   view built itself correctly and appeared nowhere. The fix is not a new
+   event species: `RegisterPath` records the new path on the CONTAINER
+   (`LastMember`), which is an ordinary property write, which fans out to
+   whoever is watching the container. Every creator already passes
+   through `RegisterPath` - import, clone, a bridge create, an object
+   building its own panel - so one place covered all of them, and the
+   client just re-lists the container that changed.
+   **Still open: deletes and renames want the identical mechanism.**
+
+5. **Import knows the name; import must use it.** A view exported as
+   `Connect` came back as `View_1` because the fresh-name minter was fed
+   the CLASS name instead of the identity in the file. Only uniqueness
+   was ever in question - suffix the name it has, never mint from the
+   class and lose it.
+
+6. **Anything that appears must be on top - every time it appears.**
+   Raising a panel on first open is not the rule; a panel opened again
+   later must raise again. (The z-order counter this rides on still only
+   counts up; compressing it is on the list in CLAUDE.md.)
+
+7. **A save writes `name_YYYYMMDD_HHMMSS.flow` and never overwrites.**
+   Loading a bare name gets the newest version. Retention stays the
+   user's call for now; keep-last-N / keep-N-days is a later policy.
+
+Working-discipline notes - all of them repeats of things already written
+in this file, which is exactly why they are worth writing again:
+
+- **Measure. Do not guess.** A `make debug` target (unstripped, `-g
+  -O0`, nothing else changed) plus gdb turned a crash that had eaten a
+  day into one line: the freed task's link read back as
+  `0x656c62616e45` - "Enable" - which named the bug outright. Building
+  the target cost less than the guessing had already cost. The pattern
+  held everywhere: one browser probe settled the textbox failures, one
+  breakpoint settled 317 namespace misses. Every hour spent reasoning
+  about what MIGHT be happening was an hour not spent looking.
+- **Fix the test to test the thing it is looking for.** A harness
+  asserting on a literal filename broke the moment saves became
+  versioned - the flow itself was fine. Assert on the mechanism (a save
+  landed, named for what was saved), not on one spelling of its result.
+  And when a test needs something in a particular place, clone it there
+  or load a flow containing it, rather than grabbing whatever the
+  session happens to have left lying around.
+- **No warnings, ever.** Two had been riding along invisibly because
+  incremental builds never re-showed them. One tolerated warning becomes
+  a hundred, and then a real one is indistinguishable from the noise.
+- **Touch only what the change requires.** Drive-by tidying of adjacent
+  code, however correct it looks, is how a working feature dies inside a
+  diff that was supposed to be about something else.

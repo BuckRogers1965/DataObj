@@ -1,14 +1,39 @@
-# Building a widget
+# Building an object or a widget
 
 This directory is a **template**, not a widget. It does not build (its
 makefile is `Makefile.copy`, so the framework's `objects/*/Makefile` scan
-skips it) and it never loads. Copy it to start a real widget.
+skips it) and it never loads. Copy it to start a real widget; for a plain object with
+no panel, copy `objects/udp` instead (see section 4).
 
 A **widget** is an instrument-panel object: a composite View whose controls
 (Checkbox, MoButton, LED, Textbox, Dropdown, TextOut, Markdown, …) are laid
 out inside it by their X/Y and wired to the widget's own properties. The
 object declares; the view renders. Examples that ship: `objects/tcpport`,
 `objects/pulsegenerator`, `objects/stopwatch`, `objects/logicgate`.
+
+---
+
+## 0. Two kinds of thing, and why they come in pairs
+
+- An **object** is *function*. It has no controls and no panel: its whole
+  interface is the properties it carries and the named nodes you deliver
+  messages to. `objects/udp` (a UDP socket), `objects/tcp`, `objects/filter`,
+  `objects/queue`. Section 4.
+- A **widget** is *presentation*. It is an instrument panel: a composite View
+  whose controls are laid out by X/Y and wired to its own properties.
+  `objects/pulsegenerator`, `objects/logicgate`, `objects/stopwatch`.
+  Sections 1-3.
+- **I/O gets both, as a pair.** `objects/udp` + `objects/udpport`, and
+  `objects/tcp` + `objects/tcpport`: the panel holds no socket, it creates an
+  engine instance and drives it by message. That split is the point - the
+  engine knows datagrams and nothing about presentation, the panel knows
+  controls and nothing about sockets, either can be replaced without touching
+  the other, and anything else (a script, a Pulse, a flow) drives the same
+  engine the same way. Section 5.
+
+Which to write: no controls -> an object. An instrument panel over an existing
+engine -> a widget. Something with real I/O that people also need to operate by
+hand -> both, and keep them apart.
 
 ---
 
@@ -81,7 +106,114 @@ properties by name.
 
 ---
 
-## 4. Lessons learned the hard way (read these)
+## 4. Writing a plain object (no panel)
+
+Copy `objects/udp` - two files, `udp.c` and a `Makefile`, no `widget.h`. Its
+interface is the header comment, and that is the whole documentation an object
+needs: what you send it, what you set on it, what you subscribe to.
+
+**The interface is nodes, and nothing else:**
+
+| what | how | example |
+|---|---|---|
+| a verb | a property carrying an `OnMsg` handler - deliver a message to it and it acts | `Send` |
+| configuration | an ordinary property, read when it matters | `LocalPort`, `RemoteAddr` |
+| state to read | an ordinary property the object writes | `Listening` |
+| something happened | `SndMsg(instance, "<node>", msg_send, data)` - whoever cares subscribes | `Received` |
+
+**There is no `In`, no `Out`, and no direction.** A datagram, a chunk, a
+reading is a *message*, not a value parked in a property, and the node it goes
+out of is just the node the subscriber list lives on. Name nodes for what they
+are (`Send`, `Received`, `Clock`, `Enable`), never for which way something
+flows. The reply address rides on the message when it needs to: a UDP datagram
+arrives carrying its sender's `RemoteAddr`/`RemotePort`, so
+`Connect(Udp,"Received",Udp,"Send")` is a complete echo server.
+
+**The rest of the shape:**
+
+- **`Enable`** - `1`/`0`, and *every* handler honors it. If the thing can be
+  restarted, make `Enable=1` restart it (the UDP engine reopens its socket);
+  if activation is genuinely one-shot, say so in the header comment (TCP).
+- **One task for the instance's whole life.** `CreateTask` once, re-arm with
+  `AddTaskMilli` **from inside the task's own callback**, `DeleteTask` in
+  `InstanceEnd` before freeing `local`. A task created per activation is the
+  leak `testharness/leaktest.py` exists to catch.
+- **Poll, drain, re-arm.** Take *everything* waiting each tick (a loop until
+  `EAGAIN`), not one item - several arrive between ticks.
+- **`SndMsg` takes ownership** of the data node; do not `DelNode` it after.
+  Forwarding a message you received means sending a fresh copy.
+- **Filter only `msg_eof`.** See lesson 12 - `message != msg_send` swallows
+  every ordinary property write.
+- **Binary-safe payloads**: `SetValueStrLen` plus a `Length` property, so
+  embedded NULs survive.
+- `ClassStart` publishes the interface with `PublishProp`; `_init`/`_fini`
+  register the library node (Company, UUID, Version, Dependencies).
+
+---
+
+## 5. A widget that drives an engine (the pair)
+
+`objects/udpport` over `objects/udp` is the worked example; read it beside
+`objects/tcpport`. The panel is an ordinary widget (sections 1-3) plus these
+rules, every one of which was a bug first.
+
+**The engine is private state, not a member.**
+
+```c
+class  = <registry walk for the class by name>;        /* GetRegObjList -> libs -> classes */
+start  = (msgobj) GetPropLong(class, "InstanceStart");
+start(class, msg_initialize, NULL);
+engine = (NodeObj) GetPropLong(class, "LastInstance");
+Connect(engine, "Received", instance, "Callback");     /* your callback, handed over once */
+```
+
+Not `CreateObject` (it requires a location, and this thing has none) and not
+`Widget_Create` (that makes it a path-registered member sitting on the canvas -
+visible, addressable, wireable, and wrong). It lives on your `local` struct,
+nothing else knows it exists, so **you** must `DeleteInstance` it in
+`InstanceEnd`. Drive it by message: `SetOrDeliverProp(engine,"Enable","1")`,
+`DeliverMsg(engine,"Send",msg_send,chunk)`. Read back what it **achieved**
+(`Listening`), never what was asked for.
+
+**Setup is armed at BIRTH, and it is the only thing that decides what the panel
+says.** In `InstanceStart`: `CreateTask`, then arm a one-shot ~300ms out. Not in
+`Activate` - a loaded or imported instance never gets an `Activate` (nothing
+runs on a load), so those are exactly the instances that would come up with no
+setup at all. What setup does:
+
+1. clear the momentary commands (`Start`/`Stop` back to `"0"`);
+2. force the resting presentation **unconditionally** - lamps to stopped,
+   readouts dark - with no comparison against what the file said;
+3. close the engine for real if it is somehow open, rather than declaring it
+   shut;
+4. *then* honor the auto option: `if (AutoStart && Enable)` press the command
+   (`SetOrDeliverProp(instance,"Start","1")`), so one path does the starting.
+
+**Watch your own state.** A load installs its values *after* your panel is up,
+so subscribe to your own state property (`Connect(instance,"On",instance,
+"StateWatch")`) and, when a claim disagrees with what the engine is doing,
+**re-arm setup** rather than correcting inline - a correction made inside a
+fan-out re-enters through the other lamp and crashes the load.
+
+**Guard the arming with a flag** (`local->pending`, cleared when the callback
+fires). Arming an already-armed task inserts it twice and corrupts the
+scheduler's list - see lesson 14; this is the same rule with the flag spelled
+out, because the callback can now be armed from birth, from `Activate`, and from
+the state watch.
+
+**Commands are momentary.** After acting, write the command property back to
+`"0"`. Leaving `"1"` makes the press part of saved state, and on load it fans
+out to the panel's own MoButton, which sees a 0->1 edge and re-emits it down its
+wire as a genuine press - the widget starts itself with nobody asking.
+
+**Trace every decision, with the values it read.** These paths fail silently
+and invisibly; a one-line trace helper per decision (`UDPPort_Trace`) turns "it
+does nothing" into a log that names the value that was wrong. Debug it while
+you write it, not after someone reports it.
+
+---
+
+## 6. Lessons learned the hard way (read these)
 
 Every one of these cost real debugging time. The skeleton already does them
 right — don't undo them.
@@ -188,6 +320,31 @@ right — don't undo them.
     nothing else; any real action belongs behind an explicit trigger (a
     button, a wired `In`), gated on `Enable` like everything else.
 
+16. **Nothing runs on a load - the values are simply installed.** The loader
+    writes saved properties with `SetPropStr`, never `SetOrDeliverProp`, so no
+    handler runs. But the write still *fans out*, and a control wired both ways
+    turns that fan-out into a real gesture. So never trust a restored value that
+    describes what the process is *doing*: runtime state (running/idle lamps,
+    "ready" flags, a received payload) is not saved state, however it got into
+    the file. Force it at setup instead.
+
+17. **A widget saved while operating must come up stopped.** Whatever the file
+    says, the process just started: nothing is open, so the panel says nothing
+    is open. The auto option is the *only* way it comes back live, and that goes
+    through the same command press a person would make. A panel claiming a
+    socket it does not have is worse than a dead one.
+
+18. **`Activate` is not a lifecycle hook you can rely on.** Dragged instances
+    get it; loaded and imported ones do not. Anything that must happen for
+    *every* instance however it was born belongs on a task armed from
+    `InstanceStart`.
+
+19. **Test the combinations, running.** Save-while-running -> load, and
+    export-while-running -> import, with the auto option both off and on: four
+    cases, and they are not the same code path. Check the truth outside the GUI
+    (`ss -uanp` for the port, a plain socket for the traffic), not just what the
+    panel claims.
+
 Two things the core now handles for you (don't re-solve them):
 - **Two-way bindings are safe.** An unchanged data-property write no longer
   re-fans-out, so a control that both edits and reflects a property can't loop.
@@ -196,7 +353,7 @@ Two things the core now handles for you (don't re-solve them):
 
 ---
 
-## 5. Build & test
+## 7. Build & test
 
 ```
 make -C objects/<name>          # build just yours
@@ -205,8 +362,14 @@ make                            # or build everything
 ```
 
 Drive it headless over the raw protocol like the suites in `testharness/`
-(create-instance, set-property, subscribe). Open the Help panel and confirm
-your `README.md` renders.
+(create-instance, set-property, subscribe) - and drive it the way the browser
+does, by writing each **control's** own `Value`, not the widget's property: they
+are different paths and only one of them is what a user's click does. Open the
+Help panel and confirm your `README.md` renders.
+
+For anything with real I/O, prove it against something outside the framework (a
+plain socket, `ss -uanp`, `nc`), and run the four save/load/export/import cases
+from lesson 19 before calling it done.
 
 The long game (see `ROADMAP.md`): this per-widget boilerplate becomes a
 **Widget base object** so a new widget declares only its controls and logic,
