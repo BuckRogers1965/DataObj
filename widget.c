@@ -335,7 +335,11 @@ void Widget_BuildTable(NodeObj instance, WidgetItem *table)
 		{
 			NodeObj c = Widget_Ctl(parent, instance, t->cls, t->prop,
 								   t->x, t->y, t->w, t->h);
-			if (c && t->label != LABEL_NONE)
+			/* ALWAYS write it: LABEL_NONE means no caption, and the client
+			   defaults a MISSING LabelPos to "bottom" - so leaving it unwritten
+			   drew the caption anyway, under a button whose face already says
+			   the same word. Widget_LabelWord has said "none" all along. */
+			if (c)
 				SetPropStr(c, "LabelPos", Widget_LabelWord(t->label));
 		}
 	}
