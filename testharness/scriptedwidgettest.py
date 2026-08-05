@@ -204,7 +204,7 @@ def test_export_import(raw, r, home):
 
     raw.send({"cmd": "export-flow", "file": "sw_eitwin", "of": view})
     raw.wait_event(lambda e: e.get("event") == "flow-saved", timeout=6)
-    wait_file("saved/sw_eitwin.flow")
+    wait_file(newest_flow("saved/sw_eitwin"))
 
     raw.events = []
     raw.send({"cmd": "import-flow", "file": "sw_eitwin", "into": home})
@@ -268,6 +268,17 @@ def test_save_load(raw, r, home):
              "some loaded copy's Runner, triggered fresh, produces 'loadval_done'",
              "copy=%s runner=%s OutBox=%r" % (copy, crunner, out),
              out == "loadval_done")
+
+
+def newest_flow(base):
+    """A save writes base_YYYYMMDD_HHMMSS.flow - never a fixed name, so
+    nothing is ever overwritten. The stamp is fixed width, so the newest
+    version is just the greatest matching filename."""
+    import glob, os
+    hits = sorted(glob.glob(base + "_*.flow"))
+    if hits:
+        return hits[-1]
+    return base + ".flow"          # written before saves were versioned
 
 
 def wait_file(path, timeout=8.0):

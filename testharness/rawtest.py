@@ -493,9 +493,10 @@ def test_save_load(raw, r, home):
     raw.send({"cmd": "save-flow", "file": "rawtwin"})
     ev = raw.wait_event(lambda e: e.get("event") == "flow-saved")
     r.expect("save: a named flow lands in saved/",
-             "flow-saved for saved/rawtwin.flow",
+             "flow-saved for a stamped saved/rawtwin_<when>.flow",
              "%s" % (ev.get("file") if ev else None),
-             bool(ev) and ev.get("file") == "saved/rawtwin.flow")
+             bool(ev) and (ev.get("file") or "").startswith("saved/rawtwin")
+             and (ev.get("file") or "").endswith(".flow"))
 
     raw.send({"cmd": "list-flows"})
     files = []
@@ -505,8 +506,9 @@ def test_save_load(raw, r, home):
             break
         files.append(e.get("file"))
     r.expect("list-flows: the dialog's list is engine fact",
-             "rawtwin.flow among the listed flows",
-             "%s" % files, "rawtwin.flow" in files)
+             "a rawtwin version among the listed flows",
+             "%s" % files,
+             any(f.startswith("rawtwin") and f.endswith(".flow") for f in files))
 
     # destroy, then a named load resurrects it - value and all
     raw.send({"cmd": "delete-instance", "instance": home + "/SaveMe"})

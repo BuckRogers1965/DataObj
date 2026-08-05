@@ -235,6 +235,11 @@ function registerPanel(alias, panelEl, display, onToggle) {
   };
   panels[alias] = rec;
 
+  /* the engine records a container's newest member here, so anything that
+     appears inside this view - an import, a clone, an object building its
+     own children - announces itself without the creator having to know
+     who is watching. */
+  send({ cmd: 'subscribe', instance: alias, port: 'LastMember' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewOpen' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewPanelX' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewPanelY' });
@@ -1335,6 +1340,13 @@ function onPropertyChanged(alias, port, value) {
   /* every thing's panel, view and card alike, syncs the same way */
   const pnl = panels[alias];
   if (pnl) {
+    /* something new is in this container: ask what is there now. Same
+       re-list the client already does for root when a flow lands, but
+       aimed at the container that actually changed. */
+    if (port === 'LastMember') {
+      if (value) send({ cmd: 'list-instances', container: alias });
+      return;
+    }
     /* Open's stored value is the initial presentation only - after       */
     /* first paint, open/closed is this window's own business              */
     if (port === 'ReservedViewOpen' && !pnl.openApplied) {

@@ -35,9 +35,29 @@ static NSObj * GetPathIndex(void)
 
 void RegisterPath(char * path, NodeObj inst)
 {
+	NodeObj container;
+	char    cpath[300], *slash;
+
 	if (!path || !path[0] || !inst)
 		return;
 	NSInsert(GetPathIndex(), path, (long) inst);
+
+	/* the container just gained a member, and that is otherwise invisible:
+	   containment is a property on the CHILD, so its fan-out reaches
+	   whoever was already watching that child - nobody, for something that
+	   did not exist a moment ago. Recording the new path ON THE CONTAINER
+	   makes it an ordinary property write, which fans out to whoever is
+	   watching the container. This is the one place every creator meets:
+	   import, clone, a bridge create, an object building its own panel.
+	   A root has no container to tell. */
+	snprintf(cpath, sizeof(cpath), "%s", path);
+	slash = strrchr(cpath, '/');
+	if (!slash || slash == cpath)
+		return;
+	*slash = '\0';
+	container = ResolvePath(cpath);
+	if (container)
+		SetPropStr(container, "LastMember", path);
 }
 
 void UnregisterPath(char * path)

@@ -265,6 +265,17 @@ def test_clone_into_self_refused(raw, r, home):
              bool(err2))
 
 
+def newest_flow(base):
+    """A save writes base_YYYYMMDD_HHMMSS.flow - never a fixed name, so
+    nothing is ever overwritten. The stamp is fixed width, so the newest
+    version is just the greatest matching filename."""
+    import glob, os
+    hits = sorted(glob.glob(base + "_*.flow"))
+    if hits:
+        return hits[-1]
+    return base + ".flow"          # written before saves were versioned
+
+
 def wait_file(path, timeout=8.0):
     """Export is async (the Serializer walk and Writer drain run as scheduler
     tasks); wait for the file to exist and stop growing before importing it."""
@@ -294,7 +305,7 @@ def test_export_import_view_wiring(raw, r, home):
     # export just THIS view (not the whole session, unlike save-flow)
     raw.send({"cmd": "export-flow", "file": "eitwin", "of": view})
     raw.wait_event(lambda e: e.get("event") == "flow-saved", timeout=6)
-    wait_file("saved/eitwin.flow")
+    wait_file(newest_flow("saved/eitwin"))
 
     # import it back INTO this suite's view, so the copy's members announce here
     raw.events = []
