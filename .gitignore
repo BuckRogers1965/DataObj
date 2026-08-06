@@ -4,9 +4,10 @@
 Makefile.bak
 *.object
 framework
+build/unit_test
 .vscode
 objects/demo/
 testharness/logs/
-testharness/tests/the 
+testharness/tests/
 __pycache__/
 saved/
