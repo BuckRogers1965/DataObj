@@ -511,6 +511,7 @@ void BuildPalette(void){
 	NodeObj library, class, inst;
 	int slot, pass;
 	char alias[128];
+	char dbg[300];
 
 	/* no forced Mode, no Deletable protection: the palette is just a     */
 	/* View like Root or any panel, and everything in it deletes like     */
@@ -571,6 +572,13 @@ void BuildPalette(void){
 						SetPropInt(inst, "Y", 10 + (slot / 3) * 66);
 						slot++;
 
+						snprintf(dbg, sizeof(dbg),
+						         "palette pass=%d slot=%d %s at X=%s Y=%s size W=%s H=%s",
+						         pass, slot - 1, GetNameStr(class),
+						         GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
+						         GetPropStr(inst, "W"), GetPropStr(inst, "H"));
+						DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+
 						/* the alias is this instance's full path, same         */
 						/* convention as a client-created instance's /Root/...   */
 						/* (createInstance, app.js) - see the doc comment above  */
@@ -583,7 +591,13 @@ void BuildPalette(void){
 						/* no main view - not a placeable palette item (an atomic
 						   control lives INSIDE widgets, never on its own). Undo the
 						   create so it is not named/registered into the palette. */
+					{
+						snprintf(dbg, sizeof(dbg),
+						         "palette pass=%d %s has no main view - destroyed, no slot",
+						         pass, GetNameStr(class));
+						DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 						Widget_Destroy(inst);
+					}
 				}
 
 				class = GetNextSibling(class);
@@ -3403,6 +3417,24 @@ void UnregisterLibrary(NodeObj library){
 }
 
 NodeObj RegisterClass(NodeObj library, NodeObj class){
+	NodeObj existing;
+
+	/* a class name is the whole address space for creating one - two of them
+	   means CreateObject, the palette and every translator silently pick
+	   whichever the walk hits first. It happens when the same module is
+	   loaded from two paths (dlopen keys on the pathname, not the inode),
+	   so say so loudly and keep the one already registered. */
+	existing = FindClass(GetNameStr(class));
+	if (existing)
+	{
+		char dup[200];
+		snprintf(dup, sizeof(dup),
+		         "class '%s' is already registered - refusing the second one",
+		         GetNameStr(class));
+		DebugPrint(dup, __FILE__, __LINE__, ERROR);
+		return existing;
+	}
+
 	PrintRegInfo("Registering class '%s'", class);
 	AddChild(library, class);
 	//PrintNode(library);

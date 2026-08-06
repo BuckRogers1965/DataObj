@@ -428,7 +428,12 @@ void Init(NodeObj Main){
 void InstallObjects(void)
 {
 	DebugPrint ( "Entering Install Objects function.", __FILE__, __LINE__, PROG_FLOW);
-        ScanDir (".", ".object", (void *) LoadObject, 8, 0, PreOrder);
+	/* "objects", not ".": scanning down from the working directory picks up
+	   every .object anywhere below it, so a build tree or a test run that
+	   holds copies of the modules gets them loaded a SECOND time - same
+	   file, different pathname, so dlopen loads it again and every class
+	   registers twice (seen live: a palette with two of every control). */
+	ScanDir ("objects", ".object", (void *) LoadObject, 8, 0, PreOrder);
 
 	// once the objects are found and loaded then initialize them after this.
 

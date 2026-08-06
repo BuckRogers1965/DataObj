@@ -356,6 +356,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "UDP");
+	/* the node name is not the Name PROPERTY - PathOfInstance reads the
+	   property, and without it every registry walk logs an error and dumps
+	   this node. A private handle still has a name; it just has no path. */
+	SetPropStr(instance, "Name", "UDP");
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
 
