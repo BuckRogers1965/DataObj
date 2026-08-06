@@ -9,7 +9,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "widget.h"
-#include "objects/network/tcp.h"	/* the TCP object's interface - all this panel knows of it */
+#include "../network/tcp.h"	/* the TCP object's interface - all this panel knows of it */
 
 /* THIS PANEL'S base for its socket's callbacks. The object adds the ordinal
    from tcp.h, so a panel holding several objects gives each a different base

@@ -22,7 +22,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
-#include "objects/network/tcp.h"
+#include "../network/tcp.h"
 
 /* this shim's own base for the socket's callbacks - its number, not the
    object's, so an owner holding several objects keeps them apart */

@@ -642,6 +642,14 @@ DataTest (){
 	SetLong(long_do,  140224278132965);
 	printf("\nLong to string check This long %lu to string %s \n\n", GetLong(long_do), GetStr(long_do));
 
+	/* the test owns these five - DelData takes their converted strings with
+	   them, so the whole conversion matrix it just walked is accounted for */
+	DelData(str_do);
+	DelData(int_do);
+	DelData(hex_do);
+	DelData(real_do);
+	DelData(long_do);
+
 	
 	
 

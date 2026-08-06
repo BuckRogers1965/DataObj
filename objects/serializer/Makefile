@@ -7,7 +7,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=serializer.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -ggdb
 
@@ -17,14 +17,14 @@ OPT=-Wall -ggdb
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -43,13 +43,14 @@ serializer.o: /usr/include/bits/time64.h /usr/include/bits/types/__fpos_t.h
 serializer.o: /usr/include/bits/types/__mbstate_t.h
 serializer.o: /usr/include/bits/types/__fpos64_t.h
 serializer.o: /usr/include/bits/types/__FILE.h /usr/include/bits/types/FILE.h
-serializer.o: /usr/include/bits/types/struct_FILE.h /usr/include/bits/stdio_lim.h
-serializer.o: /usr/include/bits/floatn.h /usr/include/bits/floatn-common.h
-serializer.o: /usr/include/stdlib.h /usr/include/bits/waitflags.h
-serializer.o: /usr/include/bits/waitstatus.h /usr/include/sys/types.h
-serializer.o: /usr/include/bits/types/clock_t.h
+serializer.o: /usr/include/bits/types/struct_FILE.h
+serializer.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
+serializer.o: /usr/include/bits/floatn-common.h /usr/include/stdlib.h
+serializer.o: /usr/include/bits/waitflags.h /usr/include/bits/waitstatus.h
+serializer.o: /usr/include/sys/types.h /usr/include/bits/types/clock_t.h
 serializer.o: /usr/include/bits/types/clockid_t.h
-serializer.o: /usr/include/bits/types/time_t.h /usr/include/bits/types/timer_t.h
+serializer.o: /usr/include/bits/types/time_t.h
+serializer.o: /usr/include/bits/types/timer_t.h
 serializer.o: /usr/include/bits/stdint-intn.h /usr/include/endian.h
 serializer.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
 serializer.o: /usr/include/bits/byteswap.h /usr/include/bits/uintn-identity.h
@@ -62,9 +63,11 @@ serializer.o: /usr/include/bits/pthreadtypes.h
 serializer.o: /usr/include/bits/thread-shared-types.h
 serializer.o: /usr/include/bits/pthreadtypes-arch.h
 serializer.o: /usr/include/bits/atomic_wide_counter.h
-serializer.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
-serializer.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
-serializer.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
+serializer.o: /usr/include/bits/struct_mutex.h
+serializer.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
+serializer.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
+serializer.o: /usr/include/bits/types/locale_t.h
 serializer.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-serializer.o: ../../node.h ../../data.h ../../object.h ../../sched.h
-serializer.o: ../../callback.h ../../DebugPrint.h
+serializer.o: /usr/include/sched.h /usr/include/bits/sched.h
+serializer.o: /usr/include/bits/types/struct_sched_param.h
+serializer.o: /usr/include/bits/cpu-set.h

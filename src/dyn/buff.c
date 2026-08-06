@@ -1179,8 +1179,9 @@ buffResize (buff buffer, unsigned int length) {
 		obj->countAddMoveForward++;
 
 		/* copy the contents of the buffer forward */
-		/* we shouldn't need to use move mem here, there shouldn't be a memory overlap */
-		memcpy((char *)obj->buffer, (char *)obj->buffer+obj->tail, obj->head-obj->tail);
+		/* the ranges DO overlap whenever head-tail is larger than tail, which is
+		   most slides - dest < src makes memcpy get away with it, ASAN doesn't */
+		memmove((char *)obj->buffer, (char *)obj->buffer+obj->tail, obj->head-obj->tail);
 
 		/* put saved character back because we are at the beginning */
 		charPoint = (char *)obj->buffer;

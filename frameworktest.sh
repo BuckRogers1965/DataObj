@@ -7,5 +7,4 @@ pkill -x framework 2>/dev/null && sleep 1
 # -v 3 turns on the CLONE trace category (DebugPrint.c) so the step-by-step
 # of every clone prints; pass your own -v after to override, e.g.
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./build/
-#./build/framework -v 3 $@
-./build/framework $@
+./build/unit_test $@

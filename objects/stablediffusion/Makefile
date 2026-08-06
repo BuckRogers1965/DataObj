@@ -6,7 +6,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=stablediffusion.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -g
 
@@ -16,14 +16,14 @@ OPT=-Wall -g
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -102,6 +102,7 @@ stablediffusion.o: /usr/include/bits/types/struct_osockaddr.h
 stablediffusion.o: /usr/include/netinet/in.h /usr/include/bits/stdint-uintn.h
 stablediffusion.o: /usr/include/bits/in.h /usr/include/arpa/inet.h
 stablediffusion.o: /usr/include/netdb.h /usr/include/rpc/netdb.h
-stablediffusion.o: /usr/include/bits/netdb.h ../../node.h ../../data.h
-stablediffusion.o: ../../object.h ../../sched.h ../../callback.h
-stablediffusion.o: ../../DebugPrint.h ../../widget.h
+stablediffusion.o: /usr/include/bits/netdb.h /usr/include/sched.h
+stablediffusion.o: /usr/include/bits/sched.h
+stablediffusion.o: /usr/include/bits/types/struct_sched_param.h
+stablediffusion.o: /usr/include/bits/cpu-set.h

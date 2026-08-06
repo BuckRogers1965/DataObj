@@ -11,7 +11,7 @@ QJS_OBJ= $(subst .c,.o,$(QJS_SRC))
 
 GOAL=jsscript.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 QJS_DEFS=-DCONFIG_VERSION=\"2024-01-13\" -D_GNU_SOURCE
 
@@ -26,14 +26,14 @@ quickjs/%.o : quickjs/%.c
 all: $(OBJECTS) $(QJS_OBJ) $(GOAL)
 
 $(GOAL): $(OBJECTS) $(QJS_OBJ)
-	ld  -shared -L../../ -lframework $(OBJECTS) $(QJS_OBJ) -lm -lpthread -o $(GOAL)
+	ld  -shared $(OBJECTS) $(QJS_OBJ) -lm -lpthread -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(QJS_OBJ) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -75,8 +75,9 @@ jsscript.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 jsscript.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 jsscript.o: /usr/include/bits/types/locale_t.h
 jsscript.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-jsscript.o: /usr/include/sys/time.h ../../node.h ../../data.h ../../object.h
-jsscript.o: ../../sched.h ../../callback.h ../../DebugPrint.h
-jsscript.o: quickjs/quickjs.h
+jsscript.o: /usr/include/sys/time.h /usr/include/sched.h
+jsscript.o: /usr/include/bits/sched.h
+jsscript.o: /usr/include/bits/types/struct_sched_param.h
+jsscript.o: /usr/include/bits/cpu-set.h quickjs/quickjs.h
 jsscript.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint.h
 jsscript.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint-gcc.h

@@ -6,7 +6,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=bridge.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -g
 
@@ -16,14 +16,14 @@ OPT=-Wall -g
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -71,5 +71,9 @@ bridge.o: /usr/include/bits/pthread_stack_min-dynamic.h
 bridge.o: /usr/include/bits/pthread_stack_min.h
 bridge.o: /usr/include/bits/dirent_ext.h /usr/include/sys/stat.h
 bridge.o: /usr/include/bits/stat.h /usr/include/bits/struct_stat.h
-bridge.o: ../../node.h ../../data.h ../../object.h ../../sched.h
-bridge.o: ../../callback.h ../../DebugPrint.h
+bridge.o: /usr/include/time.h /usr/include/bits/time.h
+bridge.o: /usr/include/bits/types/struct_tm.h
+bridge.o: /usr/include/bits/types/struct_itimerspec.h /usr/include/sched.h
+bridge.o: /usr/include/bits/sched.h
+bridge.o: /usr/include/bits/types/struct_sched_param.h
+bridge.o: /usr/include/bits/cpu-set.h

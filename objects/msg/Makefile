@@ -7,7 +7,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=msg.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -g
 
@@ -17,14 +17,14 @@ OPT=-Wall -g
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -44,5 +44,4 @@ msg.o: /usr/include/bits/types/__mbstate_t.h
 msg.o: /usr/include/bits/types/__fpos64_t.h /usr/include/bits/types/__FILE.h
 msg.o: /usr/include/bits/types/FILE.h /usr/include/bits/types/struct_FILE.h
 msg.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
-msg.o: /usr/include/bits/floatn-common.h ../../node.h ../../data.h
-msg.o: ../../object.h ../../DebugPrint.h ../../callback.h
+msg.o: /usr/include/bits/floatn-common.h

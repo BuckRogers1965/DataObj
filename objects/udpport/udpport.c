@@ -10,7 +10,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "widget.h"
-#include "objects/udp/udp.h"	/* the UDP object's interface - all this widget knows of it */
+#include "../udp/udp.h"	/* the UDP object's interface - all this widget knows of it */
 
 /* THIS PANEL'S id for replies from its UDP object, as the reference widget
    picks its own (UDP_CALLBACK 0x5001). It is the owner's number, not the

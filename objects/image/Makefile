@@ -6,7 +6,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=image.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -g
 
@@ -16,14 +16,14 @@ OPT=-Wall -g
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework $(OBJECTS) -o $(GOAL)
+	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)
@@ -63,5 +63,6 @@ image.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 image.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 image.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 image.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-image.o: ../../node.h ../../data.h ../../object.h ../../sched.h
-image.o: ../../callback.h ../../DebugPrint.h
+image.o: /usr/include/sched.h /usr/include/bits/sched.h
+image.o: /usr/include/bits/types/struct_sched_param.h
+image.o: /usr/include/bits/cpu-set.h

@@ -11,7 +11,7 @@ GOAL=tcp.object
 # would otherwise find THIS PROJECT's sched.h instead of the C library's.
 # -iquote keeps "quoted" includes finding our headers and leaves angle-
 # bracket includes to the system, which is exactly the distinction wanted.
-INCLUDES=-iquote../..
+INCLUDES=-iquote../../src
 
 OPT=-Wall -g
 
@@ -21,7 +21,7 @@ OPT=-Wall -g
 all: $(OBJECTS) $(GOAL)
 
 $(GOAL): $(OBJECTS)
-	ld  -shared -L../../ -lframework -lssl -lcrypto $(OBJECTS) -o $(GOAL)
+	ld  -shared -lssl -lcrypto $(OBJECTS) -o $(GOAL)
 
 clean:
 	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
@@ -30,7 +30,7 @@ clean:
 # so depend uses a plain -I and is told where stddef.h lives
 # openssl's opensslconf.h is multiarch, and without it its macros.h
 # raises an API-level error at makedepend (not at compile) time
-DEPINC=-I../.. -I/usr/include/x86_64-linux-gnu \
+DEPINC=-I../../src -I/usr/include/x86_64-linux-gnu \
        -I$(shell $(CC) -print-file-name=include)
 
 depend:
@@ -166,7 +166,10 @@ tcp.o: /usr/include/x86_64-linux-gnu/bits/pthread_stack_min.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/posix2_lim.h
 tcp.o: /usr/include/openssl/cryptoerr.h /usr/include/openssl/symhacks.h
 tcp.o: /usr/include/openssl/cryptoerr_legacy.h /usr/include/openssl/core.h
-tcp.o: /usr/include/pthread.h ../../sched.h ../../callback.h
+tcp.o: /usr/include/pthread.h /usr/include/sched.h
+tcp.o: /usr/include/x86_64-linux-gnu/bits/sched.h
+tcp.o: /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h
+tcp.o: /usr/include/x86_64-linux-gnu/bits/cpu-set.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/setjmp.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/types/struct___jmp_buf_tag.h
 tcp.o: /usr/include/openssl/comperr.h /usr/include/openssl/bio.h
@@ -194,5 +197,4 @@ tcp.o: /usr/include/openssl/sslerr.h /usr/include/openssl/sslerr_legacy.h
 tcp.o: /usr/include/openssl/prov_ssl.h /usr/include/openssl/ssl2.h
 tcp.o: /usr/include/openssl/ssl3.h /usr/include/openssl/tls1.h
 tcp.o: /usr/include/openssl/dtls1.h /usr/include/openssl/srtp.h
-tcp.o: /usr/include/openssl/err.h ../../node.h ../../data.h ../../object.h
-tcp.o: ../../DebugPrint.h ../../dyn/buff.h
+tcp.o: /usr/include/openssl/err.h tcp.h
