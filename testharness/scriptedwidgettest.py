@@ -327,7 +327,7 @@ def main():
         close_new_children(raw, home, before)
 
     raw.close()
-    sys.exit(1 if r.summary() else 0)
+    sys.exit(min(r.summary(), 254))	# the return code IS the failure count
 
 
 if __name__ == "__main__":

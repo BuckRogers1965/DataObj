@@ -137,7 +137,7 @@ def main():
              "the untouched data path delivers the real 0xA6 byte",
              "0xA6 present=%s" % (RAW_MARK in raw), RAW_MARK in raw)
 
-    sys.exit(1 if r.summary() else 0)
+    sys.exit(min(r.summary(), 254))	# the return code IS the failure count
 
 
 def _invalid_utf8(b):

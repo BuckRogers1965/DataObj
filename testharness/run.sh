@@ -1,203 +1,454 @@
-#!/bin/bash
+#!/bin/sh
 #
-# GUI test harness runner: the whole ritual, from scratch, on the real
-# default port - kill any running server, make clean, make, start a fresh
-# server, drive it with a headless chromium, clean up.
+# The whole suite, run against several builds of the core AT THE SAME TIME.
 #
-#   ./testharness/run.sh            # default port 8083
-#   ./testharness/run.sh -v         # verbose: every check prints, pass or fail
-#   PORT=9090 ./testharness/run.sh  # somewhere else if you must
+# Each variant gets its own core build, its own framework on its own ports, its
+# own chromium, and its own log directory - so nothing steps on anything else,
+# and your desktop framework on the production port keeps running throughout.
+#
+#   testharness/tests/<stamp>/<variant>/build/      that variant's .o/.so/exes
+#   testharness/tests/<stamp>/<variant>/<suite>.log one log per suite
+#   testharness/tests/<stamp>/report.txt            rc per suite per variant
+#
+#   ./testharness/run.sh              # every variant, every suite
+#   ./testharness/run.sh -v           # verbose suites
+#   VARIANTS=debug ./testharness/run.sh
+#   SUITES="unit_test rawtest" ./testharness/run.sh
 #
 cd "$(dirname "$0")/.." || exit 1
 
-# -v as an argument or VERBOSE=1 in the environment - either turns on
-# every suite's full expected/observed output for passing tests too
-for arg in "$@"; do
-    [ "$arg" = "-v" ] && VERBOSE=1
-done
-
-PORT="${PORT:-8083}"
-CDP_PORT="${CDP_PORT:-9223}"
-LOGDIR="testharness/logs"
-mkdir -p "$LOGDIR"
-
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:."
-
-CHROME="$(command -v chromium || command -v chromium-browser || command -v google-chrome)"
-if [ -z "$CHROME" ]; then
-    echo "no chromium/google-chrome found - the harness drives a real browser" >&2
-    exit 1
-fi
-
-# the tests run against a freshly built server, always - and a fresh
-# browser: a stale debug-port chromium would silently hijack the session
-echo "stopping any running framework ..."
-pkill -x framework 2>/dev/null
-pkill -f "remote-debugging-port=$CDP_PORT" 2>/dev/null
-sleep 1
-
-echo "make clean && make ..."
-make clean > "$LOGDIR/build.log" 2>&1
-make >> "$LOGDIR/build.log" 2>&1
-# the root Makefile does not propagate sub-make failures - a module that
-# fails to compile just quietly never produces its .object; catch it here
-if grep -qE '\*\*\*|Error [0-9]' "$LOGDIR/build.log"; then
-    echo "build failed - see $LOGDIR/build.log" >&2
-    grep -B4 -E '\*\*\*|Error [0-9]' "$LOGDIR/build.log" | tail -20 >&2
-    exit 1
-fi
-
-# warnings are kept at zero (core and modules alike) - a new one is a
-# regression, and the silent sub-makes would otherwise swallow it
-if grep -q 'warning:' "$LOGDIR/build.log"; then
-    echo "build has compiler warnings - the tree builds warning-free, keep it that way" >&2
-    grep 'warning:' "$LOGDIR/build.log" | head -10 >&2
-    exit 1
-fi
-
-# the server runs on its own defaults - 0.0.0.0:8083 - reachable from the
-# whole LAN, so you can point YOUR browser at it and watch the tests drive
-# the shared session live
-./framework -ip 0.0.0.0 -port "$PORT" > "$LOGDIR/server.log" 2>&1 &
-SERVER_PID=$!
-
-"$CHROME" --headless=new --remote-debugging-port="$CDP_PORT" --window-size=1400,950 \
-          --no-sandbox --disable-gpu about:blank > "$LOGDIR/chrome.log" 2>&1 &
-CHROME_PID=$!
-
-# only the browser is ours to clean up - the freshly built, freshly
-# tested server is LEFT RUNNING so you can point a browser at it and
-# dissect what every test staged (each test's leftovers live in its own
-# labelled view: CloneTest, AliasTest, OptionsTest, ...)
-cleanup() { kill "$CHROME_PID" 2>/dev/null; }
-trap cleanup EXIT
-
-# wait until the server actually answers a WebSocket handshake - and
-# refuse to run against a server that never does
-UP=0
-echo "waiting for the server on port $PORT ..."
-for i in $(seq 1 60); do
-    if python3 -c "
-import socket, base64, os, sys
-try:
-    s = socket.create_connection(('127.0.0.1', $PORT), timeout=2)
-    key = base64.b64encode(os.urandom(16)).decode()
-    s.sendall(('GET / HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % key).encode())
-    s.settimeout(2); d = s.recv(200); s.close()
-    sys.exit(0 if b'101' in d else 1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
-        UP=1
-        break
-    fi
-    sleep 1
-done
-if [ "$UP" != 1 ]; then
-    echo "the server never answered on port $PORT - see $LOGDIR/server.log" >&2
-    tail -20 "$LOGDIR/server.log" >&2
-    exit 1
-fi
-
-# if the port was already taken (a live dev server, say) OUR framework
-# failed to bind and the browser would silently test whatever is running
-# there instead - refuse, loudly
-if grep -q "could not bind its port" "$LOGDIR/server.log"; then
-    echo "port $PORT is already in use - the harness must run its own server." >&2
-    echo "use PORT=<free port> ./testharness/run.sh" >&2
-    exit 1
-fi
-
-sleep 2   # let chromium's debug endpoint come up too
-
-# Each suite prints ONLY its failures plus one summary line - a green run
-# is four lines total, on purpose (there will be hundreds of tests; a
-# passing report nobody reads is pure cost). Pass -v to any of them by
-# hand to watch every check.
-#
-# Ordered simplest/foundational first, most complex/slowest last: a
-# failure in a simple suite means every suite built on top of it is
-# unreliable signal for the same root cause, so reading top-to-bottom
-# tells you where to look first. Whether to stop there is a call for
-# whoever is watching, not something this script decides for them - it
-# runs every suite through and reports the first failing exit code at
-# the end.
+for arg in "$@"; do [ "$arg" = "-v" ] && VERBOSE=1; done
 VERBOSE="${VERBOSE:+-v}"
 
-# the verbs themselves: birth, naming, stamping, internals, save/load,
-# move, delete - the readme's harness rule: every mechanism is proven
-# through the raw JSON protocol (port 8091, no browser) first
-python3 testharness/rawtest.py --host 127.0.0.1 --port 8091 $VERBOSE
-RAW_RC=$?
+STAMP=$(date +%Y%m%d_%H%M%S)
+ROOT=testharness/tests/$STAMP
+INC="-Isrc -Isrc/dyn -Wall -Wextra"
 
-# connections: every wire is listed, announced, disconnectable, scrubbed
-# on sink delete, and chains - what Connect mode draws and the "x" undoes.
-# Nearly everything below wires objects together, so this comes early.
-python3 testharness/connectiontest.py --host 127.0.0.1 --port 8091 $VERBOSE
-CONN_RC=$?
+# name|flags|port offset. Ports are base+offset, so variants never collide with
+# each other or with the production instance on 8083.
+ALL_VARIANTS="debug|-O0 -g3 -fno-omit-frame-pointer -fno-inline|1
+release|-O3 -march=native -flto=auto|2
+asan|-O1 -g -fno-omit-frame-pointer -fsanitize=address|3
+ubsan|-O1 -g -fsanitize=undefined -fno-sanitize-recover=all|4
+gcov|-O0 -g --coverage|5"
 
-# allocation accounting: create/destroy and message-burst cycles must
-# come back to rest - a counter that grows and never shrinks is a leak
-python3 testharness/leaktest.py --host 127.0.0.1 --port 8091 $VERBOSE
-LEAK_RC=$?
+# simplest first, browser last - a failure in an early suite makes the later
+# ones unreliable signal for the same root cause
+ALL_SUITES="unit_test rawtest connectiontest leaktest flowtest viewclonetest jstest scriptboxtest scriptedwidgettest widgettest tcpporttest guitest"
+SUITES=${SUITES:-$ALL_SUITES}
 
-# the dataflow flows that used to boot inside main.c (cat, filter/gate,
-# queue/stack, tcp echo) - same wiring, built over the raw protocol,
-# asserting on subscribed events instead of printing probes
-python3 testharness/flowtest.py --host 127.0.0.1 --port 8091 $VERBOSE
-FLOW_RC=$?
+# overridable so a second run can be pointed somewhere else - two runs on the
+# same bases silently measure each other's engines (seen: 2026-08-05)
+WEB_BASE=${WEB_BASE:-8083}; RAW_BASE=${RAW_BASE:-8091}; CDP_BASE=${CDP_BASE:-9223}
 
-# deep-cloning a view: members, aliases AND the wires between them, over
-# clone, clone-of-clone, and save/load - proven by driving the copies,
-# never by reading structure back
-python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091 $VERBOSE
-VC_RC=$?
+# every step says what it is about to do, with a timestamp - a long silent
+# phase is indistinguishable from a hang
+say() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*"; }
 
-# the JS language host (QuickJS): a script as a dataflow object AND as a
-# bridge client speaking the JSON protocol - the second language proving
-# the "language host is a bridge" pattern
-python3 testharness/jstest.py --host 127.0.0.1 --port 8091 $VERBOSE
-JS_RC=$?
+# Start a child that the KERNEL kills when this script dies - PR_SET_PDEATHSIG.
+# A trap only covers clean exits and Ctrl-C; this covers the script being
+# kill -9'd or crashing, which is what left eight orphaned frameworks behind.
+#   pdeath <cwd> <logfile> <command...>   -> sets PDEATH_PID
+# No subshell: the wrapper's parent must be THIS script, or the death signal is
+# anchored to something that exits immediately.
+pdeath() {
+	pd_cwd=$1; pd_log=$2; shift 2
+	python3 - "$pd_cwd" "$pd_log" "$@" <<'PY' &
+import ctypes, os, signal, subprocess, sys
+cwd, log, cmd = sys.argv[1], sys.argv[2], sys.argv[3:]
+os.chdir(cwd)
+def die_with_parent():
+    ctypes.CDLL("libc.so.6").prctl(1, signal.SIGTERM)   # 1 = PR_SET_PDEATHSIG
+with open(log, "wb") as f:
+    p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT,
+                         preexec_fn=die_with_parent)
+    sys.exit(p.wait())
+PY
+	PDEATH_PID=$!
+}
 
-# the ScriptBox shell: discovers script hosts, runs code, collects output,
-# swaps languages - depends on the language hosts above already working
-python3 testharness/scriptboxtest.py --host 127.0.0.1 --port 8091 $VERBOSE
-SB_RC=$?
+CHROME="$(command -v chromium || command -v chromium-browser || command -v google-chrome)"
+[ -z "$CHROME" ] && echo "no chromium found - guitest needs a real browser" >&2
 
-# scripted composite widgets (a Lua Runner reaching siblings by path,
-# sibget/sibset) through clone, alias, export/import, and save/load -
-# the MCPSource agent-widget pattern's own twin, self-contained
-python3 testharness/scriptedwidgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
-SW_RC=$?
+# ---- the objects are shared: build them once, the normal way ----------------
+mkdir -p "$ROOT/log"
+say "run $STAMP -> $ROOT   (logs in log/, summary in report.txt)"
+say "suites: $SUITES"
+say "chromium: ${CHROME:-none found}"
+say "building the shared objects (make, log: $ROOT/objects-build.log) - this is the slow one ..."
+make > "$ROOT/log/objects-build.log" 2>&1
+say "objects built: $(ls objects/*/*.object 2>/dev/null | wc -l) modules, $(wc -l < "$ROOT/log/objects-build.log") lines of output"
+if grep -qE '\*\*\*|Error [0-9]' "$ROOT/log/objects-build.log"; then
+	echo "build failed - see $ROOT/objects-build.log" >&2; exit 1
+fi
+if grep -q 'warning:' "$ROOT/log/objects-build.log"; then
+	echo "build has compiler warnings - the tree builds warning-free, keep it that way" >&2
+	grep 'warning:' "$ROOT/log/objects-build.log" | head -10 >&2; exit 1
+fi
 
-# the scripted composite widget: a View with container In/Out ports, inner
-# controls, and a script that puppets them - the most composed non-browser
-# suite (clone infra + connections + a language host all at once)
-python3 testharness/widgettest.py --host 127.0.0.1 --port 8091 $VERBOSE
-WIDGET_RC=$?
+# ---- one core build per variant, in parallel -------------------------------
+pick_variants() {
+	echo "$ALL_VARIANTS" | while IFS='|' read -r v flags off; do
+		[ -n "$v" ] || continue
+		case " ${VARIANTS:-$( echo "$ALL_VARIANTS" | cut -d'|' -f1 | tr '\n' ' ')} " in
+			*" $v "*) printf '%s|%s|%s\n' "$v" "$flags" "$off" ;;
+		esac
+	done
+}
 
-# the TCP instrument panel (ported from VNOS): a front end driving a
-# contained TCP engine, proven over a real socket - real I/O, so it goes
-# after everything that can be proven without one
-python3 testharness/tcpporttest.py --host 127.0.0.1 --port 8091 $VERBOSE
-TCPP_RC=$?
+pick_variants > "$ROOT/log/variants"
+say "variants: $(cut -d'|' -f1 "$ROOT/log/variants" | tr '\n' ' ')"
+while IFS='|' read -r v flags off; do
+	say "[$v] building core: $flags"
+	mkdir -p "$ROOT/$v/build" "$ROOT/$v/log"
+	( make --no-print-directory BUILD="$ROOT/$v/build" OPT="$flags $INC" \
+	       "$ROOT/$v/build/framework" "$ROOT/$v/build/unit_test" \
+	       > "$ROOT/$v/log/build.log" 2>&1; echo $? > "$ROOT/$v/log/build.rc" ) &
+done < "$ROOT/log/variants"
+wait
+while IFS='|' read -r v f o; do
+	say "[$v] core build return code=$(cat "$ROOT/$v/log/build.rc" 2>/dev/null)"
+done < "$ROOT/log/variants"
 
-# and the browser last, proving presentation: gestures emit the right
-# verb, events paint the right pixels - the slowest and most fragile
-# suite (a real headless chromium), so nothing before it wastes those
-# minutes when there's already a simpler failure to fix first
-python3 testharness/guitest.py --app "http://127.0.0.1:$PORT" --cdp "$CDP_PORT" $VERBOSE
-RC=$?
+# ---- run every suite against every variant, variants in parallel -----------
+# ask a variant's own bridge to write the live root into <variant>/saved/
+save_root() {   # $1 = raw port, $2 = file name
+	python3 - "$1" "$2" <<'PY' 2>/dev/null
+import json, socket, sys, time
+port, name = int(sys.argv[1]), sys.argv[2]
+try:
+    s = socket.create_connection(("127.0.0.1", port), timeout=3)
+    s.sendall(json.dumps({"cmd": "save-flow", "of": "/Root", "file": name}).encode())
+    time.sleep(1.5)
+    s.close()
+except Exception:
+    sys.exit(1)
+PY
+}
 
-echo "logs: $LOGDIR/server.log, $LOGDIR/chrome.log   server up on http://localhost:$PORT (pid $SERVER_PID)"
-[ "$RAW_RC" != 0 ] && exit "$RAW_RC"
-[ "$CONN_RC" != 0 ] && exit "$CONN_RC"
-[ "$LEAK_RC" != 0 ] && exit "$LEAK_RC"
-[ "$FLOW_RC" != 0 ] && exit "$FLOW_RC"
-[ "$VC_RC" != 0 ] && exit "$VC_RC"
-[ "$JS_RC" != 0 ] && exit "$JS_RC"
-[ "$SB_RC" != 0 ] && exit "$SB_RC"
-[ "$SW_RC" != 0 ] && exit "$SW_RC"
-[ "$WIDGET_RC" != 0 ] && exit "$WIDGET_RC"
-[ "$TCPP_RC" != 0 ] && exit "$TCPP_RC"
-exit $RC
+# ask a variant's framework to shut ITSELF down: Main's State is an ordinary
+# property, /Main an ordinary path, set-property an existing command - so the
+# quit verb already exists (IsRunning reads State, Stopping=0, main.c:338).
+# It matters for the sanitizer builds: TERM is a signal death, and LeakSanitizer
+# only runs its exit-time check when the process exits normally.
+ask_to_quit() {  # $1 = raw port
+	python3 - "$1" <<'PY' 2>/dev/null
+import json, socket, sys, time
+try:
+    s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=3)
+    s.sendall((json.dumps({"cmd": "set-property", "instance": "/Main",
+                           "prop": "State", "value": "0"}) + "\n").encode())
+    time.sleep(0.5)
+    s.close()
+except Exception:
+    sys.exit(1)
+PY
+}
+
+# One place that turns a suite's exit status into a cell: CRASH, LEAK or a
+# count.  $5 is the pid of the engine the suite needed, or "" when it needed
+# none - unit_test links libframework directly and talks to nobody, so an
+# absent engine is not evidence of anything for it.  Sets LAST_CRASH.
+record() {   # $1 = variant  $2 = variant dir  $3 = suite  $4 = rc  $5 = server pid
+	local v=$1 d=$2 s=$3 rc=$4 srv=$5 crash=0 leak=0
+
+	# crash, in the order the evidence is trustworthy: the engine is gone;
+	# the sanitizer bailed out (ASAN _exit(1)s by default on Linux, so its
+	# abort is NOT a signal death and rc alone cannot see it); the suite
+	# could not reach the engine; the suite itself died by signal.
+	# LeakSanitizer is deliberately NOT in that list - a leak is reported
+	# at exit, AFTER the suite ran every test, so it is a finding on a
+	# suite that worked, not a suite that died.
+	if [ -n "$srv" ] && ! kill -0 "$srv" 2>/dev/null; then
+		crash=1
+	elif grep -qE "ERROR: (Address|Thread)Sanitizer|==[0-9]+==ABORTING" \
+	            "$d/log/$s.log" 2>/dev/null; then
+		crash=1
+	elif grep -qE "ConnectionRefusedError|BrokenPipeError" \
+	            "$d/log/$s.log" 2>/dev/null; then
+		crash=1
+	elif [ "$rc" -ge 128 ]; then
+		crash=1
+	fi
+
+	rm -f "$d/log/$s.leak"
+	if grep -qE "ERROR: LeakSanitizer|byte\(s\) leaked" "$d/log/$s.log" 2>/dev/null
+	then
+		leak=1
+		grep -E "SUMMARY: AddressSanitizer: .*leaked" "$d/log/$s.log" \
+			| tail -1 > "$d/log/$s.leak"
+	fi
+
+	if [ "$crash" = 1 ]; then
+		echo -1 > "$d/log/$s.rc"
+		say "[$v] $s CRASHED (exit $rc) - see $d/log/$s.log"
+	else
+		echo $rc > "$d/log/$s.rc"
+		if [ "$leak" = 1 ]; then
+			say "[$v] $s LEAKED - $(cat "$d/log/$s.leak")"
+		elif [ "$rc" = 0 ]; then
+			say "[$v] $s success"
+		else
+			say "[$v] $s $rc failures"
+		fi
+	fi
+	LAST_CRASH=$crash
+}
+
+# every suite from here on is marked not-run, with the reason
+skip_rest() {   # $1 = variant  $2 = variant dir  $3 = reason  $4... = suites to skip
+	local v=$1 d=$2 why=$3 s; shift 3   # s LOCAL: the caller's loop uses it too
+	for s in "$@"; do
+		echo -1 > "$d/log/$s.rc"
+		echo "not run: $why" > "$d/log/$s.log"
+		say "[$v] $s NOT RUN - $why"
+	done
+}
+
+run_variant() {
+	v=$1; off=$2
+	web=$((WEB_BASE + off)); raw=$((RAW_BASE + off)); cdp=$((CDP_BASE + off))
+	d=$ROOT/$v; b=$PWD/$d/build
+
+	[ "$(cat "$d/log/build.rc" 2>/dev/null)" = 0 ] || { echo "build failed" > "$d/log/SKIPPED"; return; }
+
+	mkdir -p "$d/saved" "$d/objects" "$d/log" "$d/web"
+	# HARDLINKS, not a symlink: dirscan uses lstat on purpose (dirscan.c:89), so
+	# a symlinked dir or file is not seen as a directory or a regular file and
+	# the scan skips it. Made after the shared build, since make replaces a
+	# .object with a new inode and would leave an old link stale.
+	ln -f objects/*/*.object "$d/objects/" 2>/dev/null
+	# and the same for the client: Http serves Root="web" RELATIVE TO CWD
+	# (main.c:211), and the framework runs with cwd=$d - without these the
+	# page 404s, the browser boots empty, and every guitest cascades off boot.
+	ln -f web/* "$d/web/" 2>/dev/null
+	say "[$v] $(ls "$d/objects" | wc -l) objects, $(ls "$d/web" | wc -l) web files hardlinked into $d"
+
+	# unit_test links libframework directly and speaks to no server, so it goes
+	# FIRST - before anything is started. If the library itself is broken there
+	# is nothing to learn from standing up a framework on top of it, so a crash
+	# here ends the variant without ever starting one.
+	say "[$v] unit_test ..."
+	( cd "$d" && LD_LIBRARY_PATH=build ./build/unit_test -v 0 ) \
+		> "$d/log/unit_test.log" 2>&1
+	record "$v" "$d" unit_test "$?" ""
+	if [ "$LAST_CRASH" = 1 ]; then
+		skip_rest "$v" "$d" "unit_test crashed - no framework was started" \
+			$(echo "$SUITES" | tr ' ' '\n' | grep -v '^unit_test$')
+		return
+	fi
+
+	say "[$v] starting framework on web=$web raw=$raw cdp=$cdp (cwd=$d)"
+	pdeath "$PWD/$d" log/server.log env LD_LIBRARY_PATH=build ./build/framework \
+	       -ip 127.0.0.1 -port "$web"
+	server=$PDEATH_PID
+	for i in $(seq 1 60); do
+		sleep 1
+		python3 - "$web" <<'PY' && break
+import socket, sys
+try:
+    s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2); s.close()
+except Exception: sys.exit(1)
+PY
+	done
+
+	say "[$v] framework answering on $web - composing its raw bridge on $raw"
+	python3 - "$raw" "$web" <<'PY' > "$d/log/bridge.log" 2>&1
+import sys
+sys.path.insert(0, "testharness")
+from rawtest import ensure_raw_bridge
+ensure_raw_bridge("127.0.0.1", int(sys.argv[1]), int(sys.argv[2]))
+PY
+
+	if [ -n "$CHROME" ]; then
+		pdeath "$PWD" "$d/log/chrome.log" "$CHROME" --headless=new \
+		       --remote-debugging-port="$cdp" --window-size=1400,950 \
+		       --no-sandbox --disable-gpu --user-data-dir="$PWD/$d/chrome" about:blank
+		browser=$PDEATH_PID
+		sleep 2
+	fi
+
+	# a suite that never got to measure anything is a CRASH, not a count of
+	# failures - the two used to print the same "1" and read as one failed
+	# test. -1 goes in the .rc and the report prints CRASH. It can only ever
+	# be a FILE value: a process exit status is truncated to 0-255 by the
+	# kernel, so an exiting -1 would come back as 255 and read as 255 failures.
+	crashed_by=""
+	for s in $SUITES; do
+		[ "$s" = unit_test ] && continue          # already run, before the server
+		say "[$v] $s ..."
+		case $s in
+		guitest)
+			[ -n "$CHROME" ] && python3 testharness/guitest.py \
+				--app "http://127.0.0.1:$web" --cdp "$cdp" $VERBOSE > "$d/log/guitest.log" 2>&1 ;;
+		*)
+			python3 "testharness/$s.py" --host 127.0.0.1 --port "$raw" \
+				--webport "$web" $VERBOSE > "$d/log/$s.log" 2>&1 ;;
+		esac
+		rc=$?
+
+		record "$v" "$d" "$s" "$rc" "$server"
+
+		# a crash ends this variant. Everything after it would be measuring an
+		# engine that is not there, and every one of those cells reads as a
+		# separate failure - one death, printed eleven times, is what made the
+		# report unreadable. The other variants are their own engines and keep
+		# going.
+		if [ "$LAST_CRASH" = 1 ]; then
+			crashed_by=$s
+			rest=$(echo "$SUITES" | tr ' ' '\n' | sed -n "/^$s\$/,\$p" | tail -n +2)
+			[ -n "$rest" ] && skip_rest "$v" "$d" "framework crashed during $s" $rest
+			say "[$v] STOPPED - the framework crashed during $crashed_by"
+			break
+		fi
+
+		if [ "$rc" != 0 ]; then
+			say "[$v] $s not clean - saving the session for forensics"
+			save_root "$raw" "fail_$s"
+		fi
+	done
+
+	# "is the pid gone" is true both for a framework that quit when asked and
+	# for one that died an hour ago, so ask BEFORE assuming either. A dead one
+	# never reached its exit-time leak check, and the log must not imply it did.
+	if ! kill -0 "$server" 2>/dev/null; then
+		say "[$v] framework was already gone (crashed during ${crashed_by:-an earlier suite}) - no final save, no exit-time leak check"
+	else
+		say "[$v] saving the final root"
+		save_root "$raw" "final"
+
+		say "[$v] done, asking its framework to quit"
+		ask_to_quit "$raw"
+		for i in $(seq 1 10); do
+			kill -0 "$server" 2>/dev/null || break
+			sleep 1
+		done
+		if kill -0 "$server" 2>/dev/null; then
+			say "[$v] framework did not quit when asked, signalling it"
+		else
+			say "[$v] framework quit when asked - exit-time leak check ran"
+		fi
+	fi
+
+	for pid in $browser $server; do
+		kill "$pid" 2>/dev/null
+	done
+	sleep 1
+	for pid in $browser $server; do
+		if kill -0 "$pid" 2>/dev/null; then
+			say "[$v] pid $pid ignored TERM, sending KILL"
+			kill -9 "$pid" 2>/dev/null
+		fi
+	done
+	wait $browser $server 2>/dev/null
+}
+
+while IFS='|' read -r v flags off; do
+	run_variant "$v" "$off" &
+done < "$ROOT/log/variants"
+wait
+say "all variants finished, writing the report"
+
+VARFAIL=0; VARCRASH=0; VARLEAK=0
+# ---- one report: builds across the top, suites down the side, ERROR COUNTS ---
+# a suite's own summary line ("... 23 tests, 23 passed, 0 failed") is the count;
+# unit_test reports leftover tasks; anything with no summary falls back to its
+# exit code (0 = no errors, non-zero = 1).
+# the return code IS the failure count now: suites exit with it, unit_test exits
+# with its leftover-task count, so the cell is just that number
+errors_for() {   # $1 = variant dir, $2 = suite - a count, CRASH, LEAK, or -
+	local rc
+	[ -f "$1/log/$2.rc" ] || { echo "-"; return; }
+	rc=$(cat "$1/log/$2.rc")
+	if [ "$rc" = -1 ]; then echo "CRASH"; return; fi
+	if [ -f "$1/log/$2.leak" ]; then
+		[ "$rc" = 0 ] && echo "LEAK" || echo "$rc+LEAK"
+		return
+	fi
+	echo "$rc"
+}
+
+# the raw failure count, whatever decoration the cell carries (-1 crash = 0)
+count_for() {   # $1 = variant dir, $2 = suite
+	local rc
+	rc=$(cat "$1/log/$2.rc" 2>/dev/null)
+	case $rc in ''|*[!0-9]*) echo 0 ;; *) echo "$rc" ;; esac
+}
+
+{
+	printf "%-20s" "suite"
+	while IFS='|' read -r v f o; do printf "%-9s" "$v"; done < "$ROOT/log/variants"
+	echo
+	printf "%-20s" "--------------------"
+	while IFS='|' read -r v f o; do printf "%-9s" "--------"; done < "$ROOT/log/variants"
+	echo
+	for s in $SUITES; do
+		printf "%-20s" "$s"
+		while IFS='|' read -r v f o; do printf "%-9s" "$(errors_for "$ROOT/$v" "$s")"; done < "$ROOT/log/variants"
+		echo
+	done
+	printf "%-20s" "--------------------"
+	while IFS='|' read -r v f o; do printf "%-9s" "--------"; done < "$ROOT/log/variants"
+	echo
+	printf "%-20s" "failures"
+	while IFS='|' read -r v f o; do
+		t=0
+		for s in $SUITES; do
+			t=$((t + $(count_for "$ROOT/$v" "$s")))
+		done
+		VARFAIL=$((VARFAIL + t))
+		printf "%-9s" "$t"
+	done < "$ROOT/log/variants"
+	echo
+	printf "%-20s" "crashed"
+	while IFS='|' read -r v f o; do
+		c=0
+		for s in $SUITES; do
+			[ "$(errors_for "$ROOT/$v" "$s")" = CRASH ] && c=$((c + 1))
+		done
+		VARCRASH=$((VARCRASH + c))
+		printf "%-9s" "$c"
+	done < "$ROOT/log/variants"
+	echo
+	printf "%-20s" "leaked"
+	while IFS='|' read -r v f o; do
+		l=0
+		for s in $SUITES; do
+			[ -f "$ROOT/$v/log/$s.leak" ] && l=$((l + 1))
+		done
+		VARLEAK=$((VARLEAK + l))
+		printf "%-9s" "$l"
+	done < "$ROOT/log/variants"
+	echo
+	printf "%-20s" "sanitizer"
+	while IFS='|' read -r v f o; do
+		h=$(cat "$ROOT/$v"/log/*.log 2>/dev/null | grep -cE "runtime error|ERROR: (AddressSanitizer|LeakSanitizer)")
+		printf "%-9s" "$h"
+	done < "$ROOT/log/variants"
+	echo
+	echo
+	while IFS='|' read -r v f o; do
+		echo "$v: build return code=$(cat "$ROOT/$v/log/build.rc" 2>/dev/null)  web=$((WEB_BASE+o)) raw=$((RAW_BASE+o)) cdp=$((CDP_BASE+o))  logs=$ROOT/$v/log/"
+	done < "$ROOT/log/variants"
+	for f in "$ROOT"/*/log/*.leak; do
+		[ -f "$f" ] || continue
+		v=$(basename "$(dirname "$(dirname "$f")")")
+		echo "leak: $v $(basename "$f" .leak) - $(cat "$f" | sed 's/^SUMMARY: //')"
+	done
+	if [ -d "$ROOT/gcov/build" ]; then
+		( cd "$ROOT/gcov" && gcov -b -o build ../../../../src/*.c > coverage.txt 2>&1 )
+		echo "coverage: $ROOT/gcov/coverage.txt"
+	fi
+} > "$ROOT/report.txt"
+cat "$ROOT/report.txt"
+echo "logs: $ROOT/log/ and $ROOT/<variant>/log/   summary: $ROOT/report.txt"
+
+# the return code counts everything that was not a pass: failures plus crashes
+# (a crash cannot be -1 here - the kernel truncates an exit status to 0-255)
+BAD=$((VARFAIL + VARCRASH + VARLEAK))
+if [ "$BAD" = 0 ]; then
+	say "success - no failures, no crashes, no leaks, in any variant"
+else
+	say "$VARFAIL failures, $VARCRASH crashes and $VARLEAK leaks across all variants"
+fi
+exit $((BAD > 254 ? 254 : BAD))
