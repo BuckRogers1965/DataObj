@@ -370,6 +370,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishPosition(ClassSelf);
 
 	/* every control, from the table (Language menu, Source/Output boxes, the
@@ -394,20 +397,31 @@ void _init()
 	SetName(temp, "ScriptBox");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "a5e2f7c1-3b84-4d69-9f02-7c61e8d4a903");
-	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	/* needs at least one ScriptHost class to be useful, but does not fail  */
 	/* to load without one - the dropdown is simply empty                    */
-	SetPropStr(temp, "Dependencies", "");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "button.object", "Button", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "dropdown.object", "Dropdown", "1", "0");
+	AddDependency(temp, "led.object", "LED", "1", "0");
+	AddDependency(temp, "textbox.object", "Textbox", "1", "0");
+	AddDependency(temp, "textout.object", "TextOut", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

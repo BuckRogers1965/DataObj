@@ -212,6 +212,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	/* what this class IS, and at what version. A widget descends from Widget;
+	   a bare control from Control; a pure object (no panel, no place on a
+	   canvas) from Object. */
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishPosition(ClassSelf);		/* X/Y/W/H + the reserved view props */
 
 	/* every control, straight from the table - the widget type comes from each
@@ -243,18 +249,34 @@ void _init()
 	SetName(temp, "Skeleton");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "REPLACE-WITH-A-FRESH-UUID");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* Declare every class this widget actually uses, naming the FILE as well
+	   as the class: a class cannot be looked up before its own ClassStart has
+	   run, and the two names differ more often than you would think
+	   (tcp.object provides TCPSocket). One line per control in your layout
+	   table, plus anything you create in code. Get this wrong and the class
+	   simply never starts - the log names what was missing. */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "led.object", "LED", "1", "0");
+	AddDependency(temp, "mobutton.object", "MoButton", "1", "0");
+	AddDependency(temp, "textbox.object", "Textbox", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	/* give back what _init built */
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

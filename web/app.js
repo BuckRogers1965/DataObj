@@ -45,6 +45,9 @@ const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_S
       PROP_IMAGE = 15;     /* an image loaded from a URL - the Image widget's display */
 
 /* palette classes that ARE widgets - the base case of the recursion */
+/* the control class names a dissection-table cell may be told to render as.
+   NOT how an instance is classified any more - the engine sends the class's
+   own lineage (classParent) and onInstanceCreated asks that. */
 const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MoButton', 'MenuButton', 'Dropdown', 'Markdown', 'HTML', 'Image']);
 
 /* which widget class backs which property widget-type, split by whether  */
@@ -352,7 +355,7 @@ function handleEvent(msg) {
       break;
     case 'instance-created':
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
-                        msg.reservedIn, msg.reservedOut);
+                        msg.reservedIn, msg.reservedOut, msg.classParent);
       break;
     case 'property-changed':
       onPropertyChanged(msg.instance, msg.port, msg.value);
@@ -1225,7 +1228,7 @@ document.addEventListener('pointerup', () => {
 });
 
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
-                           reservedIn, reservedOut) {
+                           reservedIn, reservedOut, classParent) {
   /* replays are idempotent - a container listed twice (or an instance     */
   /* that arrived live before its container's members were fetched) never  */
   /* renders twice                                                          */
@@ -1277,14 +1280,14 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   }
 
   /* a widget primitive has no panel - it's the same base-case rendering   */
-  /* the recursion already bottoms out to (makeSelfControl/makeSelfDisplay/ */
-  /* makeSelfActivateButton), just standing on its own instead of sitting   */
-  /* inside a composite object's card: a control (or, for LED, a colored    */
-  /* dot) and a label, nothing else. It's meant to be light enough to drag   */
-  /* around freely and, eventually, clone or copy (see registerWidgetAtom's  */
-  /* doc comment) - a node-box's header/body/footer chrome is the opposite   */
-  /* of that.                                                                */
-  if (WIDGET_CLASSES.has(className)) {
+  /* An atom is anything whose CLASS descends from Control: a control and a
+     label, nothing else - the same base case the recursion bottoms out to
+     (makeSelfControl/makeSelfDisplay/makeSelfActivateButton), standing on its
+     own instead of sitting inside a composite panel. The engine says what
+     kind of thing this is (classParent), so a control written tomorrow
+     renders correctly today - this used to be a hardcoded list of the fifteen
+     control class names, and anything missing from it drew as a panel. */
+  if (classParent === 'Control') {
     registerWidgetAtom(alias, className, props, pos, false, container, reservedIn, reservedOut);
     return;
   }

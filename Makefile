@@ -1,7 +1,7 @@
 
 CC=gcc
 
-SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c widget.c buff.c queue.c bufftest.c
+SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c buff.c queue.c bufftest.c
 
 # where those sources live now
 vpath %.c src src/dyn

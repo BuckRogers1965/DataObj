@@ -1,0 +1,11 @@
+--- src/unit_test.c
++++ src/unit_test.c
+@@ -200,7 +200,7 @@
+ 		{
+ 			if (where[0]) break;
+ 			where = " (runnow)";
+-			t = GetTaskListRunnow(list);
++			/* the HEAD of the runnow bucket, not the bucket itself:
+ 			   GetTaskListRunnow returns the list, and both it and a task
+ 			   entry are typedef'd void *, so handing the list straight to
+ 			   GetTaskNext walks the list header as if it were a task and

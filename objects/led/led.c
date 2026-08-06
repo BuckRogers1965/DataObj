@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "control.h"
 
 /*
 
@@ -146,6 +147,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Control");
+
 	PublishPosition(ClassSelf);
 
 	PublishProp(ClassSelf, "Value", PROP_LED, "0");
@@ -170,18 +174,22 @@ void _init()
 	SetName(temp, "LED");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c740");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "control.object", "Control", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

@@ -11,6 +11,8 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "serializer.h"	/* ExportView/ImportView/LoadViewAsync moved to serializer.object */
+#include "control.h"
 
 /*
 
@@ -237,11 +239,18 @@ static void Bridge_SendEventScoped(NodeObj instance, InstanceData *local, char *
 void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, char *className, NodeObj classNode, char *parent, char *container, int hidden, long connId)
 {
 	NodeObj interface, chunk, self;
-	char *escAlias, *escClass, *escParent, *escContainer, *interfaceText, *buf;
+	char *escAlias, *escClass, *escParent, *escContainer, *escKind, *interfaceText, *buf;
 	char *escIn, *escOut, *sIn, *sOut;
 	int bufLen;
 
 	interface = classNode ? GetClassInterface(classNode) : NULL;
+
+	/* WHAT KIND of thing this is, straight off the class: the name of the
+	   class it descends from (Control, Widget, Script, Object...). The client
+	   used to keep its own list of the fifteen control class names and render
+	   anything else as a panel, so a new control looked wrong until app.js was
+	   edited. Note this is NOT the "parent" field below - that one is where the
+	   instance LIVES, this is what it IS. */
 	interfaceText = interface ? NodeToText(interface) : strdup("null");
 
 	/* whether this thing names a stand-in on either side. Read straight off
@@ -255,19 +264,22 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	escIn  = JsonEscapeStr(sIn  ? sIn  : "");
 	escOut = JsonEscapeStr(sOut ? sOut : "");
 
+	escKind      = JsonEscapeStr(classNode ? (GetPropStr(classNode, "Parent") ?
+								   GetPropStr(classNode, "Parent") : "") : "");
 	escAlias     = JsonEscapeStr(alias ? alias : "");
 	escClass     = JsonEscapeStr(className ? className : "");
 	escParent    = JsonEscapeStr(parent ? parent : "");
 	escContainer = JsonEscapeStr(container ? container : "");
 
 	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
-			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + 220;
+			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + (int) strlen(escKind) + 220;
 	buf = malloc(bufLen);
-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"interface\":%s}",
-			 escAlias, escClass, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, interfaceText);
+	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"interface\":%s}",
+			 escAlias, escClass, escKind, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, interfaceText);
 
 	free(escAlias);
 	free(escClass);
+	free(escKind);
 	free(escParent);
 	free(escContainer);
 	free(escIn);
@@ -2818,6 +2830,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "In", PROP_NULL, "");
 	PublishProp(ClassSelf, "Out", PROP_NULL, "");
@@ -2842,18 +2857,26 @@ void _init()
 	SetName(temp, "Bridge");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c690");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+
+	/* created in code, not from the layout table */
+	AddDependency(temp, "alias.object", "Alias", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

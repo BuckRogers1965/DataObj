@@ -1434,6 +1434,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(sourceClass, "InstanceStart", (long)SourceInstanceStart);
 	SetPropLong(sourceClass, "InstanceEnd", (long)SourceInstanceEnd);
 	SourceClass = RegisterClass(library, sourceClass);
+
+	SetClassVersion(SourceClass, "1", "0");
+	SetClassParent(SourceClass, "Widget");
 	PublishPosition(SourceClass);
 	Widget_Publish(SourceClass, MCPSourcePanel);
 	PublishProp(SourceClass, "HostName", PROP_TEXTBOX, "127.0.0.1");
@@ -1444,6 +1447,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(agentClass, "InstanceStart", (long)MCPAgent_InstanceStart);
 	SetPropLong(agentClass, "InstanceEnd", (long)MCPAgent_InstanceEnd);
 	MCPAgentClass = RegisterClass(library, agentClass);
+
+	SetClassVersion(MCPAgentClass, "1", "0");
+	SetClassParent(MCPAgentClass, "Widget");
 	PublishPosition(MCPAgentClass);
 	PublishProp(MCPAgentClass, "AgentName", PROP_TEXTBOX, "");
 	PublishProp(MCPAgentClass, "ConnectorPath", PROP_TEXTBOX, "");
@@ -1468,18 +1474,32 @@ void _init()
 	SetName(temp, "MCPSource");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "7b6f0a3c-4d5e-4a9a-9c1a-4a2e5f8d9c11");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "TCP,Lua");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* one file, two classes (MCPSource and the MCPAgent view it generates),
+	   so the dependency list is the file's. TCP and Lua are created in code,
+	   not from a layout table. */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "mobutton.object", "MoButton", "1", "0");
+	AddDependency(temp, "textbox.object", "Textbox", "1", "0");
+	AddDependency(temp, "textout.object", "TextOut", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
+	AddDependency(temp, "tcpshim.object", "TCP", "1", "0");
+	AddDependency(temp, "lua.object", "Lua", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

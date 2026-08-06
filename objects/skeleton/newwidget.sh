@@ -1,22 +1,31 @@
 #!/bin/bash
 #
-# newwidget.sh - stamp out a new widget from the skeleton template.
+# newwidget.sh - stamp out a new module from one of the skeleton templates.
 #
-#   objects/skeleton/newwidget.sh <WidgetName>
+#   objects/skeleton/newwidget.sh <Name> [widget|control|object]
 #
-# e.g.  objects/skeleton/newwidget.sh Counter
+# e.g.  objects/skeleton/newwidget.sh Counter          # a widget (the default)
+#       objects/skeleton/newwidget.sh Gauge control    # one thing on screen
+#       objects/skeleton/newwidget.sh Resolver object  # plain function, no panel
 #
-# Creates objects/counter/ with counter.c, a real Makefile (so it builds),
-# and a starter README.md, with every Skeleton/skeleton token and the UUID
-# rewritten to the new name. Then: make -C objects/counter   (or just make).
+# Creates objects/<name>/ with <name>.c (and <name>.h for an object), a real
+# Makefile (so it builds), and a starter README.md, with every Skeleton/skeleton
+# token and the UUID rewritten. Then: make -C objects/<name>  (or just make).
+#
+# Which kind to pick: see objects/skeleton/README.md
 #
 set -e
 
 NAME="$1"
+KIND="${2:-widget}"
 if [ -z "$NAME" ]; then
-    echo "usage: $0 <WidgetName>   (e.g. $0 Counter)" >&2
+    echo "usage: $0 <Name> [widget|control|object]   (e.g. $0 Counter)" >&2
     exit 1
 fi
+case "$KIND" in
+    widget|control|object) : ;;
+    *) echo "error: kind must be widget, control or object (got '$KIND')" >&2; exit 1 ;;
+esac
 
 # a class name must be a valid C identifier starting with a capital
 case "$NAME" in
@@ -46,13 +55,28 @@ mkdir -p "$DEST"
 
 # the source: Skeleton -> Name, skeleton -> lower, UUID placeholder -> fresh.
 # (uppercase first so it can't clobber the lowercase pass)
+SRC_DIR="$SKEL_DIR/$KIND"
+if [ ! -f "$SRC_DIR/skeleton.c" ]; then
+    echo "error: no template at $SRC_DIR/skeleton.c" >&2
+    exit 1
+fi
+
 sed -e "s/Skeleton/$NAME/g" \
     -e "s/skeleton/$LOWER/g" \
+    -e "s/SKELETON/$(printf '%s' "$NAME" | tr '[:lower:]' '[:upper:]')/g" \
     -e "s/REPLACE-WITH-A-FRESH-UUID/$UUID/g" \
-    "$SKEL_DIR/skeleton.c" > "$DEST/$LOWER.c"
+    "$SRC_DIR/skeleton.c" > "$DEST/$LOWER.c"
+
+# an object carries its interface header - that IS its interface
+if [ -f "$SRC_DIR/skeleton.h" ]; then
+    sed -e "s/Skeleton/$NAME/g" \
+        -e "s/skeleton/$LOWER/g" \
+        -e "s/SKELETON/$(printf '%s' "$NAME" | tr '[:lower:]' '[:upper:]')/g" \
+        "$SRC_DIR/skeleton.h" > "$DEST/$LOWER.h"
+fi
 
 # the Makefile (renamed from Makefile.copy so the framework build now finds it)
-sed -e "s/skeleton/$LOWER/g" "$SKEL_DIR/Makefile.copy" > "$DEST/Makefile"
+sed -e "s/skeleton/$LOWER/g" "$SRC_DIR/Makefile.copy" > "$DEST/Makefile"
 
 # a STARTER help doc - this becomes the widget's Help panel (loaded on open),
 # NOT the build guide. Fill it in.
@@ -70,9 +94,15 @@ Default output connection is from **Out**.
 - **Out** - TODO.
 EOF
 
-echo "created:"
+echo "created a $KIND:"
 echo "  $DEST/$LOWER.c"
+[ -f "$DEST/$LOWER.h" ] && echo "  $DEST/$LOWER.h   (the interface - the WHOLE of it)"
 echo "  $DEST/Makefile"
-echo "  $DEST/README.md   (the widget's Help text - edit it)"
+echo "  $DEST/README.md   (its Help text - edit it)"
 echo
-echo "next:  make -C $DEST     # then restart the framework and drag '$NAME' from the palette"
+echo "read:  $SKEL_DIR/$KIND/README.md"
+if [ "$KIND" = object ]; then
+    echo "next:  make -C $DEST     # a plain object has no palette entry - something must create it"
+else
+    echo "next:  make -C $DEST     # then restart the framework and drag '$NAME' from the palette"
+fi

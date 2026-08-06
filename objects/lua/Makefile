@@ -1,13 +1,13 @@
 CC=gcc
 
-# script.c plus the vendored Lua 5.4.7 core (lua/, MIT license) - one
+# lua.c plus the vendored Lua 5.4.7 core (lua/, MIT license) - one
 # self-contained .object, no system Lua needed
-SOURCE= script.c
+SOURCE= lua.c
 LUASRC= $(wildcard lua/*.c)
 
 OBJECTS= $(subst .c,.o,$(SOURCE)) $(subst .c,.o,$(LUASRC))
 
-GOAL=script.object
+GOAL=lua.object
 
 INCLUDES=-I../../src
 

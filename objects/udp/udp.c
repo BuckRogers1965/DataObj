@@ -403,6 +403,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	/* what this class IS, and at what version - a dependent asking for
+	   UDP 1 0 gets checked against these two */
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Object");
+
 	/* nothing is published: the interface is udp.h, not a set of properties */
 
 	return rtrn_handled;
@@ -424,18 +429,27 @@ void _init()
 	SetName(temp, "UDP");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "b4f2c7d1-3e58-4a0c-9d16-7f8ab52e9c34");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	/* the FILE's own version, major/minor apart like everything else - a
+	   packed "1.0" cannot be compared (as a string "1.10" sorts below "1.9",
+	   as a REAL it converts to 1.1). What a dependency checks is the CLASS's
+	   version, set in ClassStart; this is provenance for the module itself. */
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* a socket is a plain Object: no name, no path, no position, never
+	   serialized - so the core's Object class is the whole dependency */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

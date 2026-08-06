@@ -839,6 +839,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishPosition(ClassSelf);
 
 	/* every on-screen control, straight from the layout table */
@@ -864,20 +867,30 @@ void _init()
 	SetName(temp, "UDPPort");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "2f6d9a4b-71c8-4e35-b0da-93c1e7f4a682");
-	SetPropStr(temp, "Version", "1.0");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	/* it drives a UDP instance, but loads without one - Start says the class
 	   is missing rather than failing silently */
-	SetPropStr(temp, "Dependencies", "UDP");
+
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* what it is, and what it holds: a Widget by parent, a UDP engine of its
+	   own, and the controls its panel is built from. The file is named as
+	   well as the class - a class cannot be looked up before its own
+	   ClassStart has run, and tcp.object/TCPSocket shows the two differ. */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "udp.object", "UDP", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

@@ -955,6 +955,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	/* what this class IS and at what version. Note the class name is not the
+	   file name - this lives in tcp.object - so a dependent names both. */
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Object");
+
 	/* nothing is published: the interface is tcp.h, not a set of properties */
 
 	return rtrn_handled;
@@ -976,18 +981,26 @@ void _init()
 	SetName(temp, "TCPSocket");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c660");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	/* the FILE's own version, major/minor apart: a packed "1.0" cannot be
+	   compared (as a string "1.10" sorts below "1.9", as a REAL it becomes
+	   1.1). A dependency checks the CLASS's version, set in ClassStart. */
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* a socket is a plain Object: no name, no path, no position, never
+	   serialized - so the core's Object class is the whole dependency */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

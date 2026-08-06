@@ -41,30 +41,9 @@ NodeObj CreateRoot(char * name);
 /* class (a palette) with GetChild/GetNextSibling at both levels        */
 NodeObj GetRegObjList(void);
 
-/* the palette is a real View instance (see BuildPalette's own doc         */
-/* comment, object.c) holding one inert (never Activated) bootstrap         */
-/* instance per registered class as ordinary Container'd children. Built    */
-/* once, after all classes are loaded (see main.c). GetPalette() is the     */
-/* class-name -> instance lookup table (Bridge's seeding source);           */
-/* GetPaletteView() is the View itself.                                     */
-NodeObj GetPalette(void);
-NodeObj GetPaletteView(void);
-
-/* the session's root view - what everything else is created in */
-NodeObj GetRootView(void);
-
-/* name the view BuildSettingsView parks its controls in (a boot stash) */
-void    SetSettingsHome(NodeObj view);
-void BuildPalette(void);
-
-/* the app's own chrome, addressed and broadcast the exact same way the   */
-/* Palette is - a handful of well-known, always-present instances (the    */
-/* topbar's File/Mode menus) rather than a separate client-side concept.  */
-/* Built once, after BuildPalette (its classes, e.g. MenuButton, must     */
-/* already be registered). GetChrome() holds one long property per        */
-/* well-known name ("FileMenu","ModeMenu"), same shape as GetPalette().   */
-NodeObj GetChrome(void);
-void BuildChrome(void);
+/* The palette, the topbar chrome, and what it takes to be placed at all
+   (a name, a place, a size) live in control.object - the palette exists
+   only to show controls. Include control.h to reach them. */
 
 /* remove an instance for good - UnRegisterInstance plus DelNode. Callers */
 /* that also track the instance by alias (Bridge) must drop their own      */
@@ -122,27 +101,14 @@ DeliverMsg(NodeObj target, char * port, MsgId message, NodeObj data);
 int
 ActivateInstance(NodeObj instance);
 
-/* Export a view's subtree to a file by serializing its live node state
-   (a Serializer -> Writer flow the core composes and activates). */
-void ExportView(NodeObj view, char * path);
+/* Export/import/load a view: serializer.object owns the format, both
+   directions - include serializer.h to reach ExportView / ImportView /
+   LoadViewAsync. The core neither reads nor writes it. */
 
-/* The inverse of ExportView, direct engine calls (no bridge required).
-   ImportView drops a saved view onto the canvas as a fresh copy - its
-   own top-level name mints fresh if taken, internals stay verbatim.
-   Returns the new top instance, NULL on failure. */
-NodeObj ImportView(NodeObj container, char * path, char * dropX, char * dropY);
-
-/* Restore `container` IN PLACE from a whole-session export: container's
-   current contents are destroyed, then the file's own top-level node
-   (container itself, as ExportView wrote it) is NOT re-created - its
-   children go straight into container, verbatim. Asynchronous: the
-   destroy is staggered through the scheduler one instance per task
-   (a large session's worth of DeleteInstance calls back-to-back in one
-   native call overran the scheduler's task-pool state), so this returns
-   immediately and onDone(container, ok, ctx) fires once the whole
-   restore - destroy AND rebuild - is actually complete. */
-void LoadViewAsync(NodeObj container, char * path,
-					void (*onDone)(NodeObj container, int ok, void *ctx), void *ctx);
+/* THE rule for a name the server mints: the base with any trailing _N
+   stripped, then the lowest free _k in the container. Shared by import and
+   by clone, which is why it stays here - naming is addressing. */
+void MintFreshName(char *base, char *containerPath, char *out, int outlen);
 
 /* Write a named property on target the way something OUTSIDE the object */
 /* has to: if the name resolves to a port (an OnMsg handler is present,  */
@@ -233,17 +199,8 @@ typedef struct ControlSpec
 	int   x, y, w, h;
 } ControlSpec;
 
-/* Builds target's settings panel, populated per specs: creates each     */
-/* control, positions it (a plain X/Y/W/H write - see InitPosition) and   */
-/* wires it the way its own kind implies, every row a plain Connect() -   */
-/* Button reaches target's Activate port; a display kind (LED/TextOut/    */
-/* VUMeter/Label) reflects target's property/port (Connect(target, prop,  */
-/* control, "In")); anything else (an input kind: Checkbox/Textbox/       */
-/* Slider/Knob) edits it (Connect(control, "Value", target, prop)).       */
-/* No container groups these controls - each is independently             */
-/* placed and wired, discoverable by their shared Connect() to target,    */
-/* the same as anything else in the tree. Returns target.                 */
-NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count);
+/* BuildSettingsView is in control.object (see control.h) - it makes and
+   wires the controls a ControlSpec table describes. */
 
 /* Small per-connection scalar state, keyed by a Conn id (see tcp.c's   */
 /* multi-connection support) - a table node holds one long-typed prop   */
@@ -284,40 +241,17 @@ WatchableProp(NodeObj instance, char * propname);
 /* membership structure, and BuildPalette (this file) is what actually       */
 /* uses both to make the Palette "just a view" with no special handling      */
 /* beyond two property values.                                              */
-void PublishPosition(NodeObj class);
-void InitPosition(NodeObj instance);
+/* PublishPosition/InitPosition are in control.object too (control.h). */
 
 
 /* A flow is the recorded sequence of composition calls that built it -   */
 /* Create/Set/Connect/Activate instructions, not a dump of live instance  */
 /* state (pointers, ports) that InstanceStart re-establishes every time   */
-/* an object loads anyway. Build one with NewFlow(), then use the         */
-/* Flow* wrappers in place of the plain calls above: each one performs    */
-/* the live effect exactly like its plain counterpart and also appends   */
-/* the instruction that reproduces it. NodeToText/TextToNode save and     */
-/* load the resulting script; RunFlow replays it into a container.        */
+/* flow scripts live in flow.object now - include flow.h to reach them */
 
-NodeObj NewFlow(char * name);
-
-NodeObj FlowCreateObject(NodeObj flow, NodeObj container, char * classname);
-void    FlowSetProp     (NodeObj flow, NodeObj instance, char * prop, char * value);
-int     FlowConnect     (NodeObj flow, NodeObj fromInst, char * fromPort, NodeObj toInst, char * toPort);
-int     FlowActivateInstance(NodeObj flow, NodeObj instance);
-
-/* replay a recorded (or loaded) flow script into a container */
-NodeObj RunFlow(NodeObj container, NodeObj flow);
-
-/* save/load a flow script as text */
-int     SaveFlow(NodeObj flow, char * filename);
-NodeObj LoadFlow(NodeObj container, char * filename);
-
-/* needs real loaded classes - run after InstallObjects(), not from PerformTesting() */
-void    FlowTest(NodeObj container);
-void    InterfaceTest(void);
-void    SkinTest(void);
-
-/* pure mechanism, no registered classes needed - fine to run from PerformTesting() */
-void    PropertyWatchTest(void);
+/* The tests that used to live here are in the test harness now
+   (src/unit_test.c): the library ships mechanism, the harness ships the
+   measurements. */
 
 
 /* Call backs from dynamically loaded objects to register and unregister    */
@@ -354,6 +288,36 @@ UnRegisterInstance(NodeObj class, NodeObj inst);
 /* the deferred second phase of InstallObjects (see main.c): after every  */
 /* .object is scanned and loaded, start each library's classes in         */
 /* dependency order; UnloadClasses is the symmetric teardown              */
+
+
+/* --- class dependencies and versions -------------------------------------- */
+/* A module declares, in its _init(), every class it actually uses, naming the
+   FILE that provides it and the CLASS itself: the file is what the loader can
+   act on before anything has started, the class is what gets verified once
+   that file is up. Version is per class, major/minor separate (a version is a
+   tuple - "1.10" sorts below "1.9" as a string, and converts to 1.1 as a
+   REAL). Compatible = major equal, minor at least what was asked.
+   The core's own classes come from CORE_LIBRARY_FILE, so a widget declares
+   AddDependency(lib, CORE_LIBRARY_FILE, "Widget", "1", "0").               */
+#define CORE_LIBRARY_FILE "libframework.so"
+#define CORECLASS_MAJOR   "1"
+#define CORECLASS_MINOR   "0"
+
+void AddDependency(NodeObj library, char *file, char *classname,
+				   char *major, char *minor);
+void ClearDependencies(NodeObj library);   /* a module's _fini() frees its own */
+void SetClassVersion(NodeObj class, char *major, char *minor);
+void SetClassParent(NodeObj class, char *parentname);
+int  ClassVersionOk(NodeObj class, char *wantMajor, char *wantMinor);
+
+/* find a registered class by name: RegObjList -> libraries -> classes. The
+   lookup widget.h's wrappers use to reach the Widget class's entry points. */
+NodeObj FindClass(char * classname);
+
+/* Object - the one class the core provides, registered before any module is
+   scanned so every module's dependency on it resolves. Control and Widget are
+   loadable classes of their own (control.object, widget.object). */
+void RegisterCoreClasses(void);
 void
 loadClasses(void);
 void
@@ -414,14 +378,7 @@ NodeObj InterfacePropForInstance(NodeObj inst, char * propname);
 NodeObj GetClassInterface(NodeObj class);
 
 /* per-class layout (position, label, look) for each published property, */
-/* one Layout entry per Property in the class's Interface. GetClassSkin  */
-/* returns whatever was loaded, or generates and attaches a default from */
-/* the interface the first time it's asked. Save/Load round-trip it as   */
-/* text through a file, the same pattern as SaveFlow/LoadFlow.           */
-NodeObj GenerateSkin(NodeObj class);
-NodeObj GetClassSkin (NodeObj class);
-int     SaveSkin(NodeObj class, char * filename);
-NodeObj LoadSkin(NodeObj class, char * filename);
+/* skins live in skin.object now - include skin.h to reach them */
 
 
 /* the standard Help panel size; the help text box */

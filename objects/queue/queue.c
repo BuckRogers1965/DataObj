@@ -257,6 +257,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 	QueueClass = RegisterClass(library, class);
 
+	SetClassVersion(QueueClass, "1", "0");
+	SetClassParent(QueueClass, "Widget");
+
 	PublishPosition(QueueClass);
 	Widget_Publish(QueueClass, QueuePanel);
 
@@ -265,6 +268,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(class, "InstanceStart", (long)InstanceStart);
 	SetPropLong(class, "InstanceEnd", (long)InstanceEnd);
 	StackClass = RegisterClass(library, class);
+
+	SetClassVersion(StackClass, "1", "0");
+	SetClassParent(StackClass, "Widget");
 
 	PublishPosition(StackClass);
 	Widget_Publish(StackClass, QueuePanel);
@@ -289,18 +295,28 @@ void _init()
 	SetName(temp, "Queue");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "8da17004-242c-4f21-a77e-6a823a52c670");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	/* one file, two classes - the dependency list is the file's, not each
+	   class's, so it is declared once */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "led.object", "LED", "1", "0");
+	AddDependency(temp, "textout.object", "TextOut", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

@@ -771,6 +771,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishPosition(ClassSelf);
 
 	/* every control, from the table (widget type from each control's class) */
@@ -797,18 +800,28 @@ void _init()
 	SetName(temp, "Ollama");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "6d007e4d-c7a5-47e9-971b-1e75eb7ad229");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "dropdown.object", "Dropdown", "1", "0");
+	AddDependency(temp, "mobutton.object", "MoButton", "1", "0");
+	AddDependency(temp, "textbox.object", "Textbox", "1", "0");
+	AddDependency(temp, "textout.object", "TextOut", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

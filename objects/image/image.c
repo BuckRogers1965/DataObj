@@ -7,6 +7,7 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "control.h"
 
 /* Image: a display sink whose Value is an image URL. Whatever arrives on In
    becomes Value, and the projector renders it as an <img> - so wiring a URL
@@ -127,6 +128,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Control");
+
 	PublishPosition(ClassSelf);
 
 	PublishProp(ClassSelf, "Value", PROP_IMAGE, "");
@@ -151,18 +155,22 @@ void _init()
 	SetName(temp, "Image");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "f4929bb4-8b29-4244-bc3e-5ec113c0c0c3");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "control.object", "Control", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

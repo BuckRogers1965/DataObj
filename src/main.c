@@ -10,6 +10,7 @@
 
 #include "object.h"
 #include "widget.h"
+#include "control.h"	/* the palette, the chrome, and placement */
 #include "timer.h"
 #include "libload.h"
 #include "dyn/bufftest.h"
@@ -348,7 +349,6 @@ void PerformTesting(){
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 	DataTest();
 	NodeTest();
-	PropertyWatchTest();
 	BuffTest();
 	//NameSpaceTest();
 	SchedTest();
@@ -428,6 +428,7 @@ void Init(NodeObj Main){
 void InstallObjects(void)
 {
 	DebugPrint ( "Entering Install Objects function.", __FILE__, __LINE__, PROG_FLOW);
+
 	/* "objects", not ".": scanning down from the working directory picks up
 	   every .object anywhere below it, so a build tree or a test run that
 	   holds copies of the modules gets them loaded a SECOND time - same
@@ -643,21 +644,18 @@ int main ( int argc, char* argv[] ){
 
 	/* one inert instance per registered class, so a connecting client's */
 	/* palette is real instances to walk, not a class-description dump  */
-	/* (see BuildPalette's own comment in object.c) - also needs every   */
+	/* (see BuildPalette's own comment in control.c) - also needs every   */
 	/* class already loaded, same reason FlowTest waits below            */
 	BuildPalette();
 
 	/* the topbar's own File/Mode menus - real instances too, discovered */
-	/* the same way the Palette is (see BuildChrome's comment, object.c) */
+	/* the same way the Palette is (see BuildChrome's comment, control.c) */
 	BuildChrome();
 
 	/* needs the classes InstallObjects() just loaded, so it can't run   */
 	/* from PerformTesting() inside Init() alongside the other -t tests  */
-	if (GetValueInt(GetPropNode(Main, "UnitTest"))) {
-		FlowTest(Main);
-		InterfaceTest();
-		SkinTest();
-	}
+	/* the tests that need registered classes live in the harness now
+	   (src/unit_test.c) - the library ships mechanism, not measurements */
 
 	/* the default app's objects are created IN this View, so each has a path
 	   of its own and can build its panel (a plumbing object in Main has none) */

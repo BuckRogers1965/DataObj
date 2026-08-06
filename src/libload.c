@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include "DebugPrint.h"
+#include "node.h"
+#include "object.h"
 
 #define BUFFLEN 10024
 
@@ -36,6 +38,11 @@ LoadObject (char *name, int depth)
 	fflush(NULL);
 	//printf("\n");
 	snprintf (hereName, BUFFLEN-10, "%s/%s", bundlePath, name);
+
+	/* clear the hand-back first: RegisterLibrary sets LastLibrary from inside
+	   the module's _init(), so an unset value after dlopen means the module
+	   registered no library of its own */
+	SetPropLong(GetRegObjList(), "LastLibrary", 0);
 
 	ClassHandle = dlopen(hereName, RTLD_LAZY);
 	if (!ClassHandle) {
@@ -66,6 +73,18 @@ LoadObject (char *name, int depth)
 		return 0;
 	} else
 		DebugPrint ( "Found HandleMessage in Library.", __FILE__, __LINE__, PROG_FLOW);
+
+	/* stamp the file this library came from - a dependency names a file, and
+	   the library node cannot know its own: it was built in _init(), which
+	   never sees the path. Basename only, so a dependency names what you drop
+	   in the scan path rather than where it sits today. */
+	{
+		NodeObj registered = (NodeObj) GetPropLong(GetRegObjList(), "LastLibrary");
+		char *base = strrchr(name, '/');
+
+		if (registered)
+			SetPropStr(registered, "File", base ? base + 1 : name);
+	}
 
 	return 0;
 }

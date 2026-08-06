@@ -327,6 +327,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	ClassSelf = RegisterClass(library, class);
 
+	SetClassVersion(ClassSelf, "1", "0");
+	SetClassParent(ClassSelf, "Widget");
+
 	PublishPosition(ClassSelf);
 
 	/* every control, from the table (widget type from each control's class) */
@@ -350,18 +353,27 @@ void _init()
 	SetName(temp, "PulseGenerator");
 	SetPropStr(temp, "Company", "GrokThink");
 	SetPropStr(temp, "UUID", "a3f9d21c-7e64-4b8a-9c15-2d0e83b6f512");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
 	SetPropLong(temp, "ClassStart", (long)ClassStart);
 	SetPropLong(temp, "ClassEnd", (long)ClassEnd);
 	SetPropLong(temp, "ClassMsg", (long)0);
 	SetPropInt(temp, "State", 1);
+
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+	AddDependency(temp, "widget.object", "Widget", "1", "0");
+	AddDependency(temp, "checkbox.object", "Checkbox", "1", "0");
+	AddDependency(temp, "led.object", "LED", "1", "0");
+	AddDependency(temp, "mobutton.object", "MoButton", "1", "0");
+	AddDependency(temp, "textbox.object", "Textbox", "1", "0");
+	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(LibrarySelf);
 	UnregisterLibrary(LibrarySelf);
 	LibrarySelf = NULL;
 }

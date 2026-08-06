@@ -36,17 +36,22 @@ void _init()
     SetName(temp, "Msg");
     SetPropStr(temp, "Company", "GrokThink");
     SetPropStr(temp, "UUID", "8da17004-242d-4f21-a77e-6a823a52c601");
-	SetPropStr(temp, "Version", "1.0");
-	SetPropStr(temp, "Dependencies", "");
+	SetPropStr(temp, "Major", "1");
+	SetPropStr(temp, "Minor", "0");
     SetPropLong(temp, "ClassStart", (long) &Handle_Message );
     SetPropLong(temp, "ClassEnd", (long)0 );
     SetPropLong(temp, "ClassMsg", (long)0 );
     SetPropInt(temp, "State", 1);
+	/* this module registers no class of its own, so there is nothing to give
+	   a parent or a version to - only the library's own dependency */
+	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
+
 	Self = RegisterLibrary(temp);
 }
 
 void _fini()
 {
+	ClearDependencies(Self);
 	UnregisterLibrary(Self);
 	Self = NULL;
 }
