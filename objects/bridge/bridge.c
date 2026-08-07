@@ -867,12 +867,22 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 				snprintf(dbg, sizeof(dbg), "INTERNALS:   member for '%s' -> container '%s'", name, viewAlias);
 				DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 			}
-			/* the size its OBJECT declared, in pixels (Widget_Publish carries
-			   the widget table's w/h onto the entry). A property with no table
-			   row - Name, X, Container - gets the panel's own one-line row. */
+			/* the size its OBJECT declared, in pixels. Widget_Publish carries
+			   the widget table's w/h onto the INTERFACE ENTRY, so that is
+			   where it has to be read from - the same cascade Widget above
+			   uses. Reading only the property node (which is what this did
+			   once the walk moved from the interface to the instance) meant
+			   every member fell through to the one-line default, and a code
+			   box came up 272x30 instead of the 400x180 its panel declares.
+			   A property with no table row - Name, X, Container - has neither
+			   and gets the panel's own one-line row. */
 			{
-				int mw = GetPropInt(prop, "W");
-				int mh = GetPropInt(prop, "H");
+				NodeObj isz = InterfacePropForInstance(inst, name);
+				int mw = isz ? GetPropInt(isz, "W") : 0;
+				int mh = isz ? GetPropInt(isz, "H") : 0;
+
+				if (mw <= 0) mw = GetPropInt(prop, "W");
+				if (mh <= 0) mh = GetPropInt(prop, "H");
 
 				if (mw <= 0) mw = 272;	/* the 300-wide panel, inset both sides */
 				if (mh <= 0) mh = 30;

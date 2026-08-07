@@ -780,6 +780,17 @@ UT_SchedTest (){
 
 	printf("\n");
 
+	/* CreateTask hands back a handle the CALLER owns - AddTask* only arms
+	   it, and once it has fired it is on neither the list's chain nor its
+	   reuse pool, so DeleteList cannot see it. Every task-driven object in
+	   the tree DeleteTasks its handle at teardown for exactly this reason;
+	   a test is no different. DeleteTask copes whichever state it is in. */
+	DeleteTask(testtask1);
+	DeleteTask(testtask2);
+	DeleteTask(testtask3);
+	DeleteTask(testtask4);
+
+	DeleteList(testlist);
 	DelNode(testdata);
 }
 
@@ -825,6 +836,14 @@ void UT_FlowTest(NodeObj container){
 
 	free(original);
 	free(roundtrip);
+
+	/* both recordings are node trees of our own - one record per action,
+	   each node owning a name and a value. The INSTANCES they describe stay:
+	   they are registered, the Pulse still has a Count=1 to fire, and the
+	   main loop below is what lets the flow finish the way it would in any
+	   other host. It is only these two trees that nothing else can reach. */
+	DelNode(flow);
+	DelNode(reloaded);
 }
 
 /* ---- copied verbatim from object.c ---- */
@@ -1336,9 +1355,12 @@ buffReallocAdjustment (buff buffer, unsigned int newSize);
 		exit (1);
 	}
 
-	if (!buffGetLength (buffer)) {
-		printf("A35: Failed  \n");
-		//exit (1);
+	/* buffGetLength is head-tail, the CONTENT length - a buffer just
+	   created is empty whatever it allocated. The "1 byte long" above is
+	   the allocation, and T05 checks that with buffTotalSize(). */
+	if ( buffGetLength (buffer)) {
+		printf("A35: Failed  a new buffer reports content\n");
+		exit (1);
 	}
 
 	/**********************/

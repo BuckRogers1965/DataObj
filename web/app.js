@@ -1488,7 +1488,13 @@ function onPropertyChanged(alias, port, value) {
        re-list the client already does for root when a flow lands, but
        aimed at the container that actually changed. */
     if (port === 'LastMember') {
-      if (value) send({ cmd: 'list-instances', container: alias });
+      /* only for a container we have actually opened. Subscribing is
+         truth-on-demand - it pushes the CURRENT value straight back - so a
+         fresh page load subscribing to a closed view's LastMember got a
+         value and listed contents it is not supposed to hold yet. A view we
+         have never opened lists itself on open (registerPanel), and that is
+         the only time it should. */
+      if (value && loadedContainers[alias]) send({ cmd: 'list-instances', container: alias });
       return;
     }
     /* Open's stored value is the initial presentation only - after       */

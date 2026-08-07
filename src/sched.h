@@ -44,6 +44,12 @@ GetTask(TaskList list);
 int
 DeleteTask(TaskObj task);
 
+/* frees a list and everything it owns: the pending chain, the runnow      */
+/* bucket, and the pool of retired-but-reusable entries. Defined in        */
+/* sched.c since forever, just never declared here.                        */
+int
+DeleteList(TaskList list);
+
 /* allocation accounting: task_entry structs currently allocated (in a  */
 /* list OR parked on the reuse pool) - see NodeCount (node.h)            */
 long

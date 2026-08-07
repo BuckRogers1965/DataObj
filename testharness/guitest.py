@@ -123,8 +123,13 @@ def test_boot(t, r):
              "open=%s, seeds=%s" % (palette_open, seeds),
              palette_open and seeds and seeds > 5)
 
+    # '/Root' belongs in this set: the root became a REAL View (CreateRoot),
+    # so anything at top level carries Container='/Root' where it used to
+    # carry ''. The check still has its teeth - it forbids members of any
+    # container this window has not opened, which is the actual claim.
     root_only = t.js("Object.keys(instances).every(k=>{const c=propertyValues[k+'.Container'];"
-                     "return c===undefined || c==='' || c==='/Root/Palette';})")
+                     "return c===undefined || c==='' || c==='/Root'"
+                     " || c==='/Root/Palette';})")
     r.expect("boot: only visible containers were loaded",
              "no instance from any container this window has not opened",
              "all known instances are root-level or palette members: %s" % root_only,
@@ -620,6 +625,14 @@ def test_lazy_contents(t, r):
     t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
     member = t.wait_js("(Object.keys(instances).find(k=>k.startsWith('%s/LED')) || false)" % view, "member")
 
+    # CLOSE it first. ReservedViewOpen is a real persisted property, so a view
+    # opened above is still open after a reload - the fresh page then opens it
+    # and legitimately streams the member in, and "known before open" is true
+    # for a reason that has nothing to do with laziness. Without this the test
+    # never exercised its own claim.
+    t.js("panels['%s'].setOpen(false)" % view)
+    time.sleep(0.6)
+
     # a FRESH page must not know the closed view's contents until it opens it
     t.call("Page.navigate", {"url": APP})
     time.sleep(2.5)
@@ -844,6 +857,18 @@ def test_options_on_panel_control(t, r):
                "const r=rows.find(x=>{const l=x.querySelector('label');return l&&l.textContent==='Interval';});"
                "if(!r)return null;r.scrollIntoView({block:'center'});"
                "const b=r.getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2};})()" % pulse)
+    if not pos:
+        # the row was not found - report it rather than dying on pos["x"] and
+        # taking the assertion below with it (an aborted test says nothing)
+        rows = t.js("(()=>{const p=panels['%s'];if(!p)return '(no panel)';"
+                    "return [...p.el.querySelectorAll('.prop-row label')]"
+                    ".map(l=>l.textContent).join(',')||'(no .prop-row labels)';})()" % pulse)
+        r.expect("panel-control options: a card ROW is the member, not chrome",
+                 "Options-clicking the Interval row on a Pulse card opens the Interval "
+                 "member's own panel, same as its atom form would",
+                 "no Interval row on the Pulse panel; labels present: %s" % rows,
+                 False)
+        return
     t.click(pos["x"], pos["y"])
     row_panel = t.wait_js(
         "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % row_member,
@@ -902,19 +927,37 @@ def test_gesture_checkbox_counts(t, r):
     snk = t.center_of("instances['%s']" % sink)
     t.click(snk["x"], snk["y"])                      # -> connect to Textbox
     t.wait_js("wires.length>=2", "scriptbox->textbox wire")
+    # WHICH two wires. "wires.length>=2" passes for any two, and the sink
+    # receiving the checkbox's raw values means the second one is not the
+    # one this gesture meant to draw.
+    t.js("window.__wires=JSON.stringify(wires.map(w=>"
+         "w.fromAlias+'.'+w.fromPort+' -> '+w.toAlias+'.'+w.toPort))")
 
     # count: 5 toggles = on,off,on,off,on = three rising edges
     t.set_mode('Operate')
     cbc = t.center_of("instances['%s']" % cb)
+    # every value the sink and the checkbox actually see, in order. The final
+    # value alone cannot tell "only one rising edge arrived" apart from "the
+    # script restarts per message so c is always 1" - both read as 1.
+    t.js("window.__seen=[]; window.__cb=[];")
+    t.js("(()=>{const k='%s.Value',c='%s.Value';const h=window.handleEvent;"
+         "window.handleEvent=function(m){try{if(m&&m.event==='property-changed'){"
+         "if(m.instance+'.'+m.port===k)window.__seen.push(m.value);"
+         "if(m.instance+'.'+m.port===c)window.__cb.push(m.value);}}catch(e){}"
+         "return h.apply(this,arguments);};})()" % (sink, cb))
     for _ in range(5):
         t.click(cbc["x"], cbc["y"])
         time.sleep(0.35)
     time.sleep(1.0)
 
-    val = t.js("propertyValues['%s.Value']" % sink)
+    val  = t.js("propertyValues['%s.Value']" % sink)
+    seen = t.js("JSON.stringify(window.__seen||[])")
+    cbs  = t.js("JSON.stringify(window.__cb||[])")
     r.expect("gesture count: clicking the checkbox counts pulses",
              "five checkbox clicks are three rising edges; the wired Textbox shows 3",
-             "Textbox shows: %s" % val, val == "3")
+             "Textbox shows: %s (sink saw %s, checkbox saw %s, wires %s)"
+             % (val, seen, cbs, t.js("window.__wires||'[]'")),
+             val == "3")
 
 
 def test_markdown_renders(t, r):

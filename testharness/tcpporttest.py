@@ -18,7 +18,15 @@ operate the network underneath, over a real socket.
 import argparse, os, socket, ssl, sys, time
 from rawtest import Raw, Report, ensure_raw_bridge, suite_view, group_view, close_group
 
-PANEL_PORT = 8477      # a port of our own, clear of the framework's
+# A block of five ports (PANEL_PORT + 0..4) of our own, DERIVED from this
+# run's raw-bridge port and never a constant. run.sh runs the variants at the
+# same time, each with RAW_BASE+offset, so one hardcoded number here meant all
+# five copies of this suite fought over the same listener: whoever bound it
+# first passed, the rest failed to bind. It read as a flaky test, and it read
+# as asan being somehow the correct build - asan just runs minutes behind the
+# others and had the port to itself by the time it got here.
+# Set in main() from --port; this value is the standalone case.
+PANEL_PORT = 8400
 
 
 def make(raw, cls, alias, home, x, y):
@@ -56,7 +64,9 @@ def fresh(raw, panel, prop):
     return raw.value_of(panel, prop)
 
 
-def port_is_open(port=PANEL_PORT):
+def port_is_open(port=None):
+    if port is None:
+        port = PANEL_PORT
     try:
         s = socket.create_connection(("127.0.0.1", port), timeout=2)
         s.close()
@@ -433,6 +443,11 @@ def main():
     ap.add_argument("--webport", type=int, default=8083)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+
+    # one ten-wide block per variant: raw 8092..8096 -> 8410, 8420 ... 8450,
+    # clear of the web (8083+), raw (8091+), flowtest's echo (8191+) and CDP
+    global PANEL_PORT
+    PANEL_PORT = 8400 + (args.port - 8091) * 10
 
     ensure_raw_bridge(args.host, args.port, args.webport)
 
