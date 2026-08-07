@@ -225,7 +225,7 @@ function registerPanel(alias, panelEl, display, onToggle) {
       /* tell the engine the panel opened/closed - an object may react to  */
       /* its own panel opening (e.g. load help on open). The engine        */
       /* DELIVERS this to any Open handler; it does not persist the state. */
-      send({ cmd: 'set-property', instance: alias, prop: 'ReservedViewOpen', value: open ? '1' : '0' });
+      send({ cmd: 'set-property', instance: cur(alias), prop: 'ReservedViewOpen', value: open ? '1' : '0' });
       if (onToggle) onToggle(open);
       updateWiresFor(alias);
       /* opening reveals controls that were not drawable a moment ago, so the
@@ -354,6 +354,12 @@ function handleEvent(msg) {
       if (currentMode === 'Connect') send({ cmd: 'list-connections' });
       break;
     case 'instance-created':
+      /* client-only GUI_ annotations ride the birth event, because a control
+         on a canvas has no panel open and nothing subscribes to them. They
+         land in propertyValues like any other value, so everything that
+         reads them (guiAnnotation) works the same whether they arrived here
+         or from an options panel's own subscriptions. */
+      if (msg.gui) for (const k in msg.gui) propertyValues[msg.instance + '.' + k] = msg.gui[k];
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
                         msg.reservedIn, msg.reservedOut, msg.classParent);
       break;
@@ -617,7 +623,7 @@ function makeMenuButtonEl(alias) {
           document.body.classList.add('mode-export');
           return;
         }
-        send({ cmd: 'set-property', instance: alias, prop: 'Selected', value: item });
+        send({ cmd: 'set-property', instance: cur(alias), prop: 'Selected', value: item });
       };
       dropdown.appendChild(row);
     }
@@ -782,12 +788,42 @@ document.addEventListener('click', () => {
 /* write - anything else driving this same property (another client, a  */
 /* Connect()ed source) shows up here too, the same way selfDisplays does */
 function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValue, onCommit, sizeAlias) {
-  const el = buildValueControl(widgetClass, defaultValue, onCommit);
+  /* a Textbox edit is gated by this alias's GUI_Pattern before it leaves the
+     browser - see guiValidate. Every other class commits unchanged. */
+  const commit = (widgetClass !== 'Textbox' || subscribeProp !== 'Value') ? onCommit : (v) => {
+    const raw = guiMaskStrip(guiAnnotation(subscribeAlias, 'Format'), v);
+    if (!guiValidate(subscribeAlias, el, raw)) return;
+    onCommit(raw);
+  };
+  const el = buildValueControl(widgetClass, defaultValue, commit);
   /* a Textbox is a pixel box: it takes the W/H of the instance it IS - its   */
   /* own when it renders its own Value, the Alias member's when it stands in  */
   /* for another object's property. Never the TARGET's: that is the whole     */
   /* widget's size, not this box's.                                            */
   if (widgetClass === 'Textbox') {
+    /* the annotation belongs to the DATA the control carries, not to every
+       box that happens to be bound to this instance. In an options panel
+       every row binds to the same instance - masking on the instance alone
+       put the phone format on X, Y, W, H, Name and on the GUI_Format row
+       itself. An instance-level GUI_Format describes its Value; a row for
+       any other property is not that value and is left alone. */
+    if (subscribeProp === 'Value') {
+      el.guiAlias = subscribeAlias;
+      el.addEventListener('input', () => {
+        guiReformat(el);
+        /* live, both ways, once the box has been good once - the outline
+           goes the instant the last digit lands and comes back the instant
+           one is deleted. An untouched box that has never been complete is
+           only half-typed, not wrong, so it stays plain until it commits. */
+        const raw = guiMaskStrip(guiAnnotation(subscribeAlias, 'Format'), el.value);
+        if (guiOk(subscribeAlias, raw)) {
+          el.guiArmed = true;
+          el.classList.remove('gui-invalid');
+        } else if (el.guiArmed) {
+          el.classList.add('gui-invalid');
+        }
+      });
+    }
     const owner = sizeAlias || subscribeAlias;
     (liveControls[owner + '.W'] = liveControls[owner + '.W'] || []).push({ el, widgetClass: 'AtomW' });
     (liveControls[owner + '.H'] = liveControls[owner + '.H'] || []).push({ el, widgetClass: 'AtomH' });
@@ -817,6 +853,105 @@ function wireSlot(alias, propName, controlEl) {
   return wrap;
 }
 
+/* GUI_* properties: client-only annotations. The engine stores them like any
+   other property and never reads them - the prefix IS the rule, so no list of
+   blessed names lives here or in the bridge. They arrive through the ordinary
+   property-changed path and sit in propertyValues like everything else.
+   For now only Textbox honors them.
+
+   GUI_Format is a MASK, not the name of a format - "(###) ###-####" for a
+   phone number, and the same mechanism does a date or a zip+4 without another
+   line of code here. A '#' takes one digit from the value; every other
+   character is punctuation the box supplies for you, so you type 5551234567
+   and read (555) 123-4567.
+
+   The mask is display only: the ENGINE holds the digits. Formatting that
+   changed the stored value would not be formatting, it would be a second
+   version of the data - and two clients with different masks would disagree
+   about what the property is. So the box shows masked text, and what leaves
+   the browser is always the raw digits.
+
+   GUI_Pattern is a regular expression the RAW value must match. A value that
+   fails it gets a red outline and is not sent - the propagation is gated in
+   the browser, which is why this is presentation and not truth: nothing else
+   writing that same property is bound by it. If a rule has to hold for
+   everyone, it belongs on the wire as a Filter, not here. */
+function guiAnnotation(alias, name) {
+  const v = propertyValues[cur(alias) + '.GUI_' + name];
+  return v ? v : null;
+}
+
+/* mask -> text. Punctuation is emitted only while digits remain, so a
+   half-typed number reads "(555) 12" and not "(555) 12)-    ". */
+function guiMaskApply(mask, raw) {
+  const digits = (raw || '').replace(/\D/g, '');
+  let out = '', d = 0;
+  for (const ch of mask) {
+    if (d >= digits.length) break;
+    if (ch === '#') out += digits[d++];
+    else out += ch;
+  }
+  return out;
+}
+
+/* text -> what the engine stores. The mask's punctuation is the browser's,
+   never the value's. */
+function guiMaskStrip(mask, text) {
+  return mask ? (text || '').replace(/\D/g, '') : text;
+}
+
+/* a mask is a rule, not decoration: "(###) ###-####" says ten digits, so a
+   value that does not fill it is not a phone number. The box takes whatever
+   string it is handed - typed, pasted, or written by the engine - and holds
+   it to that shape. Anything short (or long) is outlined and never sent. */
+function guiMaskComplete(mask, raw) {
+  if (!mask) return true;
+  const want = (mask.match(/#/g) || []).length;
+  return (raw || '').replace(/\D/g, '').length === want;
+}
+
+function guiPattern(alias) {
+  const src = guiAnnotation(alias, 'Pattern');
+  if (!src) return null;
+  try { return new RegExp(src); }
+  catch (e) { return null; }		/* a malformed pattern gates nothing */
+}
+
+/* both annotations judge the RAW value, so a mask and a pattern can never
+   contradict each other. Either one failing means no send. */
+function guiOk(alias, rawValue) {
+  const re = guiPattern(alias);
+  return guiMaskComplete(guiAnnotation(alias, 'Format'), rawValue)
+         && (!re || re.test(rawValue));
+}
+
+function guiValidate(alias, el, rawValue) {
+  const ok = guiOk(alias, rawValue);
+  /* once a box has held a good value it is ARMED: from then on it says so
+     immediately when it stops being good. Before that first good value it
+     is just half-typed, which is not an error yet. */
+  if (ok) el.guiArmed = true;
+  el.classList.toggle('gui-invalid', !ok);
+  return ok;
+}
+
+/* re-mask what is in the box as it is typed. The caret goes to the end
+   because the mask fills left to right as digits arrive - editing the
+   middle of a masked value is not something this handles. */
+function guiReformat(el) {
+  const mask = el.guiAlias && guiAnnotation(el.guiAlias, 'Format');
+  if (!mask) return;
+  const shown = guiMaskApply(mask, el.value);
+  if (shown === el.value) return;
+  el.value = shown;
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 function updateLiveControl(entry, value) {
   if (entry.widgetClass === 'AtomLabelPos') {
     const pos = ['left', 'right', 'top', 'bottom', 'none'].indexOf(value) >= 0 ? value : 'bottom';
@@ -842,6 +977,12 @@ function updateLiveControl(entry, value) {
     if (keep) entry.el.value = keep;
     return;
   }
+  if (entry.widgetClass === 'Textbox' && entry.el.guiAlias) {
+    const mask = guiAnnotation(entry.el.guiAlias, 'Format');
+    entry.el.value = mask ? guiMaskApply(mask, value) : value;
+    guiValidate(entry.el.guiAlias, entry.el, value);
+    return;
+  }
   if (entry.widgetClass === 'MenuValue') {
     /* selecting a value that isn't among the options yet is harmless -    */
     /* the MenuItems update re-applies it once the list arrives            */
@@ -856,7 +997,7 @@ function updateLiveControl(entry, value) {
 function makeSelfControl(alias, propName, widget, defaultValue) {
   const widgetClass = INPUT_WIDGET_CLASS[widget] || 'Textbox';
   return bindLiveControl(alias, propName, widgetClass, defaultValue,
-    (v) => send({ cmd: 'set-property', instance: alias, prop: propName, value: v }));
+    (v) => send({ cmd: 'set-property', instance: cur(alias), prop: propName, value: v }));
 }
 
 function makeSelfDisplay(alias, propName, widget) {
@@ -880,7 +1021,7 @@ function makeMoButtonEl(alias) {
   btn.className = 'mo-button';
   btn.textContent = 'Press';
 
-  const press = (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v });
+  const press = (v) => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: v });
   let held = false;
   btn.addEventListener('pointerdown', (ev) => {
     /* a button just presses - that is what it is for */
@@ -908,7 +1049,7 @@ function makeSelfActivateButton(alias) {
   const btn = document.createElement('button');
   btn.className = 'activate-btn';
   btn.textContent = 'Activate';
-  btn.onclick = () => send({ cmd: 'activate', instance: alias });
+  btn.onclick = () => send({ cmd: 'activate', instance: cur(alias) });
   return btn;
 }
 
@@ -942,7 +1083,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
     /* object's own Items property and whose selection is its Value        */
     const sel = document.createElement('select');
     sel.className = 'widget-menu';
-    sel.onchange = () => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: sel.value });
+    sel.onchange = () => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: sel.value });
     (liveControls[alias + '.Value'] = liveControls[alias + '.Value'] || []).push({ el: sel, widgetClass: 'MenuValue' });
     send({ cmd: 'subscribe', instance: alias, port: 'Value' });
     (liveControls[alias + '.Items'] = liveControls[alias + '.Items'] || []).push({ el: sel, widgetClass: 'MenuItems' });
@@ -1401,6 +1542,20 @@ function onPropertyChanged(alias, port, value) {
   const key = alias + '.' + port;
   for (const entry of selfDisplays[key] || []) updateReadout(entry.el, entry.widgetClass, value);
   for (const entry of liveControls[key] || []) updateLiveControl(entry, value);
+
+  /* the annotation itself changed - re-judge every box it governs, so
+     editing GUI_Pattern in the options panel outlines the offenders now
+     instead of at the next unrelated write */
+  if (port.startsWith('GUI_')) {
+    for (const k in liveControls)
+      for (const entry of liveControls[k])
+        if (entry.el.guiAlias === alias) {
+          const m = guiAnnotation(alias, 'Format');
+          const raw = guiMaskStrip(m, entry.el.value);
+          entry.el.value = m ? guiMaskApply(m, raw) : raw;
+          guiValidate(alias, entry.el, raw);
+        }
+  }
 
   for (const menu of menuButtons[alias] || []) {
     if (port === 'Label') { menu.state.label = value; menu.renderLabel(); }
@@ -1966,7 +2121,7 @@ function renderAliasControl(alias) {
     rec.slot.textContent = '';
     const sel = document.createElement('select');
     sel.className = 'widget-atom-control widget-menu';
-    sel.onchange = () => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: sel.value });
+    sel.onchange = () => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: sel.value });
     rec.slot.appendChild(sel);
     rec.control = sel;
     rec.labelEl.textContent = rec.label || rec.targetProp;
@@ -1995,7 +2150,7 @@ function renderAliasControl(alias) {
   /* writes go through the alias's own "Value" slot - the doorway - so     */
   /* the alias's own Name/Container/X/Y are never touched                  */
   const el = bindLiveControl(rec.target, rec.targetProp, widgetClass, propertyValues[rec.target + '.' + rec.targetProp],
-    (v) => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: v }), alias);
+    (v) => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: v }), alias);
   el.classList && el.classList.add('widget-atom-control');
   rec.slot.appendChild(el);
   rec.control = el;
@@ -2124,6 +2279,21 @@ function onInstanceRemoved(alias) {
 /* been renamed (now reachable by dragging it between views) will fail until    */
 /* the page reloads. Making every gesture closure re-resolve its alias live    */
 /* is a real follow-up, not done here.                                         */
+/* Names change under a running page: a move re-containers an instance, and
+   its path IS its name. onInstanceRenamed re-keys every map, but it cannot
+   reach inside a closure - and every deferred gesture (a commit, a button,
+   a view toggle) closed over the alias it was drawn with, so after a move it
+   addressed a path the engine no longer knows and got back "unknown
+   instance". Deferred sends resolve through here instead of trusting what
+   they captured. Chains collapse: A->B then B->C answers C for A. */
+let renamedTo = {};
+
+function cur(alias) {
+  let a = alias, guard = 0;
+  while (renamedTo[a] && guard++ < 32) a = renamedTo[a];
+  return a;
+}
+
 function onInstanceRenamed(oldAlias, newAlias) {
   if (!oldAlias || !newAlias || oldAlias === newAlias) return;
 
@@ -2167,6 +2337,18 @@ function onInstanceRenamed(oldAlias, newAlias) {
   for (const w of wires) {
     if (w.fromAlias === oldAlias) w.fromAlias = newAlias;
     if (w.toAlias === oldAlias) w.toAlias = newAlias;
+  }
+
+  renamedTo[oldAlias] = newAlias;
+
+  /* a control addresses the engine through a stamp on its own element, so
+     that a rename can follow it into what would otherwise be a closed-over
+     constant. guiAlias is the same story for the GUI_ annotations. */
+  for (const k of Object.keys(liveControls)) {
+    for (const entry of liveControls[k]) {
+      if (entry.el.ctlAlias === oldAlias) entry.el.ctlAlias = newAlias;
+      if (entry.el.guiAlias === oldAlias) entry.el.guiAlias = newAlias;
+    }
   }
 
   if (views[newAlias]) views[newAlias].innerEl.dataset.viewAlias = newAlias;

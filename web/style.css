@@ -776,3 +776,11 @@ body.offline #offline { display: flex; }
   letter-spacing: 1px;
   text-shadow: 0 2px 12px rgba(0,0,0,0.8);
 }
+
+/* a value that fails its GUI_Pattern - client-only, see guiValidate in
+   app.js. The engine knows nothing about it; this is the browser saying
+   "I did not send that", not the engine refusing it. */
+.textbox.gui-invalid {
+  border-color: #d9463f;
+  outline: 1px solid #d9463f;
+}
