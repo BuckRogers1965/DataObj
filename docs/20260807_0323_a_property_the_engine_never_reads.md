@@ -127,7 +127,17 @@ refusing to send is a rule that only exists where a browser is attached - a
 script writing the same property bypasses it, a second client bypasses it, a
 headless host has no rule at all. That is fine for input validation at the
 edge, which is what this is. If a constraint has to hold for everyone, it
-belongs on the wire as a Filter, in the engine, where every writer meets it.
+belongs in the engine, where every writer meets it.
+
+*Later the same night, that got sharper.* "In the engine" does not have to mean
+a Filter object in the wire. Every property already runs code on delivery if it
+carries an `OnMsg`, so the rule can live on the property itself - a standard
+handler, configured by sub-properties on the same node, holding for a script
+and a second client and a flow load alike. `GUI_Pattern` then demotes to what
+it should always have been: the browser's local copy, for instant feedback,
+of a rule the engine actually enforces. See
+`20260807_1250_every_property_has_an_audience.md` - including why that
+mechanism must not ship before the GUI can show that a property is gated.
 
 ## The tests, and what they were hiding
 
