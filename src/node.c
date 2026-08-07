@@ -580,9 +580,30 @@ NodeObj GetNextProp(NodeObj node)
 /* fan-out is what makes chained property wires hop onward)                */
 void SetPropStr(NodeObj node, char *name, char *value);
 
-void DeliverToSubscriber(NodeObj sub, int message, NodeObj data)
+/* WHERE THE CURRENT DELIVERY CAME FROM.
+
+   The dispatcher knows the source - FanOutSubscribers has the property that
+   changed, DispatchMsg has the envelope's outPort - and used to drop it one
+   line before calling the handler. A handler could then only learn its source
+   by owning a separate sink object per wire, which is exactly why the web
+   bridge grew a "tap" node per subscription.
+
+   Set here, around the call, so everything underneath inherits it: the
+   handler, and anything the handler sends onward. Saved and restored rather
+   than assigned, because property fan-out is SYNCHRONOUS - a handler that
+   writes a property nests another delivery inside the one already running.
+   Single-threaded fabric, so a stack discipline is enough. */
+static NodeObj curFromNode = NULL;
+
+NodeObj MsgFromNode(void)
+{
+	return curFromNode;
+}
+
+void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNode)
 {
 	NodeObj toInstance, portnode, chunk;
+	NodeObj prevFrom;
 	int (*callback)(NodeObj, int, NodeObj);
 	int (*onmsg)(NodeObj, int, NodeObj);
 	char *port, *value;
@@ -590,16 +611,23 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data)
 	callback   = (int (*)(NodeObj, int, NodeObj)) GetPropLong(sub, "Callback");
 	toInstance = (NodeObj) GetPropLong(sub, "Instance");
 
+	prevFrom    = curFromNode;
+	curFromNode = fromNode;
+
 	if (callback)
 	{
 		callback(toInstance, message, data);
+		curFromNode = prevFrom;
 		return;
 	}
 
 	port  = GetPropStr(sub, "Port");
 	value = data ? GetValueStr(data) : NULL;
 	if (!toInstance || !port || !value)
+	{
+		curFromNode = prevFrom;
 		return;
+	}
 
 	/* a handler that appeared on the port after the wire was made still  */
 	/* wins - deliver to it the way genuine port traffic arrives (the     */
@@ -614,10 +642,12 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data)
 		SetValueStr(chunk, value);
 		onmsg(toInstance, message, chunk);
 		DelNode(chunk);
+		curFromNode = prevFrom;
 		return;
 	}
 
 	SetPropStr(toInstance, port, value);
+	curFromNode = prevFrom;
 }
 
 /* every property write fans out, unconditionally, to whatever has       */
@@ -634,7 +664,7 @@ static void FanOutSubscribers(NodeObj propnode)
 	while (sub)
 	{
 		if (CmpName(sub, "Subscriber"))
-			DeliverToSubscriber(sub, msg_change, propnode);
+			DeliverToSubscriber(sub, msg_change, propnode, propnode);
 		sub = GetNextSibling(sub);
 	}
 }

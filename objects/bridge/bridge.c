@@ -1760,24 +1760,23 @@ void Bridge_DoActivate(NodeObj instance, InstanceData *local, NodeObj command)
  * here first (Bridge_FreeTaps).
  */
 
-/* free every tap subscribed to any of inst's ports, ahead of deleting  */
-/* inst - the Subscriber props pointing at them die with the instance,  */
-/* and a tap is a bare node nothing else owns (Bridge_MakeTap mallocs   */
-/* it, no registry, no parent), so each one would otherwise leak        */
-void Bridge_FreeTaps(NodeObj inst)
+/* drop the Bridge's tap records for a dying instance. They are children of
+   the Taps property so they are owned and cannot leak, but a record whose
+   PropNode has been freed must go or a later allocation reusing that address
+   would match it. DelSibling before DelNode: DelNode recurses nextSib first
+   and would take every record after it. */
+void Bridge_FreeTaps(NodeObj bridgeInstance, NodeObj inst)
 {
-	NodeObj port, sub, tap;
+	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
+	NodeObj rec, next;
 
-	for (port = GetNextProp(inst); port; port = GetNextSibling(port))
+	for (rec = taps ? GetChild(taps) : NULL; rec; rec = next)
 	{
-		for (sub = GetNextProp(port); sub; sub = GetNextSibling(sub))
-		{
-			if (!CmpName(sub, "Subscriber"))
-				continue;
-			tap = (NodeObj) GetPropLong(sub, "Instance");
-			if (tap && CmpName(tap, "Tap"))
-				DelNode(tap);
-		}
+		next = GetNextSibling(rec);
+		if ((NodeObj) GetPropLong(rec, "Target") != inst)
+			continue;
+		DelSibling(rec);
+		DelNode(rec);
 	}
 }
 
@@ -1864,7 +1863,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 			   view's removal to a key nobody was viewing, so its icon and
 			   panel lingered until a reload. */
 
-			Bridge_FreeTaps(mem);
+			Bridge_FreeTaps(instance, mem);
 			UnregisterPath(p);
 			DeleteInstance(mem);
 
@@ -1940,19 +1939,42 @@ void Bridge_ConnClosed(NodeObj instance, InstanceData *local, long connId)
  * Bridge's own Out - reusing the wiring the Bridge already has to the
  * client, whether that is raw TCP or a WebSocket, for free.
  */
+static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *eventType);
+
+int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data);
+
 int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 {
-	NodeObj owner, target, chunk;
+	NodeObj owner;
+
+	/* the handler entry: MsgFromNode() says which property this delivery
+	   came from, so the record is found by pointer instead of being carried
+	   by a sink object of its own.
+	   It must be MsgFromNode and not `data`: for a property change the two
+	   are the same node, but for queued message traffic `data` is the
+	   PAYLOAD and the source appears nowhere in it. Identifying by data
+	   silently dropped every Out-port subscription in the system. */
+	owner = instance;
+	instance = Bridge_FindTap(owner, MsgFromNode(), NULL);
+	if (!instance)
+		return rtrn_propagate;
+
+	return Bridge_TapEmit(owner, instance, message, data);
+}
+
+/* the body, given the record. Split out because subscribe's truth-on-demand
+   push calls it DIRECTLY - not through DeliverToSubscriber - so there is no
+   ambient source to look the record up from, and it already has the record
+   in hand. */
+int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data)
+{
+	NodeObj target, chunk;
 	InstanceData *ownerLocal;
 	char *alias, *port, *eventType, *value;
 	char aliasBuf[ALIASLEN];
 	char *escAlias, *escPort, *escValue;
 	char *buf;
 	int   bufLen;
-
-	owner = (NodeObj) GetPropLong(instance, "Owner");
-	if (!owner)
-		return rtrn_propagate;
 
 	/* resolved fresh every delivery, not cached at subscribe time - see  */
 	/* Bridge_AliasForInstance's doc comment. Falls back to the string    */
@@ -2023,23 +2045,47 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_propagate;
 }
 
-NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char *port, char *eventType)
+/* the record for one watched property, or NULL. DeliverToSubscriber hands a
+   Callback the ORIGINAL data, and for a property change that data IS the
+   source property node - so a pointer compare says which subscription fired.
+   Records are children of the Bridge's own Taps property, so DelNode frees them
+   and they can be listed; a tap used to be a bare node owned by nobody. */
+static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *eventType)
 {
-	NodeObj tap, in;
+	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
+	NodeObj rec;
+	char   *e;
 
-	tap = NewNode(INTEGER);
-	SetName(tap, "Tap");
-	SetPropStr(tap, "Instance", alias);	/* fallback only - see Bridge_TapOnIn */
-	SetPropLong(tap, "Target", (long) target);
-	SetPropStr(tap, "Port", port);
-	SetPropStr(tap, "EventType", eventType);
-	SetPropLong(tap, "Owner", (long) bridgeInstance);
+	for (rec = taps ? GetChild(taps) : NULL; rec; rec = GetNextSibling(rec))
+	{
+		if ((NodeObj) GetPropLong(rec, "PropNode") != propNode)
+			continue;
+		e = GetPropStr(rec, "EventType");
+		if (!eventType || (e && strcmp(e, eventType) == 0))
+			return rec;
+	}
+	return NULL;
+}
 
-	SetPropInt(tap, "In", 0);
-	in = GetPropNode(tap, "In");
-	SetPropLong(in, "OnMsg", (long) Bridge_TapOnIn);
+NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char *port,
+					   char *eventType, NodeObj propNode)
+{
+	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
+	NodeObj rec;
 
-	return tap;
+	if (!taps)
+		return NULL;
+
+	rec = NewNode(INTEGER);
+	SetName(rec, "Tap");
+	SetPropStr(rec, "Instance", alias);	/* fallback only - see Bridge_TapOnIn */
+	SetPropLong(rec, "Target", (long) target);
+	SetPropLong(rec, "PropNode", (long) propNode);
+	SetPropStr(rec, "Port", port);
+	SetPropStr(rec, "EventType", eventType);
+	AddChild(taps, rec);
+
+	return rec;
 }
 
 void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
@@ -2095,37 +2141,27 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 	/* one tap per port+event already serves every client at once.       */
 	tap = NULL;
 	{
-		NodeObj portNode, sub, cand;
-		char *tPort, *tEvent;
+		NodeObj portNode = GetPropNode(inst, port);
 
-		portNode = GetPropNode(inst, port);
-		for (sub = portNode ? GetNextProp(portNode) : NULL; sub; sub = GetNextSibling(sub))
-		{
-			if (!CmpName(sub, "Subscriber"))
-				continue;
-			cand = (NodeObj) GetPropLong(sub, "Instance");
-			if (!cand || !CmpName(cand, "Tap"))
-				continue;
-			if ((NodeObj) GetPropLong(cand, "Owner") != instance)
-				continue;
-			tPort  = GetPropStr(cand, "Port");
-			tEvent = GetPropStr(cand, "EventType");
-			if (tPort && strcmp(tPort, port) == 0 && tEvent && strcmp(tEvent, eventType) == 0)
-			{
-				tap = cand;
-				break;
-			}
-		}
+		tap = portNode ? Bridge_FindTap(instance, portNode, eventType) : NULL;
 	}
 
 	if (!tap)
 	{
-		tap = Bridge_MakeTap(instance, inst, alias, port, eventType);
+		NodeObj propNode;
 
-		if (!Connect(inst, port, tap, "In"))
+		/* Connect creates the SOURCE property if absent, so take the node's
+		   address afterwards - it is the record's identity */
+		if (!Connect(inst, port, instance, "Taps"))
 		{
-			DelNode(tap);
 			Bridge_Error(instance, "subscribe", "connect failed");
+			return;
+		}
+		propNode = GetPropNode(inst, port);
+		tap = Bridge_MakeTap(instance, inst, alias, port, eventType, propNode);
+		if (!tap)
+		{
+			Bridge_Error(instance, "subscribe", "could not record the tap");
 			return;
 		}
 	}
@@ -2149,7 +2185,7 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 	/* to touch it. A port has no such resting value, so this only applies   */
 	/* to "data" properties.                                                  */
 	if (strcmp(eventType, "property-changed") == 0)
-		Bridge_TapOnIn(tap, msg_change, GetPropNode(inst, port));
+		Bridge_TapEmit(instance, tap, msg_change, GetPropNode(inst, port));
 }
 
 /* targeted - only the client that logged in needs to see it */
@@ -2884,6 +2920,15 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropInt(instance, "In", 0);
 	port = GetPropNode(instance, "In");
 	SetPropLong(port, "OnMsg", (long)Bridge_OnIn);
+
+	/* Taps is a PROPERTY, like every other one - carrying a handler does
+	   not make it a different kind of thing. Client subscriptions Connect
+	   to it, and each watched property gets one record as a child of it.
+	   Declared here, with the rest, so it exists before the first
+	   subscribe: Connect refuses a sink property that is not already there. */
+	SetPropInt(instance, "Taps", 0);
+	port = GetPropNode(instance, "Taps");
+	SetPropLong(port, "OnMsg", (long)Bridge_TapOnIn);
 
 	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
 	SetPropStr(instance, "Enable", "1");

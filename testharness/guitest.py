@@ -655,6 +655,21 @@ def test_lazy_contents(t, r):
 # --------------------------------------------------------------------------
 
 
+def shown_value(t, alias):
+    """WHAT THE BOX DISPLAYS, which is what these tests actually assert.
+
+    propertyValues is a cache of property-CHANGED events. A Textbox does not
+    change its Value that way: Textbox_OnIn stores with SetValueStr (no
+    fan-out, deliberately - a repeated write is still an event for a box that
+    triggers something) and re-announces with SndMsg out its own Value. So the
+    rendered control has the text while the property-changed cache may not,
+    and a test that reads the cache is looking in the wrong place for a claim
+    about what is shown."""
+    return t.js("(()=>{const l=(liveControls['%s.Value']||[])"
+                ".filter(x=>document.contains(x.el));"
+                "return l.length ? l[l.length-1].el.value : null;})()" % alias)
+
+
 def test_script_pulse(t, r, lang, snippet):
     """The script pulse generator as a real WIDGET: a ScriptBox (the
     script widget - dropdown, source box, output box) powered by `lang`,
@@ -684,7 +699,7 @@ def test_script_pulse(t, r, lang, snippet):
     t.js("send({cmd:'activate',instance:'%s'})" % pulse)
     time.sleep(3.0)
 
-    final = t.js("propertyValues['%s.Value']" % sink)
+    final = shown_value(t, sink)
     r.expect("%s pulse widget: a ScriptBox counts pulses like a coded widget" % lang.lower(),
              "the %s-powered ScriptBox counts 3 rising edges; the wired Textbox shows 3" % lang,
              "Textbox shows: %s" % final,
@@ -838,47 +853,50 @@ def test_options_on_panel_control(t, r):
              "panel %s shown=%s members=%s" % (member_panel, shown, sorted(plist)),
              member_panel and shown and "Target" in plist and "X" in plist)
 
-    # the SAME members projected as a CARD's rows must not lose their
-    # instance-hood (the reported bug: rows filtered the member away and an
-    # Options click fell through to the card itself)
+    # AND AGAIN ON A WIDGET'S OWN PANEL, because a panel is just a view of
+    # ordinary controls - the same base case, no second kind of projection.
+    # A Pulse's panel members are real instances (P/Interval is a Knob), so
+    # Options-clicking one opens ITS panel exactly as clicking a member atom
+    # above did.
+    #
+    # This used to Options-click a "card ROW". Cards were a client-side
+    # parallel answer to "what is an object's panel" - registerCard and
+    # addMemberRow no longer exist, cardBodies is never written, and
+    # .prop-row survives only in the stylesheet. readmefirst repair #2 said
+    # that species had to die; it did, and the claim it guarded belongs to
+    # the controls themselves.
     pulse = view + '/P'
     t.js("send({cmd:'create-instance',class:'Pulse',as:'%s',container:'%s',x:'20',y:'90'})" % (pulse, view))
     t.wait_js("!!instances['%s']" % pulse, "pulse")
-    t.js("internalsAskMode['%s']='card'; send({cmd:'internals',instance:'%s'})" % (pulse, pulse))
-    card_view = t.wait_js("(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % pulse,
-                          "pulse card internals")
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelX',value:'880'})" % pulse)
+    t.js("send({cmd:'set-property',instance:'%s',prop:'ReservedViewPanelY',value:'120'})" % pulse)
     t.js("panels['%s'].setOpen(true)" % pulse)
-    time.sleep(1.5)  # rows stream in
+    time.sleep(1.5)  # its controls stream in
 
-    row_member = t.js("(Object.keys(aliasAtoms).find(k=>k.startsWith('%s/')"
-                      " && aliasAtoms[k].targetProp==='Interval') || false)" % card_view)
-    pos = t.js("(()=>{const p=panels['%s'];if(!p)return null;"
-               "const rows=[...p.el.querySelectorAll('.prop-row')];"
-               "const r=rows.find(x=>{const l=x.querySelector('label');return l&&l.textContent==='Interval';});"
-               "if(!r)return null;r.scrollIntoView({block:'center'});"
-               "const b=r.getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2};})()" % pulse)
-    if not pos:
-        # the row was not found - report it rather than dying on pos["x"] and
-        # taking the assertion below with it (an aborted test says nothing)
-        rows = t.js("(()=>{const p=panels['%s'];if(!p)return '(no panel)';"
-                    "return [...p.el.querySelectorAll('.prop-row label')]"
-                    ".map(l=>l.textContent).join(',')||'(no .prop-row labels)';})()" % pulse)
-        r.expect("panel-control options: a card ROW is the member, not chrome",
-                 "Options-clicking the Interval row on a Pulse card opens the Interval "
-                 "member's own panel, same as its atom form would",
-                 "no Interval row on the Pulse panel; labels present: %s" % rows,
-                 False)
+    knob = pulse + '/Interval'
+    present = t.js("!!instances['%s']" % knob)
+    r.expect("panel-control options: a widget's panel holds real instances",
+             "the Pulse's Interval control is an addressable instance in its panel",
+             "%s present: %s" % (knob, present),
+             present)
+    if not present:
         return
-    t.click(pos["x"], pos["y"])
-    row_panel = t.wait_js(
-        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % row_member,
-        "the row member's own internals")
-    row_shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (row_panel, row_panel))
-    r.expect("panel-control options: a card ROW is the member, not chrome",
-             "Options-clicking the Interval row on a Pulse card opens the Interval "
-             "member's own panel, same as its atom form would",
-             "row member %s -> panel %s shown=%s" % (row_member, row_panel, row_shown),
-             row_member and row_panel and row_shown)
+
+    t.set_mode('Options')
+    src = t.center_of("instances['%s']" % knob)
+    t.click(src["x"], src["y"])
+    knob_panel = t.wait_js(
+        "(Object.keys(internalsOwner).find(k=>internalsOwner[k]==='%s') || false)" % knob,
+        "the Interval control's own internals")
+    time.sleep(1.0)
+    shown = t.js("panels['%s'] && panels['%s'].el.style.display!=='none'" % (knob_panel, knob_panel))
+    r.expect("panel-control options: a control in a panel opens like anything else",
+             "Options-clicking the Interval control inside the Pulse's panel opens "
+             "ITS own panel - a panel member is an instance, not chrome",
+             "control %s -> panel %s shown=%s" % (knob, knob_panel, shown),
+             knob_panel and shown)
+
+    t.js("panels['%s'].setOpen(false)" % pulse)
 
 
 def test_gesture_checkbox_counts(t, r):
@@ -918,15 +936,48 @@ def test_gesture_checkbox_counts(t, r):
     time.sleep(0.5)
 
     t.set_mode('Connect')
+
+    # THE WIRE LANDS ON THE DOT, NOT THE ICON BODY. A widget is a view
+    # (classParent Widget -> registerView), and a view names a control that
+    # stands in for it on each side: addStandInMark puts a clickable
+    # .view-dot on the icon, onStandInClick arms or completes on it, and
+    # completeWire resolves the dot to the real port before sending one
+    # connect. Clicking the middle of the icon is not the gesture and does
+    # nothing in Connect mode - which is how this test used to draw NO wires
+    # at all and still pass, because `wires.length>=2` was satisfied by
+    # leftovers from the two pulse tests that ran before it.
+    #
+    # The dots are strictly directional (onStandInClick): out STARTS a wire
+    # and refuses to finish one, in FINISHES and refuses to start. So the
+    # order below is the only order that works.
+    def dot(side):
+        return t.js("(()=>{const i=instances['%s'];if(!i)return null;"
+                    "const e=i.el.querySelector('.view-dot.%s');if(!e)return null;"
+                    "e.scrollIntoView({block:'center'});"
+                    "const b=e.getBoundingClientRect();"
+                    "if(!b.width||!b.height)return null;"
+                    "return {x:b.left+b.width/2,y:b.top+b.height/2};})()" % (box, side))
+
+    def wired(fa, fp, ta, tp):
+        """the SPECIFIC wire, not a count - a count passes on other tests'"""
+        return ("wires.some(w=>w.fromAlias==='%s'&&w.fromPort==='%s'"
+                "&&w.toAlias==='%s'&&w.toPort==='%s')" % (fa, fp, ta, tp))
+
+    din, dout = dot('in'), dot('out')
+    if not din or not dout:
+        r.expect("gesture count: clicking the checkbox counts pulses",
+                 "the ScriptBox icon offers in/out stand-in dots to wire to",
+                 "in dot: %s, out dot: %s" % (din, dout), False)
+        return
+
     src = t.center_of("instances['%s']" % cb)
     t.click(src["x"], src["y"])                      # arms Checkbox.Value
-    ic = t.center_of("instances['%s']" % box)
-    t.click(ic["x"], ic["y"])                        # icon completes as sink -> In
-    t.wait_js("wires.length>=1", "checkbox->scriptbox wire")
-    t.click(ic["x"], ic["y"])                        # icon starts as source -> Out
+    t.click(din["x"], din["y"])                      # finishes -> ScriptBox.In
+    t.wait_js(wired(cb, 'Value', box, 'In'), "checkbox.Value -> scriptbox.In")
+    t.click(dout["x"], dout["y"])                    # starts -> arms ScriptBox.Out
     snk = t.center_of("instances['%s']" % sink)
-    t.click(snk["x"], snk["y"])                      # -> connect to Textbox
-    t.wait_js("wires.length>=2", "scriptbox->textbox wire")
+    t.click(snk["x"], snk["y"])                      # finishes -> Textbox.Value
+    t.wait_js(wired(box, 'Out', sink, 'Value'), "scriptbox.Out -> textbox.Value")
     # WHICH two wires. "wires.length>=2" passes for any two, and the sink
     # receiving the checkbox's raw values means the second one is not the
     # one this gesture meant to draw.
@@ -950,7 +1001,7 @@ def test_gesture_checkbox_counts(t, r):
         time.sleep(0.35)
     time.sleep(1.0)
 
-    val  = t.js("propertyValues['%s.Value']" % sink)
+    val  = shown_value(t, sink)
     seen = t.js("JSON.stringify(window.__seen||[])")
     cbs  = t.js("JSON.stringify(window.__cb||[])")
     r.expect("gesture count: clicking the checkbox counts pulses",

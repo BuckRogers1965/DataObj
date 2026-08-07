@@ -71,7 +71,11 @@ long    NodeCount (void);
 /* fan-out and object.c's queued port dispatch. A record with a Callback */
 /* calls it; one without gets the universal default: the payload is      */
 /* stored onto the record's {Instance, Port} (which fans out in turn).   */
-void    DeliverToSubscriber (NodeObj sub, int message, NodeObj data);
+void    DeliverToSubscriber (NodeObj sub, int message, NodeObj data, NodeObj fromNode);
+
+/* the property node the delivery being handled right now came from, or NULL
+   outside a delivery. Valid only for the duration of the handler. */
+NodeObj MsgFromNode (void);
 
 /* symlinks: a node can stand for another node (an alias's control     */
 /* property links to the original's - value, subscribers, and wiring   */

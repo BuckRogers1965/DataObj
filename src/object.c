@@ -1407,7 +1407,7 @@ DispatchMsg(NodeObj envArg, NodeObj unused, int reason){
 				/* one shared definition of delivery (node.c): a       */
 				/* recorded handler is called; a plain-property wire   */
 				/* gets the universal default - store what arrived     */
-				DeliverToSubscriber(sub, env->message, env->data);
+				DeliverToSubscriber(sub, env->message, env->data, env->outPort);
 			sub = GetNextSibling(sub);
 		}
 	}

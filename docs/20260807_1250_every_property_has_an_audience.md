@@ -321,3 +321,68 @@ who is allowed to write this. Security turns out not to be a subsystem at all,
 just the same gate asking a different question.
 
 Not bad for a phone number.
+
+## Postscript: the twin failure
+
+Leaving the system is one way to pay. There is a second, and it cost more
+hours than the first.
+
+The web bridge minted a "tap" object for every client subscription - a node
+whose entire job was to know which property a delivery came from, because the
+handler could not otherwise tell. It turned out `DispatchMsg` had that
+information the whole time. The source property node is `env->outPort`; it is
+how the subscriber list gets found in the first place, and it was dropped one
+line before the handler was called:
+
+```c
+DeliverToSubscriber(sub, env->message, env->data);
+```
+
+Meanwhile the *other* delivery path, `FanOutSubscribers`, does pass its origin.
+One path carried the source, the other discarded it, and an entire species of
+object grew in the gap.
+
+**The substitute then hid the affordance.** Nobody fixed the dispatcher,
+because the tap made it unnecessary. That is the loop: an unused affordance
+produces a workaround, and the workaround removes the pressure that would have
+revealed the affordance.
+
+It is not a rare shape here:
+
+- `DeliverToSubscriber` already hands a callback the ORIGINAL data - put there
+  deliberately for this kind of dispatch - so a proxy object per source was
+  never needed
+- `DelNode` recursing props and children is a garbage collector; the tap sat
+  outside it and got a hand-written reaper instead
+- `DeleteList` existed in sched.c and was never declared in sched.h, so a test
+  leaked its list because the API looked absent
+- `Widget`, `W` and `H` were annotations on property nodes three times over;
+  `GUI_` did not invent annotations, it named them
+- messages already carry `Conn`; a generation stamp for time rather than origin
+  is the same move, still unmade
+- quiescence already is the fixed-point predicate - it is the shutdown rule; a
+  settle-and-release barrier is that same predicate scoped to a region
+
+The tell is distinct from the bypass tell. A bypass announces itself with a
+helper whose job is to *remember*. This one announces itself with **a new
+species whose only job is to carry information something upstream already
+had.** The tap carried identity the dispatcher held. The card panel carried a
+property list the internals view held. A per-object `OnChange` carries
+behaviour a standard handler could.
+
+And the reason it happens is actionable rather than a matter of attention: the
+affordance was **invisible from where you would use it**. Reading
+`DeliverToSubscriber(sub, message, data)` tells you nothing about `data` being
+the source for one of its two callers - you would have to go read the caller.
+An affordance that cannot be seen from the call site is functionally absent.
+
+Which is why the fix was not a new capability. `MsgFromNode()` creates no
+information; it gives a name to information that was already flowing past. The
+dispatcher passes what it always knew, the handler can ask, and the tap stops
+being a thing that has to exist.
+
+So the closing law has a twin:
+
+> Leaving the system costs you a second system to maintain, and you will
+> forget. Not knowing the system costs you a second mechanism to maintain -
+> and that one is worse, because it looks like architecture.
