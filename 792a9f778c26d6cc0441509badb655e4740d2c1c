@@ -1,0 +1,15 @@
+The message undersells this one: it is not only the make depend churn.
+
+Bridge_InstanceEvent gained Bridge_GuiProps, which carries every GUI_*
+property on an instance out with the birth event as a "gui" object. That is
+what lets a client know an instance's presentation annotations (GUI_Format,
+GUI_Pattern) without opening an options panel - the surface that does not
+exist when a control is just sitting on a canvas. The GUI_ prefix is the
+whole rule: the engine stores these and never reads them, and no list of
+blessed names exists in the bridge or anywhere else.
+
+Also in here: src/dyn/bufftest.* and src/schedtest.* deleted, part of moving
+the unit tests out of libframework.so and into the unit_test executable.
+
+The dependency churn across every objects/*/Makefile is the make depend the
+message refers to. It is noise; the two changes above are the content.
