@@ -9,6 +9,7 @@
 #include "DebugPrint.h"
 
 #include "quickjs/quickjs.h"
+#include "control.h"	/* PROP_* - what a published property presents as */
 
 /*
 

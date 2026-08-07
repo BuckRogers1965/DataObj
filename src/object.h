@@ -182,26 +182,6 @@ NodeObj CloneInstance(NodeObj source, char * containerPath, NodeObj map);
 /* delivery) and any instance's Activate port (ActivateOnMsg, stamped by */
 /* RegisterInstance), so there is no second or third way to wire.        */
 
-/* One row of a settings panel: which control class represents a named  */
-/* property/port on the object that owns this table, and where it sits. */
-/* The C-side answer to "make objects control their own presentation" -  */
-/* the shape is the VNOS panel-builder pattern (objects/demo/            */
-/* pulsegenerator/pulsepb.c's ControlInfo[]: control class, bound        */
-/* variable, X, Y, W, H per row) brought inward: an object's own         */
-/* ClassStart/InstanceStart declares this table directly instead of a    */
-/* client inferring a layout from a Widget-type constant. property is    */
-/* unused for a Button row - it always reaches the target's Activate,    */
-/* never a named property.                                               */
-typedef struct ControlSpec
-{
-	char *controlClass;
-	char *property;
-	int   x, y, w, h;
-} ControlSpec;
-
-/* BuildSettingsView is in control.object (see control.h) - it makes and
-   wires the controls a ControlSpec table describes. */
-
 /* Small per-connection scalar state, keyed by a Conn id (see tcp.c's   */
 /* multi-connection support) - a table node holds one long-typed prop   */
 /* per connection, named by its decimal id. Used by anything sitting     */
@@ -238,7 +218,7 @@ WatchableProp(NodeObj instance, char * propname);
 /* inside, "" for the top-level canvas) and Deletable ("0" refuses           */
 /* Bridge_Delete) - the same reasoning: an instance's membership in a View   */
 /* is exactly as ordinary a property as where it sits, not a Slot/           */
-/* membership structure, and BuildPalette (this file) is what actually       */
+/* membership structure, and BuildPalette (control.object) is what actually  */
 /* uses both to make the Palette "just a view" with no special handling      */
 /* beyond two property values.                                              */
 /* PublishPosition/InitPosition are in control.object too (control.h). */
@@ -337,24 +317,9 @@ void *
 ObjGetTaskList(void);
 
 
-typedef enum {
-    PROP_TEXTBOX=1,
-    PROP_LED,
-    PROP_BUTTON,
-    PROP_CHECKBOX,
-    PROP_SLIDER,
-    PROP_VUMETER,
-    PROP_TEXTOUT,
-    PROP_KNOB,
-    PROP_LABEL,
-    PROP_NULL,
-    PROP_MENU,
-    PROP_ICON,     /* renders as the thing's icon - a doorway that opens   */
-                   /* its one panel; what Open publishes (PublishPosition) */
-    PROP_MARKDOWN, /* rendered markdown - the Markdown widget's display    */
-    PROP_HTML,     /* rendered HTML, sandboxed - the HTML widget's display */
-    PROP_IMAGE     /* an image loaded from a URL - the Image widget's display */
-} PropertyType;
+/* PropertyType - which control a published property presents as - is in
+   control.h. The core stores that number and never interprets it; what
+   the choices ARE is a question about controls. */
 
 /* Published interface: what a palette (or anything else outside the     */
 /* object) needs to know about a class without creating an instance -    */
@@ -377,14 +342,8 @@ NodeObj InterfacePropForInstance(NodeObj inst, char * propname);
 /* published one - walk it with GetChild/GetNextSibling                  */
 NodeObj GetClassInterface(NodeObj class);
 
-/* per-class layout (position, label, look) for each published property, */
-/* skins live in skin.object now - include skin.h to reach them */
+/* per-class layout for each published property: skins live in skin.object
+   now - include skin.h to reach them */
 
-
-/* the standard Help panel size; the help text box */
-#define HELP_W 530
-#define HELP_H 376
-#define HELP_W_OFF 50
-#define HELP_H_OFF 80
 
 #endif

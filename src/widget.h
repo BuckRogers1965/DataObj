@@ -24,6 +24,14 @@
 #define HELP_ICON_X 15
 #define HELP_ICON_Y_OFF 80
 
+/* the Help panel itself, and the text box inside it. Presentation, so it
+   lives with the class that owns Help - it was in object.h, where the core
+   had no use for it. */
+#define HELP_W 530
+#define HELP_H 376
+#define HELP_W_OFF 50
+#define HELP_H_OFF 80
+
 /* one control's placement in a widget panel table (legacy Widget_Build) */
 typedef struct
 {

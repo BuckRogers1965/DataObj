@@ -200,7 +200,13 @@ static int UT_ReportLeftoverTasks(TaskList list)
 		{
 			if (where[0]) break;
 			where = " (runnow)";
-			t = GetTaskListRunnow(list);
+			/* the HEAD of the runnow bucket, not the bucket itself:
+			   GetTaskListRunnow returns the LIST, and both a list and a task
+			   entry are typedef'd void *, so handing the list straight to
+			   GetTaskNext walks the list header as though it were a task and
+			   reports whatever those bytes happen to be (seen live:
+			   callback=0x31, data=ASCII). The compiler cannot catch it. */
+			t = GetTaskListHead(GetTaskListRunnow(list));
 			if (!t) break;
 		}
 		cb = GetTaskCallback(t);

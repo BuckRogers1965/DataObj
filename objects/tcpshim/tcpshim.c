@@ -23,6 +23,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "../network/tcp.h"
+#include "control.h"	/* PROP_* - what a published property presents as */
 
 /* this shim's own base for the socket's callbacks - its number, not the
    object's, so an owner holding several objects keeps them apart */

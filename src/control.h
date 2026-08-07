@@ -21,6 +21,45 @@
 #include "object.h"
 #include "DebugPrint.h"
 
+/* Which control a published property presents as - the third argument to
+   PublishProp. The core carries the number through without interpreting it;
+   the client turns it into a control. This was in object.h, which has no use
+   for the answer and no business naming controls.
+
+   Append only: the numbers travel to the client and sit in saved interfaces,
+   so inserting one in the middle renumbers everything after it. */
+typedef enum {
+    PROP_TEXTBOX=1,
+    PROP_LED,
+    PROP_BUTTON,
+    PROP_CHECKBOX,
+    PROP_SLIDER,
+    PROP_VUMETER,
+    PROP_TEXTOUT,
+    PROP_KNOB,
+    PROP_LABEL,
+    PROP_NULL,
+    PROP_MENU,
+    PROP_ICON,     /* renders as the thing's icon - a doorway that opens   */
+                   /* its one panel; what Open publishes (PublishPosition) */
+    PROP_MARKDOWN, /* rendered markdown - the Markdown widget's display    */
+    PROP_HTML,     /* rendered HTML, sandboxed - the HTML widget's display */
+    PROP_IMAGE     /* an image loaded from a URL - the Image widget's display */
+} PropertyType;
+
+/* One row of a settings panel: which control class represents a named
+   property or port on the object that owns this table, and where it sits.
+   An object declares its own presentation directly rather than a client
+   inferring a layout from a widget-type constant. `property` is unused for
+   a Button row - that always reaches the target's Activate, never a named
+   property. BuildSettingsView (below) is what turns a table into controls. */
+typedef struct ControlSpec
+{
+	char *controlClass;
+	char *property;
+	int   x, y, w, h;
+} ControlSpec;
+
 #ifdef CONTROL_IMPL
 NodeObj Widget_Create(NodeObj container, char *cls, char *name);
 void Widget_Destroy(NodeObj instance);
