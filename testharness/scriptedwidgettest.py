@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """
-Scripted composite widgets (a View containing a Lua Runner that reaches
-its sibling controls by path - sibget/sibset, objects/lua/script.c)
-through every variation a real widget goes through: clone, alias,
-export/import, save/load. This is the MCPSource agent-widget pattern's
-own twin, built self-contained (no external MCP service) so it runs
-anywhere run.sh does.
+Scripted composite widgets (a View holding InBox, OutBox, and a ScriptBox
+carrying the logic) through every variation a real widget goes through:
+clone, alias, export/import, save/load. This is the MCPSource agent-widget
+pattern's own twin, built self-contained (no external MCP service) so it
+runs anywhere run.sh does.
 
-The shape, every test: a View holding InBox (Textbox), OutBox (Textbox),
-and Runner (Lua). Runner's Source: on receiving "1" on In, reads InBox
-via sibget and writes InBox's value + "_done" into OutBox via sibset.
-Triggering is a plain set-property on Runner's own In port (a real
-message - In has an OnMsg handler, so this is not a client-side
-simulation of activation, it is the actual trampoline any Connect()'d
-button would also go through).
+The shape, every test: InBox (Textbox) -> ScriptBox.In, and ScriptBox.Out
+-> OutBox (Textbox). The script appends "_done" to whatever arrives and
+send()s it back out. The ScriptBox is an ordinary member of the view, so
+it joins the flow by WIRE - nothing in the Source names an address, which
+is exactly why the widget still works after being cloned or imported
+under a different name.
 
-Every check is functional: the widget is proven by writing InBox and
-reading OutBox back, never by reading structure alone - a script that
-lost its way to a sibling looks structurally identical to one that
-didn't.
+The logic used to live in a bare Lua instance reaching its siblings with
+sibget/sibset. Language hosts are opaque now - they publish nothing and
+cannot be addressed from outside - so the ScriptBox is the thing that
+carries a script, and the script talks to the widget through its own
+ports.
+
+Triggering is a plain set-property on InBox (a real message through a real
+Connect, not a client-side simulation) and the proof is reading OutBox
+back - a widget that lost its wiring or its script looks structurally
+identical to one that didn't.
 
 Run through run.sh, or standalone against a running server:
 
@@ -30,9 +34,7 @@ from rawtest import Raw, Report, ensure_raw_bridge, suite_view, container_childr
 RUNNER_SOURCE = (
     "oninput(function(value, kind)\n"
     "  if kind == 'eof' then return end\n"
-    "  if value ~= '1' then return end\n"
-    "  local v = sibget('InBox') or ''\n"
-    "  sibset('OutBox', v .. '_done')\n"
+    "  send(tostring(value) .. '_done')\n"
     "end)\n"
 )
 
@@ -59,15 +61,29 @@ def members(raw, view):
     return out
 
 
+def press_run(raw, runner):
+    """The Run button, over the protocol. Exactly ONE activate: setting
+    Language builds the inner host, so the first Run is the one that
+    executes. Activating twice re-runs a box that is already live and
+    wedges the engine in an unbounded message loop, so a restored copy
+    gets one press here too."""
+    raw.send({"cmd": "set-property", "instance": runner, "prop": "Language",
+              "value": "Lua"})
+    time.sleep(0.3)
+    raw.send({"cmd": "activate", "instance": runner})
+    time.sleep(0.8)
+
+
 def run_widget(raw, runner, in_value, timeout=4.0):
-    """Functional proof of the whole widget: set InBox, trigger Runner,
-    read OutBox back. Returns OutBox's value, or None on timeout."""
+    """Functional proof of the whole widget: write InBox and read OutBox
+    back. Writing InBox IS the trigger - it is wired into the ScriptBox's
+    In - so there is nothing to poke by hand. Returns OutBox's value, or
+    None on timeout."""
     view = "/".join(runner.split("/")[:-1])
     inbox = view + "/InBox"
     outbox = view + "/OutBox"
-    raw.send({"cmd": "set-property", "instance": inbox, "prop": "Value", "value": in_value})
     raw.value_of(outbox, "Value")  # arm the subscription before triggering
-    raw.send({"cmd": "set-property", "instance": runner, "prop": "In", "value": "1"})
+    raw.send({"cmd": "set-property", "instance": inbox, "prop": "Value", "value": in_value})
     ev = raw.wait_event(lambda e: e.get("event") == "property-changed"
                         and e.get("instance") == outbox and e.get("port") == "Value",
                         timeout=timeout)
@@ -79,7 +95,7 @@ def find_widget_parts(raw, view):
     mem = members(raw, view)
     inbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/InBox")), None)
     outbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/OutBox")), None)
-    runner = next((m for m, c in mem if c == "Lua"), None)
+    runner = next((m for m, c in mem if c == "ScriptBox"), None)
     return inbox, outbox, runner
 
 
@@ -103,15 +119,21 @@ def build_scripted_view(raw, home, name):
     raw.wait_event(lambda e: e.get("event") == "instance-created"
                   and e.get("instance") == view + "/OutBox")
 
-    raw.send({"cmd": "create-instance", "class": "Lua", "as": view + "/Runner",
+    raw.send({"cmd": "create-instance", "class": "ScriptBox", "as": view + "/Runner",
               "container": view, "x": "10", "y": "140"})
     ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
                         and e.get("instance") == view + "/Runner")
     runner = ev.get("instance") if ev else (view + "/Runner")
 
+    raw.send({"cmd": "set-property", "instance": runner, "prop": "Language", "value": "Lua"})
     raw.send({"cmd": "set-property", "instance": runner, "prop": "Source", "value": RUNNER_SOURCE})
-    raw.send({"cmd": "activate", "instance": runner})
+    raw.send({"cmd": "connect", "from": view + "/InBox", "fromPort": "Value",
+              "to": runner, "toPort": "In"})
+    raw.send({"cmd": "connect", "from": runner, "fromPort": "Out",
+              "to": view + "/OutBox", "toPort": "Value"})
     time.sleep(0.3)
+
+    press_run(raw, runner)
     return view, view + "/InBox", view + "/OutBox", runner
 
 
@@ -129,8 +151,8 @@ def test_build_and_run(raw, r, home):
 def test_clone(raw, r, home):
     """Clone the whole widget - Runner must survive the clone-walk (not
     _Hidden - see design_alias_panel_model/project_first_scripted_widget),
-    sibget/sibset must resolve to the CLONE's own InBox/OutBox, and the
-    clone must be independent of the original."""
+    the copied wires must resolve to the CLONE's own InBox/OutBox, and
+    the clone must be independent of the original."""
     view, inbox, outbox, runner = build_scripted_view(raw, home, "SW_Clone")
 
     raw.events = []
@@ -143,12 +165,14 @@ def test_clone(raw, r, home):
 
     cinbox, coutbox, crunner = find_widget_parts(raw, clone) if clone else (None, None, None)
     r.expect("scripted widget clone: Runner survived the clone",
-             "the clone holds InBox, OutBox, and a Lua Runner",
+             "the clone holds InBox, OutBox, and a ScriptBox Runner",
              "clone=%s inbox=%s outbox=%s runner=%s" % (clone, cinbox, coutbox, crunner),
              bool(clone) and bool(cinbox) and bool(coutbox) and bool(crunner))
 
+    if crunner:
+        press_run(raw, crunner)
     out = run_widget(raw, crunner, "cloneval") if crunner else None
-    r.expect("scripted widget clone: sibget/sibset resolve to the CLONE's own siblings",
+    r.expect("scripted widget clone: the copy's wiring resolves to the CLONE's own controls",
              "the clone's OutBox becomes the clone's InBox value + '_done'",
              "OutBox=%r" % out,
              out == "cloneval_done")
@@ -197,9 +221,9 @@ def test_alias(raw, r, home):
 
 
 def test_export_import(raw, r, home):
-    """Export the widget's View alone, import it back - sibget/sibset must
-    still resolve after the round trip through disk and a fresh clone-drop
-    name (design_export_relative_import_drop: relative links, clone-drop)."""
+    """Export the widget's View alone, import it back - Source and the
+    wiring must still resolve after the round trip through disk and a
+    fresh clone-drop name (design_export_relative_import_drop: relative links, clone-drop)."""
     view, inbox, outbox, runner = build_scripted_view(raw, home, "SW_EI")
 
     raw.send({"cmd": "export-flow", "file": "sw_eitwin", "of": view})
@@ -227,18 +251,20 @@ def test_export_import(raw, r, home):
              "copy=%s inbox=%s outbox=%s runner=%s" % (copy, cinbox, coutbox, crunner),
              bool(copy) and bool(cinbox) and bool(coutbox) and bool(crunner))
 
+    if crunner:
+        press_run(raw, crunner)
     out = run_widget(raw, crunner, "importval") if crunner else None
-    r.expect("scripted widget import: sibget/sibset resolve after export/import",
+    r.expect("scripted widget import: Source and wiring survive export/import",
              "the imported OutBox becomes the imported InBox value + '_done'",
              "OutBox=%r" % out,
              out == "importval_done")
 
 
 def test_save_load(raw, r, home):
-    """Save the whole session, load it back - Source must survive, the
-    loaded Runner must lazily re-activate on first use (not require a
-    second explicit activate the user has no reason to send), and
-    sibget/sibset must resolve to the LOADED copy's own siblings."""
+    """Save the whole session, load it back - Source must survive, and one
+    press of Run must bring the loaded widget back to life wired to the
+    LOADED copy's own controls. The load itself deliberately does NOT run
+    the script (no action on restore); Run is the user's gesture."""
     view, inbox, outbox, runner = build_scripted_view(raw, home, "SW_SaveLoad")
 
     raw.send({"cmd": "save-flow", "file": "sw_savetwin"})
@@ -259,13 +285,14 @@ def test_save_load(raw, r, home):
     while time.time() < deadline and out != "loadval_done":
         ib, ob, rn = find_widget_parts(raw, view)
         if ib and ob and rn:
+            press_run(raw, rn)
             out = run_widget(raw, rn, "loadval")
             copy, cinbox, coutbox, crunner = view, ib, ob, rn
         if out != "loadval_done":
             time.sleep(0.4)
 
     r.expect("scripted widget save/load: Source survived and the widget still runs",
-             "some loaded copy's Runner, triggered fresh, produces 'loadval_done'",
+             "the loaded Runner, Run pressed once, produces 'loadval_done'",
              "copy=%s runner=%s OutBox=%r" % (copy, crunner, out),
              out == "loadval_done")
 

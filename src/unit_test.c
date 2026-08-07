@@ -15,7 +15,6 @@
 #include "control.h"	/* the palette, the chrome, and placement */
 #include "timer.h"
 #include "libload.h"
-#include "dyn/bufftest.h"
 #include "DebugPrint.h"
 #include "namespace.h"
 
@@ -183,6 +182,7 @@ int IsRunning(NodeObj Main){
    something and never let it drain - name it and get out, rather than spinning
    in the main loop forever */
 void UT_PerformTesting(void);
+void UT_SchedTest(void);
 void UT_InterceptTest(void);
 void UT_LinkTest(void);
 
@@ -217,16 +217,6 @@ static int UT_ReportLeftoverTasks(TaskList list)
 			printf("LEFTOVER TASK%s: callback=%p  data=%p\n", where, (void *) cb, (void *) GetTaskData(t));
 	}
 	return n;
-}
-
-void PerformTesting(){
-	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
-	DataTest();
-	NodeTest();
-	/* PropertyWatchTest moved to the harness: UT_PropertyWatchTest */
-	BuffTest();
-	//NameSpaceTest();
-	SchedTest();
 }
 
 void Init(NodeObj Main){
@@ -266,15 +256,11 @@ void Init(NodeObj Main){
 
 	/* print out the help text if printhelp is turned on */
 	if (GetValueInt(GetPropNode(Main, "printhelp"))) {
-		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -ip   <address> : Address to bind the web GUI to, e.g. 127.0.0.1 or 0.0.0.0 (default 0.0.0.0)\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -port <number>  : Port to serve the web GUI on (default 8083)\n       -t              : Perform Unit Testing of library functions\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
+		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -ip   <address> : Address to bind the web GUI to, e.g. 127.0.0.1 or 0.0.0.0 (default 0.0.0.0)\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -port <number>  : Port to serve the web GUI on (default 8083)\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
 	}
 
-	/* if -t command line argument is set, perform unit test */
-	if (GetValueInt(GetPropNode(Main, "UnitTest"))) {
-		PerformTesting();		/* the copies still inside libframework.so */
-	} else {
-		UT_PerformTesting();		/* the copies in this file */
-	}
+	/* running the tests IS this program - there is no option to not */
+	UT_PerformTesting();
 
 
 	/* if deamon option was turned on, become a deamon */
@@ -429,12 +415,6 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 				if (strcmp ( argv[i], "-h" ) == 0 ) {
 					DebugPrint ( "Store print help file.", __FILE__, __LINE__, CMDLINEOPTS);
 					SetPropInt(Main, "printhelp", 1);
-					break;
-				}
-
-				if (strcmp ( argv[i], "-t" ) == 0 ) {
-					DebugPrint ( "Store perform unit tests.", __FILE__, __LINE__, CMDLINEOPTS);
-					SetPropInt(Main, "UnitTest", 1);
 					break;
 				}
 
@@ -749,54 +729,59 @@ int UT_NameSpaceTest()
 }
 
 /* ---- copied verbatim from sched.c ---- */
-/* NOT COMPILED - UT_SchedTest: uses sched.c's internal TaskPtr type, its static testcallback, and an internal AddTaskDelay signature.
-   #if 0 rather than a block comment because the body contains comments. */
-#if 0
+/* ---- from sched.c, on the public sched.h API ----
+   The original used sched.c's internal TaskPtr and a testcallback that lived
+   in the module. TaskObj and the AddTask* calls are all exported, so the test
+   needs nothing the library does not already publish - the reason it can live
+   out here at all. */
+static int UT_schedcallback(NodeObj object, NodeObj data, int value){
+	(void) object;
+	(void) data;
+	(void) value;
+
+	printf("!!! ");
+	return 1;
+}
+
+void
 UT_SchedTest (){
 
 	int CountOfScheduledTasks = 1;
 
 	TimeUpdate();
 
-   # ifndef S_SPLINT_S
-
 	TaskList testlist = CreateList();
-	
-	TaskPtr   testtask1 =  CreateTask(testlist);
-	TaskPtr   testtask2 =  CreateTask(testlist);
-	TaskPtr   testtask3 =  CreateTask(testlist);
-	TaskPtr   testtask4 =  CreateTask(testlist);
+
+	TaskObj   testtask1 =  CreateTask(testlist);
+	TaskObj   testtask2 =  CreateTask(testlist);
+	TaskObj   testtask3 =  CreateTask(testlist);
+	TaskObj   testtask4 =  CreateTask(testlist);
 
 	NodeObj testdata = NewNode(INTEGER);
 	SetPropInt(testdata, "TestData", 1);
 
-
-	AddTaskDelay(testtask1, 5, 500000, &testcallback, 1000, testdata);  /* 5.5s: 500000us */
-	AddTaskNow(testtask2, &testcallback, 1001, testdata);
-	AddTaskMilli(testtask3, 100, &testcallback, 1002, testdata);
-	AddTaskSec(testtask4, 10, &testcallback, 1003, testdata);
+	AddTaskDelay(testtask1, 5, 500000, &UT_schedcallback, 1000, testdata, "UT_delay");  /* 5.5s: 500000us */
+	AddTaskNow(testtask2, &UT_schedcallback, 1001, testdata);
+	AddTaskMilli(testtask3, 100, &UT_schedcallback, 1002, testdata);
+	AddTaskSec(testtask4, 10, &UT_schedcallback, 1003, testdata);
 
 	printf("Schedtest\n");
 
 	while(CountOfScheduledTasks){
-		//long offset;
 
 		TimeUpdate();
 
 		CountOfScheduledTasks = ExecTasks(testlist);
 
-		/* if we have no scheduled tasks, then begin stopping */
-
 		printf(".");
 		fflush(stdout);
 		usleep(10000);
 	}
-   # endif
 
 	printf("\n");
 
+	DelNode(testdata);
 }
-#endif		/* UT_SchedTest */
 
 /* ---- copied verbatim from object.c ---- */
 void UT_FlowTest(NodeObj container){
@@ -1666,7 +1651,8 @@ void UT_LinkTest(void)
 	DelNode(original);
 }
 
-/* the same list, in the same order, as PerformTesting() in libframework */
+/* every core-module test there is - the library carries none of its own
+   any more, so this list is the whole of it */
 void UT_PerformTesting(){
 	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
 	UT_DataTest();
@@ -1674,7 +1660,7 @@ void UT_PerformTesting(){
 	UT_PropertyWatchTest();
 	UT_BuffTest();
 	//UT_NameSpaceTest();
-	/* UT_SchedTest();  NOT COMPILED: needs sched.c internals (TaskPtr, static testcallback) */
+	UT_SchedTest();
 }
 
 int main ( int argc, char* argv[] ){
@@ -1749,13 +1735,11 @@ int main ( int argc, char* argv[] ){
 	   They are app furniture. A host that is not the app does not want them,
 	   which is the same reason they no longer live in object.c. */
 
-	/* needs the classes InstallObjects() just loaded, so it can't run   */
-	/* from PerformTesting() inside Init() alongside the other -t tests  */
-	if (GetValueInt(GetPropNode(Main, "UnitTest"))) {
-		UT_FlowTest(Main);
-		UT_InterfaceTest();
-		UT_SkinTest();
-	}
+	/* these three need the classes InstallObjects() just loaded, so they
+	   run here rather than up in UT_PerformTesting() with the rest */
+	UT_FlowTest(Main);
+	UT_InterfaceTest();
+	UT_SkinTest();
 
 	DebugPrint ( "Entering Main Loop.", __FILE__, __LINE__, PROG_FLOW);
 

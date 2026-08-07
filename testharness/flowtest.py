@@ -184,12 +184,18 @@ def test_stack_clock(raw, r, home):
              "%s" % seen, seen == ["1", "1", "1", "0", "0", "0"])
 
 
-def test_tcp_echo(raw, r, home, host):
+def test_tcp_echo(raw, r, home, host, port):
     """A TCP server wired straight back into itself: everything a peer
     sends comes back. Enable=0 is a FULL shutdown - sockets close and the
-    flow quiesces, the same line any timer (or anything else) can drive."""
+    flow quiesces, the same line any timer (or anything else) can drive.
+
+    `port` is derived from this run's own raw-bridge port, never a constant:
+    run.sh gives each variant RAW_BASE+offset (8092..8096), so a hardcoded
+    port here lands on ANOTHER variant's bridge. It did - 8095 is ubsan's -
+    and all five variants then echoed at a JSON bridge, which answered
+    'could not parse command' and never refused the shutdown check."""
     raw.send({"cmd": "create-instance", "class": "TCP", "as": home + "/EchoTcp", "container": home})
-    raw.send({"cmd": "set-property", "instance": home + "/EchoTcp", "prop": "LocalPort", "value": "8095"})
+    raw.send({"cmd": "set-property", "instance": home + "/EchoTcp", "prop": "LocalPort", "value": str(port)})
     raw.send({"cmd": "connect", "from": home + "/EchoTcp", "fromPort": "Out",
               "to": home + "/EchoTcp", "toPort": "In"})
     raw.send({"cmd": "activate", "instance": home + "/EchoTcp"})
@@ -197,7 +203,7 @@ def test_tcp_echo(raw, r, home, host):
 
     echoed = None
     try:
-        s = socket.create_connection((host, 8095), timeout=3)
+        s = socket.create_connection((host, port), timeout=3)
         s.sendall(b"hello, flow")
         s.settimeout(3)
         echoed = s.recv(1024)
@@ -213,7 +219,7 @@ def test_tcp_echo(raw, r, home, host):
     time.sleep(0.8)
     refused = False
     try:
-        s2 = socket.create_connection((host, 8095), timeout=1.5)
+        s2 = socket.create_connection((host, port), timeout=1.5)
         s2.close()
     except Exception:
         refused = True
@@ -263,7 +269,7 @@ def main():
     close_group(raw, g)
 
     g = group_view(raw, home, "TcpEcho")
-    guarded(test_tcp_echo, raw, r, g, args.host)
+    guarded(test_tcp_echo, raw, r, g, args.host, args.port + 100)
     close_group(raw, g)
 
     raw.close()

@@ -5,19 +5,26 @@ Enable/Activate/In/Out ports, controls laid out inside it, and a script
 that PUPPETS the controls. It behaves like a compiled widget, but its
 logic is editable script.
 
-    external --> [View.In]==>[Slider] --(script watches)--> sets [Output]
-                                                              |
-                              [View.Out]<==[Output.Value] <---+
+    external --> [View.In]==>[Slider] --> [ScriptBox.In]
+                                              | script doubles it
+                                              v  pathset()
+                              [View.Out]<==[Output.Value]
 
  - View.In is bound (container port) to an inner Input control's In.
  - View.Out is bound to an inner Output control's Value.
- - A JSScript (wired to a Bridge, so it speaks the protocol) subscribes
-   to the Input control's Value and drives the Output control's Value.
-   THAT is the widget's behavior - edit the script, change the widget.
+ - A SCRIPTBOX holds the logic. It is an ordinary member of the view like
+   any other control: wire the Input into its In, and its script writes
+   the Output by path. Edit the script, change the widget.
+
+The logic used to live in a bare JSScript instance wired to a Bridge,
+driving the protocol with cmd(). Language hosts are opaque now - they
+publish nothing and cannot be addressed - so the ScriptBox is the widget
+that carries a script, and the engine's verbs (pathset) are first class
+instead of JSON commands through a bridge.
 
 This proves Phase 5 (composite) + Phase 7 (script behavior) together,
-and it only works because the script is a bridge client that can address
-its sibling controls by path (Phase 1.5 addressing).
+and it only works because the script can address controls by path
+(Phase 1.5 addressing).
 
     python3 testharness/widgettest.py --host 127.0.0.1 --port 8091
 """
@@ -46,16 +53,9 @@ def build_widget(raw, home):
     slider = view + "/Input"
     out = view + "/Output"
     js = view + "/Logic"
-    br = view + "/Wire"
     make(raw, "Slider", slider, view, 20, 20)
     make(raw, "Textbox", out, view, 20, 80)
-    make(raw, "JSScript", js, view, 20, 140)
-    make(raw, "Bridge", br, view, 20, 200, hidden=True)
-
-    # the script is a protocol client: Cmd -> Bridge.In, Bridge.Out -> Evt
-    raw.send({"cmd": "connect", "from": js, "fromPort": "Cmd", "to": br, "toPort": "In"})
-    raw.send({"cmd": "connect", "from": br, "fromPort": "Out", "to": js, "toPort": "Evt"})
-    raw.send({"cmd": "activate", "instance": br})
+    make(raw, "ScriptBox", js, view, 20, 140)
 
     # CONTAINER PORTS: the View's own In/Out become the widget's interface
     raw.send({"cmd": "bind-port", "container": view, "port": "In",
@@ -63,27 +63,26 @@ def build_widget(raw, home):
     raw.send({"cmd": "bind-port", "container": view, "port": "Out",
               "target": out, "targetProp": "Value"})
 
-    # the widget's LOGIC, in editable script: watch the input, double it,
-    # drive the output. The script addresses its siblings by path.
-    src = (
-        "var IN = '%s';\n"
-        "var OUT = '%s';\n"
-        "onevent(function(txt) {\n"
-        "  try {\n"
-        "    var e = JSON.parse(txt);\n"
-        "    if (e.event === 'property-changed'\n"
-        "        && e.instance === IN && e.port === 'Value') {\n"
-        "      var v = parseInt(e.value, 10) || 0;\n"
-        "      cmd({cmd: 'set-property', instance: OUT,\n"
-        "           prop: 'Value', value: String(v * 2)});\n"
-        "    }\n"
-        "  } catch (x) {}\n"
-        "});\n"
-        "cmd({cmd: 'subscribe', instance: IN, port: 'Value'});\n"
-    ) % (slider, out)
+    # the widget's LOGIC, in editable script. The ScriptBox is a member of
+    # the view like any other control, so it joins the flow by WIRE, not by
+    # address: Input.Value -> ScriptBox.In, script doubles it and send()s it,
+    # ScriptBox.Out -> Output.Value. Nothing in the source names a path, so
+    # the same widget works wherever it is cloned or imported to.
+    src = ("oninput(function(v, k) {\n"
+           "  if (k === 'eof') return;\n"
+           "  send(String((parseInt(v, 10) || 0) * 2));\n"
+           "});\n")
+    raw.send({"cmd": "set-property", "instance": js, "prop": "Language", "value": "JSScript"})
     raw.send({"cmd": "set-property", "instance": js, "prop": "Source", "value": src})
+    raw.send({"cmd": "connect", "from": slider, "fromPort": "Value", "to": js, "toPort": "In"})
+    raw.send({"cmd": "connect", "from": js, "fromPort": "Out", "to": out, "toPort": "Value"})
+    time.sleep(0.3)
+
+    # ONE activate: setting Language already built the inner host, so this
+    # Run executes. Activating a second time re-runs a live box and wedges
+    # the engine in an unbounded message loop.
     raw.send({"cmd": "activate", "instance": js})
-    time.sleep(0.6)
+    time.sleep(0.8)
     return view, slider, out, js
 
 
