@@ -18,6 +18,7 @@
 NodeObj NewFlow(char *name);
 NodeObj FlowCreateObject(NodeObj flow, NodeObj container, char *classname);
 void FlowSetProp(NodeObj flow, NodeObj instance, char *prop, char *value);
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 int FlowConnect(NodeObj flow, NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort);
 int FlowActivateInstance(NodeObj flow, NodeObj instance);
 NodeObj RunFlow(NodeObj container, NodeObj flow);
@@ -62,8 +63,10 @@ static inline void FlowSetProp(NodeObj flow, NodeObj instance, char *prop, char 
 		fn(flow, instance, prop, value);
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 static inline int FlowConnect(NodeObj flow, NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort)
 {
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	int (*fn)(NodeObj flow, NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort) = (int (*)(NodeObj flow, NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort)) FlowEntry("Wire");
 
 	return fn ? fn(flow, fromInst, fromPort, toInst, toPort) : 0;

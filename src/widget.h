@@ -88,6 +88,7 @@ typedef struct
    Each wrapper below turns that back into an ordinary call. WIDGET_IMPL is
    defined by the implementation itself, which wants the real prototypes. */
 #ifdef WIDGET_IMPL
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void Widget_Port(NodeObj instance, char *name, char *initial, void *handler);
 void Widget_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp);
 NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
@@ -113,8 +114,10 @@ static inline long WidgetEntry(char *name)
 	return cls ? GetPropLong(cls, name) : 0;
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 static inline void Widget_Port(NodeObj instance, char *name, char *initial, void *handler)
 {
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	void (*fn)(NodeObj instance, char *name, char *initial, void *handler) = (void (*)(NodeObj instance, char *name, char *initial, void *handler)) WidgetEntry("Port");
 
 	if (fn)

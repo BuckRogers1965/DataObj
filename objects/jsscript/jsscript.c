@@ -330,6 +330,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	if (data)
 		ScriptAttach(instance, (NodeObj) GetPropLong(data, "Owner"),
+					 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 					 (MsgId) GetPropLong(data, "MsgBase"), GetPropStr(data, "Port"));
 	else
 		ScriptAttach(instance, NULL, 0, NULL);

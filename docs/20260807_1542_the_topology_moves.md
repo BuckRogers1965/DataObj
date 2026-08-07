@@ -178,9 +178,9 @@ number is readable off the picture without running anything.
 That equal-cost assumption holds for local delivery and collapses the moment a
 wire leaves the process. Hold it for this section; the next one takes it away.
 
-VNOS hit this decades ago and answered it with sync widgets: objects whose job
-was to hold data until the paths agreed, because each route took a different
-time. That is path skew, and it is a geometric quantity here - for any vertex
+The answer to it is a sync widget: an object whose job is to hold data until
+the paths agree, because each route takes a different time. That is path skew,
+and it is a geometric quantity here - for any vertex
 with in-degree greater than one, compare the path lengths back to the common
 fork. Equal, and the join is aligned. Unequal, and that node sees values from
 different generations forever, by construction, and no amount of testing will
@@ -295,8 +295,8 @@ stability**: hold at the alignment point until the region is quiescent for that
 generation, then let the whole block through at once.
 
 This is the same move a digital simulator makes with delta cycles - settle the
-combinational mesh, commit at the clock edge - and the same one VNOS's sync
-widgets were reaching for. It is more robust than the alternatives because it
+combinational mesh, commit at the clock edge - and what a sync widget is
+reaching for. It is more robust than the alternatives because it
 needs no fan-in count and no equal-length paths; it only needs to know when the
 wiggling stopped.
 

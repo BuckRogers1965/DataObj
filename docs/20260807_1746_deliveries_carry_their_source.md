@@ -31,7 +31,7 @@ panel, `GUI_` props and the serializer.
 
 ## Three test fixes, and what each was really looking at
 
-**The gesture test wired to the icon body, which is not a port.** A widget
+**The gesture test wired to the icon body, which is not a wire endpoint.** A widget
 renders as a view, and a view's wire endpoints are the stand-in dots -
 `addStandInMark` / `onStandInClick`, resolved by `completeWire` into one
 ordinary connect. Both icon clicks were no-ops, so the checkbox stayed armed

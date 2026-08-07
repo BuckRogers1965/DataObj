@@ -65,6 +65,7 @@ typedef struct ScriptSub
 	NodeObj           self;			/* the host, so dispatch can find its state */
 	long              cbHandle;		/* opaque: the host turns this back into a callable */
 	char              path[300];
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	char              port[80];
 } ScriptSub;
 
@@ -73,6 +74,7 @@ typedef struct ScriptCommon
 {
 	NodeObj    owner;			/* who created us and gets the callbacks */
 	MsgId      msgBase;			/* their chosen base: answers are base + ordinal */
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	char       port[80];		/* their port */
 
 	long       budgetMs;		/* wall clock allowed per run, 0 = unlimited */
@@ -87,6 +89,7 @@ static ScriptCommon *Common(NodeObj self)
 	return self ? (ScriptCommon *) GetPropLong(self, "scriptcommon") : NULL;
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void ScriptAttach(NodeObj self, NodeObj owner, MsgId msgBase, char *port)
 {
 	ScriptCommon *c;

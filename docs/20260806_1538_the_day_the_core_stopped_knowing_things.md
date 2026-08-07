@@ -194,7 +194,7 @@ With that, five moves in an afternoon:
 | presentation, the palette, the chrome | `control.object` | 390 |
 
 The serializer one is the one I'd been looking forward to. Export was *already*
-an object — a task-driven walker emitting JSON out its `Out` port — while import
+an object — a task-driven walker emitting JSON out its `Out` property — while import
 was a hand-rolled parser in the core, `\uXXXX` escapes and all. One format, two
 homes, which had to agree byte for byte with nothing enforcing it. Now
 `libframework.so` exports zero of `ExportView`/`ImportView`/`LoadViewAsync` and

@@ -1,7 +1,6 @@
 # Roadmap: from framework to web canvas
 
-*"Connect the world" — the VNOS vision, Singlestep Technologies, ~2001.
-This document is that vision's build order, resumed.*
+*"Connect the world." This document is that goal's build order.*
 
 The destination: a web app where people log into the server, see their
 canvas, drag objects from a palette into dataflows, wire them together,
@@ -249,7 +248,7 @@ per-property or per-object opt-in.
    View is a first-class object on the palette exactly like LED or
    Button — the one thing that makes it a View is what it *holds*: a
    table of child slots, each recording `{instance, X, Y, Width,
-   Height}` — the panel-builder shape the VNOS reference demo objects
+   Height}` — the panel-builder shape the demo objects
    already used (`objects/demo/pulsegenerator/pulsepb.c`'s
    `ControlInfo[]`: control class, bound variable, X, Y, W, H per row)
    brought into this framework's own idiom. The slot table is
@@ -331,8 +330,8 @@ per-property or per-object opt-in.
    — Enable, the State LED, Activate, position/PanelX/PanelY, and now
    Help — and each class re-declares them by hand in its own
    ClassStart/InstanceStart. That repetition is the signal to mechanize
-   object subclassing (the `DefaultMessage(superclass, …)` chaining
-   TCPObject models, long promised): a Widget base class publishes and
+   object subclassing (message chaining to a superclass, long promised):
+   a Widget base class publishes and
    handles the common face once, individual widget classes subclass it
    and add only what makes them themselves, and every widget panel
    gets the common controls in consistent places for free — consistent
@@ -405,8 +404,7 @@ per-property or per-object opt-in.
    panel is a bundle of taps.
 5. **Sessions and login**: users as nodes (`Main/Users/<name>`), each
    with canvas containers; token auth first, TLS later.
-   *Already present: objects/network/testkey/ certs, SSL code paths
-   in the VNOS reference TCPObject.c.*
+   *Already present: objects/network/testkey/ certs.*
    *Path scheme, once this lands: the current-path aliasing built for
    the Palette/View work (`/Root/...`, renamed live as an instance's
    Container changes - Bridge_Rename, bridge.c) extends the same way
@@ -957,14 +955,13 @@ interpreter.
   core" actually safe at scale: an object that needs another object's
   class to exist first (subclassing, a composite depending on its parts)
   declares it instead of relying on scan-order luck.
-- **Source enumeration — reading all of a property's inputs (`wgv->Sources`).**
+- **Source enumeration — reading all of a property's inputs.**
   Today `Connect` records the subscription on the **source** property (a
   `Subscriber` sub-node naming `{Instance, Port, Callback}`): a forward,
   forward index that answers "who do I feed?" but not the reverse.
   A handler is delivered one value at a time and cannot ask "who is
-  wired into my In, and what does each hold right now?" VNOS gave every
-  input exactly that — `wgv->numSources` / `wgv->Sources[i]` — and objects
-  walked it to *combine* their inputs. Without it a whole family of objects
+  wired into my In, and what does each hold right now?" An object needs
+  exactly that to *combine* its inputs. Without it a whole family of objects
   can't be built honestly: **any N-input combinational object** — LogicGate
   (OR/AND/XOR over N wires), Comparator, Summer/adder, Mux, averager,
   majority-voter. Each only ever sees a single arriving value with no way
@@ -989,8 +986,8 @@ interpreter.
   This closes the last gap between "a wire is a subscription" and "an object
   can reason about all its wires," and it is what turns the combinational
   objects from single-input stand-ins into the real thing.
-- TCP client mode and multi-connection (the ring pattern and
-  connecting state machine in the VNOS TCPObject.c reference).
+- TCP client mode and multi-connection (the ring pattern and the
+  connecting state machine).
   Client mode brings `async-dns/` into the build: hostname resolution
   without ever blocking the fabric (worker thread + sentinel flag,
   results delivered as main-loop callbacks).
@@ -1024,8 +1021,8 @@ interpreter.
 - **Hot reload**: the machinery is already half-built — `_fini` →
   `UnregisterLibrary` and `UnloadClasses` exist, so replacing one
   `.object` in a *running* system (dlclose, copy, dlopen) is a
-  finish-the-plumbing job, not a design job. This revives the VNOS
-  support model — a fix is one tiny emailed file — and upgrades it:
+  finish-the-plumbing job, not a design job. That makes the support
+  model a fix in one tiny emailed file, and upgrades it:
   no restart. The web palette makes it self-serve: publishing an
   object to a server *is* deployment.
 

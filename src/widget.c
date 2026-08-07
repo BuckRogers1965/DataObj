@@ -76,8 +76,10 @@ void Widget_Destroy(NodeObj instance)
 	DeleteInstance(instance);
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void Widget_Port(NodeObj instance, char *name, char *initial, void *handler)
 {
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj port;
 
 	SetPropStr(instance, name, initial);

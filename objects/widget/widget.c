@@ -13,8 +13,10 @@
 typedef int (*WidgetActivate)(NodeObj, MsgId, NodeObj);
 
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void Widget_Port(NodeObj instance, char *name, char *initial, void *handler)
 {
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj port;
 
 	SetPropStr(instance, name, initial);
@@ -480,6 +482,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetClassParent(ClassSelf, "Control");
 
 	/* the names widget.h looks up - one per entry point */
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	SetPropLong(ClassSelf, "Port",            (long)Widget_Port);
 	SetPropLong(ClassSelf, "Reflect",         (long)Widget_Reflect);
 	SetPropLong(ClassSelf, "Ctl",             (long)Widget_Ctl);

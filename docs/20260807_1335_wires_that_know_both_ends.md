@@ -2,11 +2,10 @@
 
 ## The widget we cannot build
 
-VNOS had a Sum. An in box, an out box, and a button. You wire five things -
+Consider a Sum. An in box, an out box, and a button. You wire five things -
 or fifty - into the input, press the button, and it walks the list of what is
 connected to it, reads each one's *current* value, and adds them up. Messages
-in flight are ignored on purpose: it is a snapshot, not a stream. The old
-`wgv` array.
+in flight are ignored on purpose: it is a snapshot, not a stream.
 
 We cannot build that today, and the reason is one line:
 
@@ -139,7 +138,7 @@ is found here, while the mirror still has no consumers.
 
 ### Phase 3 - the first reader, purely additive
 
-- [ ] engine call: sources of a given `(instance, port)`, from the mirror
+- [ ] engine call: sources of a given `(instance, property)`, from the mirror
 - [ ] bridge: answer inbound as well as outbound (extend `list-connections`)
 - [ ] test it against the Phase 0 oracle - the two enumerations must agree
 

@@ -81,6 +81,7 @@ void FlowSetProp(NodeObj flow, NodeObj instance, char *prop, char *value){
 	AppendChild(flow, instr);
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 int FlowConnect(NodeObj flow, NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort){
 
 	NodeObj instr;

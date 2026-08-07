@@ -171,7 +171,3 @@ clean build proves nothing about whether your symbols exist.
 ## Not currently built
 
 - `objects/msg/` — a stub from early on. Registers a library and no class.
-- `objects/network/TCPObject.c` — the reference implementation from the
-  predecessor system. It cannot compile here (different API) and is kept because
-  it is the closest thing to a finished object: connection rings, a state
-  machine, and a lifecycle that lets the system go quiet on its own.

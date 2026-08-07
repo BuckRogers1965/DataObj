@@ -202,6 +202,7 @@ static void ScriptBox_SwapHost(NodeObj instance, char *lang)
 	args = NewNode(INTEGER);
 	SetPropLong(args, "Owner", (long) instance);
 	SetPropLong(args, "MsgBase", (long) SCRIPTBOX_CALLBACK);
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	SetPropStr(args, "Port", "Evt");
 	instanceStart(cls, msg_initialize, args);
 	DelNode(args);

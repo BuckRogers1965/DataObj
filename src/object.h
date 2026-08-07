@@ -87,6 +87,7 @@ Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to);
 /* The message is routed to every subscriber of that port. */
 /* Returns the number of subscribers it was delivered to.  */
 int
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data);
 
 /* Deliver straight to one named port's own handler, bypassing whatever  */
@@ -95,6 +96,7 @@ SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data);
 /* than a fixed Connect()'d wire. Returns 1 if delivered, 0 if the       */
 /* target has no such port or no handler on it.                         */
 int
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 DeliverMsg(NodeObj target, char * port, MsgId message, NodeObj data);
 
 /* Call the Activate function an instance registered on itself */
@@ -144,6 +146,7 @@ ContainmentCycle(char * instPath, char * container);
 /* instance when the name is a link. Plain properties behave exactly     */
 /* like GetPropNode. Every port-resolution choke point uses this, which  */
 /* is the entire alias mechanism.                                         */
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 NodeObj ResolvePort(NodeObj * instp, char * name);
 
 /* Expose targetInst's property on owner as a link - value, subscribers, */

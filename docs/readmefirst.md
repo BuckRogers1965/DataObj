@@ -244,7 +244,7 @@ presented, with the GUI pixel- and behavior-identical throughout
 5. **Event-driven delete** — the optimistic local removal is gone;
    `instance-removed` is the only remover.
 
-Placement rule that emerged during the work (the VNOS lesson): a verb's
+Placement rule that emerged during the work: a verb's
 MECHANISM lives in object.c as a language-neutral engine call
 (PlaceInstance, MoveInstance, InterfacePropForInstance, alongside
 CreateObject/CloneObject/Connect/SetOrDeliverProp/ActivateInstance/

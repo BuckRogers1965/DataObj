@@ -1138,6 +1138,7 @@ void Bridge_Move(NodeObj instance, InstanceData *local, NodeObj command)
 /* appear or die. A wire spanning two different views is sent once per    */
 /* view; a client viewing both dedupes by the wire's own four names.      */
 static void Bridge_WireEvent(NodeObj instance, InstanceData *local, char *event,
+							 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 							 NodeObj fromInst, char *fromPort, NodeObj toInst, char *toPort)
 {
 	char *fromAlias, *toAlias, *fromCont, *toCont;
@@ -1986,6 +1987,7 @@ int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data)
 	if (!alias)
 		alias = GetPropStr(instance, "Instance");
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	port      = GetPropStr(instance, "Port");
 	eventType = GetPropStr(instance, "EventType");
 	value     = data ? GetValueStr(data) : "";
@@ -2067,6 +2069,7 @@ static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *ev
 	return NULL;
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char *port,
 					   char *eventType, NodeObj propNode)
 {
@@ -2081,6 +2084,7 @@ NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char
 	SetPropStr(rec, "Instance", alias);	/* fallback only - see Bridge_TapOnIn */
 	SetPropLong(rec, "Target", (long) target);
 	SetPropLong(rec, "PropNode", (long) propNode);
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	SetPropStr(rec, "Port", port);
 	SetPropStr(rec, "EventType", eventType);
 	AddChild(taps, rec);
@@ -2316,6 +2320,7 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
  */
 void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 {
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj port, sub, sink, chunk, lib, cls;
 	NodeObj inst;
 	char *fromAlias, *toAlias, *toPort;
@@ -2346,6 +2351,7 @@ void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 				if (!toAlias)
 					continue;	/* a tap - not a drawable wire */
 
+				/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 				toPort = GetPropStr(sub, "Port");
 				if (!toPort)
 					continue;	/* a record predating port-carrying subscriptions */

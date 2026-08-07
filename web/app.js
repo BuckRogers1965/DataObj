@@ -58,14 +58,17 @@ const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
 
 let ws = null;
 let classes = {};          // className -> [{Name,Widget,Default}, ...]
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 let instances = {};        // alias -> {className, el, ports: {name: dotEl}}
 let selfDisplays = {};     // "alias.propName" -> {el,widgetClass}, for a widget class's own State shown on itself
 let liveControls = {};     // "alias.propName" -> {el,widgetClass}, an editable control synced from its own property-changed events
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 let portDisplays = {};     // "alias.portName" -> {el,widgetClass}, a readout painted from the port's message-flowed traffic (an out-port LED)
 let wires = [];            // {fromAlias, fromPort, toAlias, toPort, lineEl}
 let cardBodies = {};       // cardAlias -> {addMemberRow}, a card panel waiting to grow rows from its internals view's members
 let internalsOwner = {};   // internals view alias -> the instance it dissects (learned from the internals event)
 let internalsAskMode = {}; // instance alias -> 'card'|'options', which gesture asked for internals (purely which PANEL this window then shows)
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 let pendingPort = null;    // {alias, port, dotEl} - first end of a wire being drawn
 let dragState = null;      // {alias, offsetX, offsetY}
 let gestureDrag = null;    // {kind:'clone'|'alias', data, ghost} - a Clone/Alias carry in progress (the ghost, not the source)
@@ -1179,6 +1182,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
   /* Container reply strand an element in the root looking like it belonged   */
   /* there. The Container subscribe below still exists for any later move.   */
   placeInContainer(el, container || '');
+  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
   instances[alias] = { className, el, ports: { [primaryProp]: el } };
 
   livePositions[alias] = { el };
@@ -1317,6 +1321,7 @@ function registerView(alias, props, pos, hidden, container, reservedIn, reserved
   placeInContainer(wrap, container || '');
   flushPendingContainer(alias);
 
+  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
   instances[alias] = { className: 'View', el: wrap, ports: {} };
   livePositions[alias] = { el: wrap };
 
@@ -1595,6 +1600,7 @@ function onMessageFlowed(alias, port, value) {
    whatever was clicked, reused both as the pending-connection highlight
    and as the wire's anchor point (drawWire/updateWire just read its
    bounding box, they don't care what kind of element it is). */
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 function onPortClick(alias, port, el) {
   if (effectiveMode(el) !== 'Connect') return;
 
@@ -2110,6 +2116,7 @@ function renderAliasControl(alias) {
     rec.slot.appendChild(ic);
     rec.control = ic;
     rec.labelEl.textContent = '';
+    /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
     instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
     instances[alias].ports['Value'] = rec.el;
     return;
@@ -2139,6 +2146,7 @@ function renderAliasControl(alias) {
     const listKey = rec.target + '.' + rec.targetProp + 'List';
     (liveControls[listKey] = liveControls[listKey] || []).push({ el: sel, widgetClass: 'MenuItems' });
     send({ cmd: 'subscribe', instance: rec.target, port: rec.targetProp + 'List' });
+    /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
     instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
     instances[alias].ports['Value'] = rec.el;
     return;
@@ -2165,6 +2173,7 @@ function renderAliasControl(alias) {
 
   /* wiring through the alias is wiring to the original (ResolvePort,       */
   /* object.c) - the atom arms a wire on its doorway slot                    */
+  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
   instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
   instances[alias].ports['Value'] = rec.el;
 }
@@ -2222,6 +2231,7 @@ function registerAliasAtom(alias, pos, container) {
   attachOptionsGesture(el, alias);
 
   placeInContainer(el, container || '');
+  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
   instances[alias] = { className: 'Alias', el, ports: {} };
   livePositions[alias] = { el };
   send({ cmd: 'subscribe', instance: alias, port: 'X' });

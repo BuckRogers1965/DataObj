@@ -606,6 +606,7 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	NodeObj prevFrom;
 	int (*callback)(NodeObj, int, NodeObj);
 	int (*onmsg)(NodeObj, int, NodeObj);
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	char *port, *value;
 
 	callback   = (int (*)(NodeObj, int, NodeObj)) GetPropLong(sub, "Callback");
@@ -621,6 +622,7 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 		return;
 	}
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	port  = GetPropStr(sub, "Port");
 	value = data ? GetValueStr(data) : NULL;
 	if (!toInstance || !port || !value)

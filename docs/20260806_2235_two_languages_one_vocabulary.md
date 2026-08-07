@@ -21,7 +21,7 @@ supposed to be interchangeable. They weren't, and nothing could have told you:
 | `getprop` / `setprop` | yes | yes |
 | `send` | yes | yes |
 | `sibget` / `sibset` | **yes** | no |
-| `print` (to a port) | no | **yes** |
+| `print` (to a property) | no | **yes** |
 | `cmd` (bridge) | no | **yes** |
 | runaway guard | **none** | 500 ms |
 

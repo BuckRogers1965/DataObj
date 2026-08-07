@@ -692,6 +692,7 @@ void MintFreshName(char *base, char *containerPath, char *out, int outlen)
  * their "local" state, so resolving the node alone is not enough.
  * For a plain unlinked property this is exactly GetPropNode.
  */
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 NodeObj ResolvePort(NodeObj * instp, char * name)
 {
 	NodeObj raw, owner;
@@ -862,6 +863,7 @@ static NodeObj CloneObject(NodeObj source)
 /* name is what makes the record self-describing: list-connections,     */
 /* CloneConnections, Disconnect and the delete scrub all read the wire   */
 /* straight off it, no adapter, no reverse handler lookup.               */
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handler){
 
 	NodeObj sub;
@@ -881,6 +883,7 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
 			continue;
 		if ((NodeObj) GetPropLong(sub, "Instance") != toNode)
 			continue;
+		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		p = GetPropStr(sub, "Port");
 		if ((!p && !toPort) || (p && toPort && strcmp(p, toPort) == 0))
 		{
@@ -894,6 +897,7 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
 	SetName(sub, "Subscriber");
 	SetPropLong(sub, "Instance", (long)toNode);
 	if (toPort)
+		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		SetPropStr(sub, "Port", toPort);
 	SetPropLong(sub, "Callback", handler);
 	AddProp(fromPort, sub);
@@ -903,6 +907,7 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
 /* itself, the same rule a deep-cloned view's aliases already follow    */
 void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map){
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj port, sub, sink, sinkClone;
 	char *portName, *toPort;
 
@@ -937,6 +942,7 @@ void CloneConnections(NodeObj srcInst, NodeObj cloneInst, NodeObj map){
 			/* sink outside this cloned group (including every tap - taps   */
 			/* are never in the map) is left alone too.                     */
 			sink = (NodeObj) GetPropLong(sub, "Instance");
+			/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 			toPort = GetPropStr(sub, "Port");
 			if (!sink || !toPort)
 				continue;
@@ -1234,6 +1240,7 @@ NodeObj CloneInstance(NodeObj source, char *containerPath, NodeObj map)
 int
 Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj fromPort, toPort, fromOwner, toOwner;
 	long handler;
 
@@ -1313,6 +1320,7 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 int
 Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj fromPort, toPort, fromOwner, toOwner, sub;
 	char * toName;
 
@@ -1336,6 +1344,7 @@ Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 			continue;
 		if ((NodeObj) GetPropLong(sub, "Instance") != toOwner)
 			continue;
+		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		if (!GetPropStr(sub, "Port") || !toName
 			|| strcmp(GetPropStr(sub, "Port"), toName) != 0)
 			continue;
@@ -1367,6 +1376,7 @@ typedef struct {
 				/* DeleteInstance's CancelPendingSends, which    */
 				/* matches on this to catch a queued send whose  */
 				/* source is deleted before delivery fires        */
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj outPort;
 	MsgId   message;
 	NodeObj data;
@@ -1482,8 +1492,10 @@ static void CancelPendingSends(NodeObj deadInstance)
 /* is owned by the sender's own queued delivery, not by whoever received */
 /* it (see Filter_OnIn for the pattern).                                 */
 int
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj outPort, owner;
 	MsgEnvelope * env;
 	TaskObj task;
@@ -1525,6 +1537,7 @@ SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
  * everyone subscribed to a port; this reaches exactly one target's port
  * directly, the same way SndMsg reaches each subscriber once it's found.
  */
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 int DeliverMsg(NodeObj target, char *port, MsgId message, NodeObj data){
 
 	NodeObj portNode;

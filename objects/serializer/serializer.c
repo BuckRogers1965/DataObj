@@ -1350,6 +1350,7 @@ static int Step(InstanceData *local)
 					sinkInst = (NodeObj) GetPropLong(s, "Instance");
 					if (!sinkInst || !PathOfInstance(sinkInst, sinkPath, sizeof(sinkPath)))
 						continue;
+					/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 					sinkPort = GetPropStr(s, "Port");
 
 					if (!firstWire)

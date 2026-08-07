@@ -5,13 +5,10 @@ Loadable object modules are discovered on disk at startup, loaded with `dlopen`,
 register themselves into a live node tree. Everything — metadata, state, wiring, even
 function pointers — is stored as properties on nodes.
 
-Provenance: this is a ground-up rewrite of VNOS (Singlestep Technologies,
-early 2000s) — `objects/network/TCPObject.c` is kept as the reference
-implementation from that system. Four pieces are new inventions, lessons from
-problems the original never solved: the **node tree** (one uniform structure
+Four pieces carry the design: the **node tree** (one uniform structure
 for registry, config, wiring, and skins), the **intelligent data object**
 (automatic type conversion at every read, so producers and consumers never
-negotiate types), the **subscriber model** (fan-out routing instead of VNOS's
+negotiate types), the **subscriber model** (fan-out routing rather than a
 single owner-callback, which is what makes probes, taps, and Enable control
 lines free), and the **non-blocking DNS** (`async-dns/` — a worker thread
 quarantines the blocking resolver behind a sentinel flag polled from the main
@@ -21,9 +18,10 @@ joins when TCP client mode does).
 Three governing principles:
 - **Everything is a node**: one tree structure holds the registry, configuration,
   and wiring; properties are nodes, so anything can be annotated.
-  **There is no such thing as a port, and no in/out direction.** There is no
-  port type, no "sink", no distinction between a "compiled port" and a "plain
-  property" - every one of them is a node, and any node is subscribable. `In`,
+  **A property is a node. It lives in a container and it is a container.**
+  There is one kind of thing and no directions - no "sink", and no distinction
+  between a property with a compiled handler and a plain data property. Every
+  one of them is a node, and any node is subscribable. `In`,
   `Out`, `Enable`, `Clock` are just *names* objects happen to give properties;
   naming a property `Out` does not make it special in any way. A connection has
   a from end and a to end - that is a fact about the wire, never about the
@@ -84,8 +82,8 @@ CLI options (parsed in `main.c:ProcessCmdLine`): `-h` help, `-d` daemonize,
 - **Object modules**: each subdirectory of `objects/` with a `Makefile` builds a
   `<name>.object` shared library, also linked against `libframework.so` — this keeps
   modules in the 10–20 KB range. **That size is a deployment feature, by design**:
-  in the VNOS era customer support meant emailing a single object file — drop it in
-  the scan path and the fix is installed. Objects are isolated behind the message
+  customer support can mean emailing a single object file — drop it in the scan
+  path and the fix is installed. Objects are isolated behind the message
   fabric so a replaced object can't break its neighbors; "install" is "copy the
   file"; the `UUID`/`Company` properties on every library node are provenance for
   exactly this. Preserve this granularity — never introduce cross-object link
@@ -105,28 +103,12 @@ are the active ones (`pulse` was reactivated July 2026 with a rewritten
 edges out its `Out` property, finite trains end with `msg_eof`, Count=0 pulses
 forever and intentionally holds the program open).
 
-`objects/network/TCPObject.c` deserves special mention: it is **the reference
-implementation** — a complete, working object from the predecessor system (VNOS /
-Singlestep Technologies, 2003, same author). It cannot compile here (it targets the
-VNOS API: `VOBJ`, `MsgFunc`, `SendOMessage`, `InitVnosLib`, `ActivateFunc` state
-machines, headers not in this tree) but it is the closest-to-working model of what a
-finished object should do. When building new objects, port its structure onto the
-new framework's mechanisms:
-
-| TCPObject (VNOS)                                  | This framework                          |
-|---------------------------------------------------|-----------------------------------------|
-| `ObjectMessageFunc` message switch                | `Handle_Message`                         |
-| `INITCLASS_MSG` / `STARTUP_MSG` / `END_MSG`       | `_init` / `ClassStart` / `ClassEnd`      |
-| `INITIALIZE_MSG` / `DESTROY_MSG`                  | `InstanceStart` / `InstanceEnd`          |
-| `SETVARIABLE_MSG` / `GETVARIABLE_MSG` + var ids   | node properties + intercepts             |
-| `SendOMessage(owner, msgID + CALLBACK_OFFSET, …)` | propagation out a property (Connect)     |
-| `TCP_REMOTE_CONNECTION_CLOSED_CALLBACK`           | the EOF-on-Out pattern                   |
-| instance rings + `SetTaskSleep(ST_SLEEP)` on empty| stop rescheduling tasks → system quiesces|
-| `DefaultMessage(superclass, …)` chaining          | roadmap: object subclassing              |
-
-Its lifecycle discipline is the model for the cat flow: instances register into an
-active ring on start, the polling task sleeps itself the moment the ring is empty,
-and everything goes quiet without anyone calling exit.
+The lifecycle discipline every object follows: `_init` registers the library,
+`ClassStart` registers the class, `InstanceStart`/`InstanceEnd` bracket an
+instance, `Handle_Message` is the message entry point, and a peer closing is
+just `msg_eof` out the relevant property. Instances register into an active ring
+on start, the polling task sleeps itself the moment the ring is empty, and
+everything goes quiet without anyone calling exit.
 
 ## Runtime object loading and registration (the core mechanism)
 
@@ -413,8 +395,7 @@ composed:
   per-delivery verdicts. `Out` is an ordinary property — it exists to hold the
   subscription list and give `Connect()` an endpoint; chunks flow through it, they
   are not retained on it. EOF is just another message id through the same router,
-  so consumers switch on msgid (data vs EOF) exactly like TCPObject's message
-  dispatch. One producer fans out to any number of consumers; none of them poll.
+  so consumers switch on msgid (data vs EOF). One producer fans out to any number of consumers; none of them poll.
 - The reader drives itself via scheduler tasks, emitting chunks on its `Out`
   property. On end-of-file it sends an **EOF message on its Out** and deactivates
   (stops rescheduling, so its tasks drain).
@@ -435,11 +416,11 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   fires, `DispatchMsg` walks the `Subscriber` sub-nodes on the named property and
   delivers to each (`DeliverToSubscriber`, node.c — the one definition of
   delivery, shared with node.c's own synchronous property-write fan-out).
-  `Connect()` builds the subscription: it records `{Instance, Port, Callback}`
-  on the source property via `AddSubscription()` — Callback is the target's
-  `OnMsg` handler if it has one, else 0, in which case delivery applies the
-  universal default: store the payload onto the record's `{Instance, Port}`
-  (whose own write fans out in turn, so chains hop). This is what lets
+  `Connect()` builds the subscription: `AddSubscription()` records the target
+  instance, the target property's name, and a Callback on the source property —
+  Callback is the target's `OnMsg` handler if it has one, else 0, in which case
+  delivery applies the universal default: store the payload onto that instance's
+  named property (whose own write fans out in turn, so chains hop). This is what lets
   `Connect()` reach ANY property — one with a compiled handler, a plain data
   property, or `Activate` (ordinary since July 2026: `ActivateOnMsg` stamped by
   `RegisterInstance`) — with no adapter species (the old
@@ -520,11 +501,10 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   fans out only on a real change, so this no longer applies. (Properties that
   mirror state are created as STRING props where
   state is mirrored, since `SetValueInt(node, 0)` is a no-op — see below.)
-- **TCP** (`objects/network/tcp.c`, built as `tcp.object`; `TCPObject.c` in the
-  same directory stays as the uncompiled VNOS reference): server mode, any
+- **TCP** (`objects/network/tcp.c`, built as `tcp.object`): server mode, any
   number of simultaneous connections (a linked ring serviced by one shared
   polling task, each message tagged with a `Conn` property identifying its
-  connection — TCPObject's ring pattern, done right). `LocalPort` picks the
+  connection — one ring, one shared task). `LocalPort` picks the
   port; `LocalAddr` (optional) picks the interface to bind — e.g. `127.0.0.1`
   for local-only; absent/empty means all interfaces (this is what the `-ip`
   option feeds). Received bytes go out `Out` (one message per recv), messages
@@ -535,8 +515,7 @@ message flow and exits on its own when the flow drains. How the pieces landed:
   activation is one-shot). A timed server is therefore just a Pulse wired to
   `Enable`; note Pulse emits rising-then-falling, so a 30s lifetime uses
   `Interval=15000, Count=1` (falling edge at 30s). `SO_REUSEADDR` is set;
-  `SIGPIPE` is ignored (set in ClassStart). Client mode is still to come — the
-  connecting state machine lives in TCPObject.c.
+  `SIGPIPE` is ignored (set in ClassStart). Client mode is still to come.
 - **msg_eof** added to callback.h (appended, existing values unshifted).
 - **Bug fixed in sched.c**: `AddTaskDelay` never stored its `data` argument
   (`task->data` stayed uninitialized; `ExecTasks` passes it to the callback).

@@ -93,6 +93,7 @@ typedef struct ScriptVerb
    agent view's. That is both the only thing that can work and the thing you
    actually want. */
 #ifdef SCRIPT_IMPL
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void        ScriptAttach(NodeObj self, NodeObj owner, MsgId msgBase, char *port);
 void        ScriptDetach(NodeObj self);
 ScriptVerb *ScriptVerbs(void);
@@ -118,6 +119,7 @@ static inline long ScriptEntry(char *name)
 	return GetPropLong(cls, name);
 }
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 static inline void ScriptAttach(NodeObj self, NodeObj owner, MsgId msgBase, char *port)
 {
 	void (*fn)(NodeObj, NodeObj, MsgId, char *) =

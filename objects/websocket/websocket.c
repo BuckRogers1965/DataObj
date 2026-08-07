@@ -209,6 +209,7 @@ char *WS_Base64Encode(unsigned char *data, size_t len)
 
 /* ---- handshake ---- */
 
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 void WS_SendRaw(NodeObj instance, char *port, char *text, int length, long connId)
 {
 	NodeObj chunk = NewNode(STRING);

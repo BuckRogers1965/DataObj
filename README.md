@@ -9,9 +9,7 @@ is a separate file discovered on disk at startup. An application here is a set o
 objects plus their wiring. Shipping a different product means shipping different
 objects, never a different binary.
 
-It is a ground-up rewrite of VNOS (Singlestep Technologies, early 2000s), by the
-same author, with the four things that system never solved built in from the
-start.
+Four things it is built on are described below.
 
 ---
 
@@ -122,8 +120,7 @@ leak detector. The fabric is its own instrumentation.
 
 ## The four inventions
 
-Kept from VNOS: the object model, the message fabric, the deployment story.
-New here, each one a lesson from a problem the original never solved:
+Each one exists because the obvious alternative does not hold up:
 
 1. **The node tree** — one uniform structure for registry, config, wiring and
    skins, instead of four separate mechanisms.

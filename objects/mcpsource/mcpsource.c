@@ -941,6 +941,7 @@ static NodeObj MCPAgent_Host(NodeObj agentView)
 	args = NewNode(INTEGER);
 	SetPropLong(args, "Owner", (long) agentView);
 	SetPropLong(args, "MsgBase", (long) MCPAGENT_CALLBACK);
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	SetPropStr(args, "Port", "ScriptEvt");
 	instanceStart(cls, msg_initialize, args);
 	DelNode(args);
@@ -1527,6 +1528,7 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 	                   normally comes from, and Language is not published -
 	                   so the property carries its own. */
 	{
+		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		NodeObj port = GetPropNode(agentView, "Language");
 		char    hosts[300];
 
