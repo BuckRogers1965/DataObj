@@ -23,9 +23,15 @@ Three governing principles:
   between a property with a compiled handler and a plain data property. Every
   one of them is a node, and any node is subscribable. `In`,
   `Out`, `Enable`, `Clock` are just *names* objects happen to give properties;
-  naming a property `Out` does not make it special in any way. A connection has
-  a from end and a to end - that is a fact about the wire, never about the
-  properties it joins.
+  naming a property `Out` does not make it special in any way. **An object may
+  choose a direction; the engine has none and enforces none.** A Reader only
+  produces, a Writer only consumes, and the names they give their properties
+  announce that intent to whoever wires them - but nothing reads those names.
+  You can subscribe to a property named `In` and write values onto one named
+  `Out`, and both behave exactly as they would on any other property.
+  `Connect()` takes two properties and records the subscription on the first one
+  it was handed - that asymmetry belongs to that one call, not to either
+  property.
 - **Everything is a message**: objects interact only by messages routed through
   subscriptions on nodes. Delivery is in-process pointer-passing (function
   pointer call with a node handle — no copies, no serialization, no thread
