@@ -1954,6 +1954,10 @@ function renderAliasControl(alias) {
     return;
   }
 
+  /* The row is labelled with the PROPERTY name alone. The object it belongs
+     to is already the title of the panel the row is sitting in, so prefixing
+     every row with it just repeats a long generated name twenty times. */
+
   /* PROP_MENU: a dropdown. Its selectable options come from a companion   */
   /* property on the target named "<prop>List" (e.g. Language -> the        */
   /* discovered LanguageList) - the same one-property-carries-the-options   */
@@ -1965,7 +1969,7 @@ function renderAliasControl(alias) {
     sel.onchange = () => send({ cmd: 'set-property', instance: alias, prop: 'Value', value: sel.value });
     rec.slot.appendChild(sel);
     rec.control = sel;
-    rec.labelEl.textContent = rec.label || (baseName(rec.target) + '.' + rec.targetProp);
+    rec.labelEl.textContent = rec.label || rec.targetProp;
     /* the current value drives selection, the companion List drives the    */
     /* options - two subscriptions, both landing on this one <select>       */
     const valKey = rec.target + '.' + rec.targetProp;
@@ -1996,7 +2000,7 @@ function renderAliasControl(alias) {
   rec.slot.appendChild(el);
   rec.control = el;
 
-  rec.labelEl.textContent = rec.label || (baseName(rec.target) + '.' + rec.targetProp);
+  rec.labelEl.textContent = rec.label || rec.targetProp;
 
   /* wiring through the alias is wiring to the original (ResolvePort,       */
   /* object.c) - the atom arms a wire on its doorway slot                    */
@@ -2184,7 +2188,7 @@ function onInstanceRenamed(oldAlias, newAlias) {
     if (s) { s.textContent = newBase; s.title = newAlias; }
   }
   const atom = aliasAtoms[newAlias];
-  if (atom && !atom.label) atom.labelEl.textContent = baseName(atom.target) + '.' + atom.targetProp;
+  if (atom && !atom.label) atom.labelEl.textContent = atom.targetProp;
 
   log(oldAlias + ' → ' + newAlias, 'event');
 }

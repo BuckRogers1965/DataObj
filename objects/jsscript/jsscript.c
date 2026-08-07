@@ -7,174 +7,162 @@
 #include "object.h"
 #include "sched.h"
 #include "DebugPrint.h"
+#include "script.h"
 
 #include "quickjs/quickjs.h"
 #include "control.h"	/* PROP_* - what a published property presents as */
 
 /*
+JavaScript (QuickJS) host.
 
-JSScript object: a QuickJS interpreter as an ordinary dataflow object -
-the SECOND language host, built deliberately as a BRIDGE CLIENT: wire
-its Cmd port to a Bridge's In and the Bridge's Out to its Evt port,
-and a script speaks the same JSON protocol the browser does - create,
-connect, set-property, subscribe, the whole verb set, with session
-naming, events and flow recording for free. A script is a peer of the
-GUI, not a special API. (The Lua host predates this shape and is
-untouched until this one proves the pattern.)
+It is an OPAQUE object: no properties, no ports, no name, no path. Its whole
+interface is script.h - a driver creates one through this class's own
+InstanceStart, hands over {Owner, MsgBase, Port}, then sends it messages and
+catches answers. Nothing can find it, wire it, save it or reach into it.
 
-Ports and properties:
+The source lives on the WIDGET that owns this host, which is the thing that
+gets serialized and cloned; the host is rebuilt from it on every start.
 
-    Source     the JavaScript text (edit like any property; clones, saves)
-    In     ->  oninput(fn) runs fn(value, kind) per arriving message
-    Out        send(value) emits a dataflow message here
-    Print      print(value) emits here - the ScriptBox shell wires this
-               to its Output textarea, and errors land here too, loud
-    Cmd        cmd(objOrString) emits one JSON protocol command here
-    Evt    ->  onevent(fn) runs fn(jsonText) per arriving Bridge event
-    Enable     1/0 gate, the standard convention
-    State      Starting/Running/Stopping
+What a script sees is NOT defined here. script.object owns the verb table and
+implements every verb once, in C, over DataObj; this file walks that table and
+registers each entry through one trampoline. Add a verb there and JavaScript
+has it without this file changing - which is the point, because this host and
+the Lua one had already drifted apart (this one had print and cmd and no
+sibling access, the other had siblings and no print).
 
-Script globals: send, print, cmd, oninput, onevent, getprop, setprop,
-log. Values cross the boundary as strings (the intelligent-data-object
-rule extended into script space); cmd() accepts an object and
-JSON.stringifies it, or a preformed string.
+Two things are still spelled here, because they are this host's own lifecycle
+rather than verbs: oninput(fn) and onevent(fn).
 
-Activate (re)runs Source in a FRESH JSContext. Callbacks run
-synchronously inside message delivery, like any compiled handler - and
-a runaway script cannot freeze the single-threaded fabric: an
-interrupt handler enforces a per-entry wall-clock budget (500ms);
-overrunning it kills the script loudly (State, Print, DebugPrint).
+A runaway script cannot freeze the single-threaded fabric: QuickJS's interrupt
+handler asks script.object's shared budget. That budget is real wall clock, not
+the framework's cached time, precisely because a script that never yields also
+never lets the main loop refresh the cache.
 
-QuickJS 2024-01-13 is vendored in ./quickjs (MIT, bellard.org) so the
-module stays a single self-contained .object.
-
+QuickJS 2024-01-13 is vendored in ./quickjs (MIT, bellard.org) so the module
+stays a single self-contained .object.
 */
-
-#define JS_ENTRY_BUDGET_USEC 500000
 
 typedef struct InstanceData
 {
-	int        active;
 	int        enabled;
 	JSRuntime *rt;
 	JSContext *ctx;
 	JSValue    onin;	/* oninput callback, JS_UNDEFINED when unset */
-	JSValue    onevt;	/* onevent callback                           */
+	JSValue    onevt;	/* onevent callback                          */
 	NodeObj    instance;
-	long       entryDeadline;	/* usec-of-day the current entry must yield by */
+	char      *source;	/* our own copy - the owner holds the real one */
 } InstanceData;
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
-
-static long JS_NowUsec(void)
-{
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return tv.tv_sec * 1000000L + tv.tv_usec;
-}
-
-/* the runaway guard: called periodically by the engine mid-execution */
-static int JS_InterruptCheck(JSRuntime *rt, void *opaque)
-{
-	InstanceData *local = (InstanceData *) opaque;
-	return local && local->entryDeadline && JS_NowUsec() > local->entryDeadline;
-}
 
 static InstanceData *JS_Local(JSContext *ctx)
 {
 	return (InstanceData *) JS_GetContextOpaque(ctx);
 }
 
-/* one message out a named port, payload as a string */
-static void JS_EmitPort(InstanceData *local, char *port, const char *text)
+/* every loadable object must export this, the loader checks for it */
+int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
-	NodeObj chunk = NewNode(STRING);
-	SetName(chunk, "Data");
-	SetValueStr(chunk, (char *) (text ? text : ""));
-	SndMsg(local->instance, port, msg_send, chunk);
+	(void) instance; (void) message; (void) data;
+
+	return rtrn_dropped;
 }
 
-/* a script failure is never silent: State stops, the text goes out     */
-/* Print (the Output box), and the server log gets it at ERROR          */
-static void JS_Fail(InstanceData *local, const char *what)
+/* the runaway guard: the deadline is script.object's, so both languages get
+   the same one and neither can forget to have it */
+static int JS_InterruptCheck(JSRuntime *rt, void *opaque)
 {
-	char buf[900];
+	InstanceData *local = (InstanceData *) opaque;
 
-	snprintf(buf, sizeof(buf), "JSScript error: %s", what ? what : "unknown");
-	DebugPrint(buf, __FILE__, __LINE__, ERROR);
-	JS_EmitPort(local, "Print", buf);
-	SetPropInt(local->instance, "State", Stopping);
+	(void) rt;
+	return local && ScriptOverBudget(local->instance);
 }
 
 static void JS_ReportException(InstanceData *local)
 {
-	JSValue exc = JS_GetException(local->ctx);
-	const char *msg = JS_ToCString(local->ctx, exc);
+	JSValue     e = JS_GetException(local->ctx);
+	const char *s = JS_ToCString(local->ctx, e);
 
-	JS_Fail(local, msg ? msg : "exception");
-
-	if (msg)
-		JS_FreeCString(local->ctx, msg);
-	JS_FreeValue(local->ctx, exc);
-}
-
-/* ---- the script-visible globals ---- */
-
-static JSValue js_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-	InstanceData *local = JS_Local(ctx);
-	const char *s = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-
-	if (local && s)
-		JS_EmitPort(local, "Out", s);
+	ScriptReport(local->instance, SCRIPT_ERROR, (char *) (s ? s : "script error"));
 	if (s)
-		JS_FreeCString(ctx, s);
-	return JS_UNDEFINED;
+		JS_FreeCString(local->ctx, s);
+	JS_FreeValue(local->ctx, e);
 }
 
-static JSValue js_print(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+/* ---- the one trampoline -------------------------------------------------
+   Every verb in script.object's table is registered through this, with the
+   table index as magic. Marshal JS values to DataObj, call, marshal back. */
+static JSValue JS_VerbCall(JSContext *ctx, JSValueConst this_val,
+						   int argc, JSValueConst *argv, int magic)
 {
 	InstanceData *local = JS_Local(ctx);
-	const char *s = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+	ScriptVerb   *table = ScriptVerbs();
+	ScriptVerb   *v     = table ? &table[magic] : NULL;
+	DataObj       args[8];
+	DataObj       result;
+	JSValue       out;
+	long          cb = 0;
+	const char   *s;
+	int           i, n;
 
-	if (local && s)
-		JS_EmitPort(local, "Print", s);
-	if (s)
-		JS_FreeCString(ctx, s);
-	return JS_UNDEFINED;
-}
+	(void) this_val;
 
-/* one protocol command out Cmd: a string goes as-is, an object is       */
-/* JSON.stringify'd - wire Cmd to a Bridge's In and this IS the wire     */
-static JSValue js_cmd(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-	InstanceData *local = JS_Local(ctx);
-	JSValue jstr;
-	const char *s;
-
-	if (!local || argc < 1)
+	if (!v || !local)
 		return JS_UNDEFINED;
 
-	if (JS_IsString(argv[0]))
-		jstr = JS_DupValue(ctx, argv[0]);
-	else
-		jstr = JS_JSONStringify(ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
-
-	s = JS_ToCString(ctx, jstr);
-	if (s)
+	n = v->argc < 8 ? v->argc : 8;
+	for (i = 0; i < n; i++)
 	{
-		JS_EmitPort(local, "Cmd", s);
-		JS_FreeCString(ctx, s);
+		args[i] = NewData(STRING);
+		s = (i < argc) ? JS_ToCString(ctx, argv[i]) : NULL;
+		SetStr(args[i], (char *) (s ? s : ""));
+		if (s)
+			JS_FreeCString(ctx, s);
 	}
-	JS_FreeValue(ctx, jstr);
-	return JS_UNDEFINED;
+
+	/* a trailing function argument becomes an opaque handle only this host
+	   knows how to call back through */
+	if (v->takesCallback && n < argc && JS_IsFunction(ctx, argv[n]))
+		cb = (long) JS_VALUE_GET_PTR(JS_DupValue(ctx, argv[n]));
+
+	result = v->fn(local->instance, args, cb);
+
+	for (i = 0; i < n; i++)
+		DelData(args[i]);
+
+	if (!result)
+		return JS_UNDEFINED;
+
+	out = JS_NewString(ctx, GetStr(result));
+	DelData(result);
+	return out;
 }
 
+/* script.object calls this when a connect()ed source fires */
+static void JSHost_Invoke(NodeObj self, long cbHandle, DataObj value)
+{
+	InstanceData *local = (InstanceData *) GetPropLong(self, "local");
+	JSValue       fn, arg, r;
+
+	if (!local || !local->ctx || !cbHandle)
+		return;
+
+	fn  = JS_MKPTR(JS_TAG_OBJECT, (void *) cbHandle);
+	arg = JS_NewString(local->ctx, value ? GetStr(value) : "");
+	r   = JS_Call(local->ctx, fn, JS_UNDEFINED, 1, (JSValueConst *) &arg);
+	if (JS_IsException(r))
+		JS_ReportException(local);
+	JS_FreeValue(local->ctx, r);
+	JS_FreeValue(local->ctx, arg);
+}
+
+/* this host's own lifecycle hooks, not verbs */
 static JSValue js_oninput(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
 	InstanceData *local = JS_Local(ctx);
 
+	(void) this_val;
 	if (local && argc > 0 && JS_IsFunction(ctx, argv[0]))
 	{
 		JS_FreeValue(ctx, local->onin);
@@ -187,6 +175,7 @@ static JSValue js_onevent(JSContext *ctx, JSValueConst this_val, int argc, JSVal
 {
 	InstanceData *local = JS_Local(ctx);
 
+	(void) this_val;
 	if (local && argc > 0 && JS_IsFunction(ctx, argv[0]))
 	{
 		JS_FreeValue(ctx, local->onevt);
@@ -195,134 +184,14 @@ static JSValue js_onevent(JSContext *ctx, JSValueConst this_val, int argc, JSVal
 	return JS_UNDEFINED;
 }
 
-static JSValue js_getprop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-	InstanceData *local = JS_Local(ctx);
-	const char *n = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-	char *v = NULL;
-	JSValue ret;
+/* ---- running ------------------------------------------------------------ */
 
-	if (local && n)
-		v = GetPropStr(local->instance, (char *) n);
-	ret = JS_NewString(ctx, v ? v : "");
-	if (n)
-		JS_FreeCString(ctx, n);
-	return ret;
-}
-
-static JSValue js_setprop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-	InstanceData *local = JS_Local(ctx);
-	const char *n = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-	const char *v = argc > 1 ? JS_ToCString(ctx, argv[1]) : NULL;
-
-	if (local && n && v)
-		SetOrDeliverProp(local->instance, (char *) n, (char *) v);
-	if (n)
-		JS_FreeCString(ctx, n);
-	if (v)
-		JS_FreeCString(ctx, v);
-	return JS_UNDEFINED;
-}
-
-static JSValue js_log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-	const char *s = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-	char buf[600];
-
-	if (s)
-	{
-		snprintf(buf, sizeof(buf), "JSScript: %s", s);
-		DebugPrint(buf, __FILE__, __LINE__, OBJMSGHANDLING);
-		JS_FreeCString(ctx, s);
-	}
-	return JS_UNDEFINED;
-}
-
-/* call one stored callback with string args, budgeted and loud */
-static void JS_CallHandler(InstanceData *local, JSValue fn, const char *a, const char *b)
-{
-	JSValue args[2], ret;
-	int argc = 0;
-
-	if (!local->ctx || !JS_IsFunction(local->ctx, fn))
-		return;
-
-	if (a)
-		args[argc++] = JS_NewString(local->ctx, a);
-	if (b)
-		args[argc++] = JS_NewString(local->ctx, b);
-
-	local->entryDeadline = JS_NowUsec() + JS_ENTRY_BUDGET_USEC;
-	ret = JS_Call(local->ctx, fn, JS_UNDEFINED, argc, args);
-	local->entryDeadline = 0;
-
-	while (argc > 0)
-		JS_FreeValue(local->ctx, args[--argc]);
-
-	if (JS_IsException(ret))
-		JS_ReportException(local);
-	JS_FreeValue(local->ctx, ret);
-}
-
-/* every loadable object must export this, the loader checks for it */
-int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
-{
-	DebugPrint ( "JSScript handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
-	return rtrn_handled;
-}
-
-/* dataflow in: fn(value, kind) with kind "send"/"change"/"eof" */
-int JSScript_OnIn(NodeObj instance, MsgId message, NodeObj data)
-{
-	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
-	char *v;
-
-	if (!local || !local->active || !local->enabled)
-		return rtrn_dropped;
-
-	v = data ? GetValueStr(data) : NULL;
-	JS_CallHandler(local, local->onin, v ? v : "",
-				   message == msg_eof ? "eof" : (message == msg_change ? "change" : "send"));
-	return rtrn_handled;
-}
-
-/* protocol events in (the Bridge's Out wired here): fn(jsonText) */
-int JSScript_OnEvt(NodeObj instance, MsgId message, NodeObj data)
-{
-	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
-	char *v;
-
-	if (!local || !local->active || !local->enabled || message == msg_eof)
-		return rtrn_dropped;
-
-	v = data ? GetValueStr(data) : NULL;
-	if (v)
-		JS_CallHandler(local, local->onevt, v, NULL);
-	return rtrn_handled;
-}
-
-/* control callback: 1 enables, 0 disables, EOF on this line is ignored */
-int JSScript_OnEnable(NodeObj instance, MsgId message, NodeObj data)
-{
-	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
-
-	if (!local || message != msg_send)
-		return rtrn_dropped;
-
-	local->enabled = GetValueInt(data) ? 1 : 0;
-	SetValueStr(GetPropNode(instance, "Enable"), local->enabled ? "1" : "0");
-	return rtrn_handled;
-}
-
-static void JSScript_FreeEngine(InstanceData *local)
+static void JS_Teardown(InstanceData *local)
 {
 	if (local->ctx)
 	{
 		JS_FreeValue(local->ctx, local->onin);
 		JS_FreeValue(local->ctx, local->onevt);
-		local->onin = JS_UNDEFINED;
-		local->onevt = JS_UNDEFINED;
 		JS_FreeContext(local->ctx);
 		local->ctx = NULL;
 	}
@@ -331,96 +200,141 @@ static void JSScript_FreeEngine(InstanceData *local)
 		JS_FreeRuntime(local->rt);
 		local->rt = NULL;
 	}
+	local->onin  = JS_UNDEFINED;
+	local->onevt = JS_UNDEFINED;
 }
 
-/* Activate: fresh runtime, register the globals, run Source */
-int JSScript_Activate(NodeObj instance, MsgId message, NodeObj data)
+static void JS_Run(NodeObj instance)
 {
 	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
-	char *src;
-	JSValue global, ret;
+	ScriptVerb   *table;
+	JSValue       global, r;
+	int           i;
+
+	if (!local)
+		return;
+
+	JS_Teardown(local);
+
+	local->rt  = JS_NewRuntime();
+	local->ctx = JS_NewContext(local->rt);
+	JS_SetContextOpaque(local->ctx, local);
+	JS_SetInterruptHandler(local->rt, JS_InterruptCheck, local);
+	local->onin  = JS_UNDEFINED;
+	local->onevt = JS_UNDEFINED;
+
+	global = JS_GetGlobalObject(local->ctx);
+
+	/* the whole binding: walk the table, one trampoline per entry */
+	table = ScriptVerbs();
+	for (i = 0; table && table[i].name; i++)
+		JS_SetPropertyStr(local->ctx, global, table[i].name,
+						  JS_NewCFunctionMagic(local->ctx, JS_VerbCall, table[i].name,
+											   table[i].argc, JS_CFUNC_generic_magic, i));
+
+	JS_SetPropertyStr(local->ctx, global, "oninput",
+					  JS_NewCFunction(local->ctx, js_oninput, "oninput", 1));
+	JS_SetPropertyStr(local->ctx, global, "onevent",
+					  JS_NewCFunction(local->ctx, js_onevent, "onevent", 1));
+	JS_FreeValue(local->ctx, global);
+
+	if (!local->source || !local->source[0])
+		return;
+
+	ScriptStartRun(instance);
+	r = JS_Eval(local->ctx, local->source, strlen(local->source), "<source>", JS_EVAL_TYPE_GLOBAL);
+	if (JS_IsException(r))
+		JS_ReportException(local);
+	JS_FreeValue(local->ctx, r);
+}
+
+static void JS_Deliver(NodeObj instance, NodeObj data, const char *kind)
+{
+	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
+	JSValue       args[2], r;
+
+	if (!local || !local->enabled || !local->ctx || !JS_IsFunction(local->ctx, local->onin))
+		return;
+
+	ScriptStartRun(instance);
+	args[0] = JS_NewString(local->ctx, data ? GetValueStr(data) : "");
+	args[1] = JS_NewString(local->ctx, kind);
+	r = JS_Call(local->ctx, local->onin, JS_UNDEFINED, 2, (JSValueConst *) args);
+	if (JS_IsException(r))
+		JS_ReportException(local);
+	JS_FreeValue(local->ctx, r);
+	JS_FreeValue(local->ctx, args[0]);
+	JS_FreeValue(local->ctx, args[1]);
+}
+
+/* ---- the whole driver-facing surface: one message function -------------- */
+static int JS_MessageFunc(NodeObj instance, MsgId message, NodeObj data)
+{
+	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
 
 	if (!local)
 		return rtrn_dropped;
 
-	JSScript_FreeEngine(local);
-
-	local->rt = JS_NewRuntime();
-	local->ctx = JS_NewContext(local->rt);
-	JS_SetContextOpaque(local->ctx, local);
-	JS_SetInterruptHandler(local->rt, JS_InterruptCheck, local);
-	local->onin = JS_UNDEFINED;
-	local->onevt = JS_UNDEFINED;
-
-	global = JS_GetGlobalObject(local->ctx);
-	JS_SetPropertyStr(local->ctx, global, "send",    JS_NewCFunction(local->ctx, js_send,    "send", 1));
-	JS_SetPropertyStr(local->ctx, global, "print",   JS_NewCFunction(local->ctx, js_print,   "print", 1));
-	JS_SetPropertyStr(local->ctx, global, "cmd",     JS_NewCFunction(local->ctx, js_cmd,     "cmd", 1));
-	JS_SetPropertyStr(local->ctx, global, "oninput", JS_NewCFunction(local->ctx, js_oninput, "oninput", 1));
-	JS_SetPropertyStr(local->ctx, global, "onevent", JS_NewCFunction(local->ctx, js_onevent, "onevent", 1));
-	JS_SetPropertyStr(local->ctx, global, "getprop", JS_NewCFunction(local->ctx, js_getprop, "getprop", 1));
-	JS_SetPropertyStr(local->ctx, global, "setprop", JS_NewCFunction(local->ctx, js_setprop, "setprop", 2));
-	JS_SetPropertyStr(local->ctx, global, "log",     JS_NewCFunction(local->ctx, js_log,     "log", 1));
-	JS_FreeValue(local->ctx, global);
-
-	local->active = 1;
-	SetPropInt(instance, "State", Running);
-
-	src = GetPropStr(instance, "Source");
-	if (src && src[0])
+	switch (message)
 	{
-		local->entryDeadline = JS_NowUsec() + JS_ENTRY_BUDGET_USEC;
-		ret = JS_Eval(local->ctx, src, strlen(src), "Source", JS_EVAL_TYPE_GLOBAL);
-		local->entryDeadline = 0;
+		case SCRIPT_SET_SOURCE_MSG:
+			if (local->source)
+				free(local->source);
+			local->source = strdup(data ? GetValueStr(data) : "");
+			return rtrn_handled;
 
-		if (JS_IsException(ret))
-			JS_ReportException(local);
-		JS_FreeValue(local->ctx, ret);
+		case SCRIPT_RUN_MSG:
+			local->enabled = 1;
+			JS_Run(instance);
+			return rtrn_handled;
+
+		case SCRIPT_IN_MSG:
+			JS_Deliver(instance, data, "send");
+			return rtrn_handled;
+
+		case SCRIPT_STOP_MSG:
+			local->enabled = 0;
+			JS_Teardown(local);
+			return rtrn_handled;
+
+		case SCRIPT_BUDGET_MSG:
+			ScriptSetBudget(instance, data ? GetValueLong(data) : 0);
+			return rtrn_handled;
 	}
 
-	return rtrn_handled;
+	return rtrn_dropped;
 }
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
-	NodeObj instance, port;
-	InstanceData *local = malloc(sizeof(InstanceData));
+	NodeObj       instance = NewNode(INTEGER);
+	NodeObj       entry;
+	InstanceData *local;
 
-	local->active = 0;
-	local->enabled = 1;
-	local->rt = NULL;
-	local->ctx = NULL;
-	local->onin = JS_UNDEFINED;
-	local->onevt = JS_UNDEFINED;
-	local->entryDeadline = 0;
+	(void) message;
 
-	instance = NewNode(INTEGER);
-	SetName(instance, "JSScript");
+	local = malloc(sizeof(InstanceData));
+	memset(local, 0, sizeof(InstanceData));
+	local->enabled  = 1;
 	local->instance = instance;
+	local->onin     = JS_UNDEFINED;
+	local->onevt    = JS_UNDEFINED;
 
-	SetPropStr(instance, "Source", "");
-	SetPropInt(instance, "Out", 0);
-	SetPropInt(instance, "Print", 0);
-	SetPropInt(instance, "Cmd", 0);
-	SetPropInt(instance, "State", Starting);
+	SetName(instance, "JSScript");
 	SetPropLong(instance, "local", (long) local);
-	SetPropLong(instance, "Activate", (long) JSScript_Activate);
 
-	SetPropInt(instance, "In", 0);
-	port = GetPropNode(instance, "In");
-	SetPropLong(port, "OnMsg", (long) JSScript_OnIn);
+	/* ONE entry node - the whole surface. Nothing published, nothing wired. */
+	SetPropStr(instance, "Msg", "");
+	entry = GetPropNode(instance, "Msg");
+	SetPropLong(entry, "OnMsg", (long) JS_MessageFunc);
 
-	SetPropInt(instance, "Evt", 0);
-	port = GetPropNode(instance, "Evt");
-	SetPropLong(port, "OnMsg", (long) JSScript_OnEvt);
+	if (data)
+		ScriptAttach(instance, (NodeObj) GetPropLong(data, "Owner"),
+					 (MsgId) GetPropLong(data, "MsgBase"), GetPropStr(data, "Port"));
+	else
+		ScriptAttach(instance, NULL, 0, NULL);
 
-	SetPropStr(instance, "Enable", "1");
-	port = GetPropNode(instance, "Enable");
-	SetPropLong(port, "OnMsg", (long) JSScript_OnEnable);
-
-	/* a pure object - no view: no InitPosition/PublishPosition, so it has  */
-	/* no X/Y and never shows in the palette. It is used INSIDE a ScriptBox  */
-	/* widget, never dragged out on its own.                                 */
+	ScriptSetInvoke(instance, JSHost_Invoke);
 
 	RegisterInstance(class, instance);
 
@@ -431,11 +345,18 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *) GetPropLong(instance, "local");
 
+	(void) message; (void) data;
+
+	ScriptDetach(instance);
+
 	if (local)
 	{
-		JSScript_FreeEngine(local);
+		JS_Teardown(local);
+		if (local->source)
+			free(local->source);
 		free(local);
 	}
+
 	return rtrn_handled;
 }
 
@@ -450,21 +371,12 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	/* the runtime-discovery marker: anything listing script languages    */
 	/* (the ScriptBox shell's dropdown) walks the registry for classes    */
 	/* carrying this - no list is maintained anywhere                     */
-	SetPropInt(class, "ScriptHost", 1);
 
 	ClassSelf = RegisterClass(library, class);
 
 	SetClassVersion(ClassSelf, "1", "0");
 	SetClassParent(ClassSelf, "Script");
 
-	PublishProp(ClassSelf, "Source", PROP_TEXTBOX, "");
-	PublishProp(ClassSelf, "In", PROP_NULL, "");
-	PublishProp(ClassSelf, "Out", PROP_NULL, "");
-	PublishProp(ClassSelf, "Print", PROP_NULL, "");
-	PublishProp(ClassSelf, "Cmd", PROP_NULL, "");
-	PublishProp(ClassSelf, "Evt", PROP_NULL, "");
-	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State", PROP_LED, "1");
 
 	return rtrn_handled;
 }

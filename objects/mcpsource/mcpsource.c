@@ -9,6 +9,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "widget.h"
+#include "script.h"
 
 /*
 
@@ -845,9 +846,18 @@ int SourceInstanceEnd(NodeObj instance, MsgId message, NodeObj data)
    move work: this struct is rebuilt fresh by MCPAgent's own InstanceStart
    on every instantiation, including a clone's, but a cached NodeObj
    pointer to the ORIGINAL connector or ORIGINAL Runner would not be. */
+/* our own callback base: the script host answers on our "ScriptEvt" port at
+   base + SCRIPT_PRINT / SCRIPT_OUT / SCRIPT_ERROR */
+#define MCPAGENT_CALLBACK 0x6200
+
 typedef struct AgentData
 {
 	NodeObj  inner;
+	NodeObj  host;		/* the agent's logic - a PRIVATE script handle. Not a
+						   child called "Runner": unnamed, unaddressable, never
+						   cloned and never serialized. The SOURCE lives on the
+						   agent view itself, which IS cloned and serialized, so
+						   a clone rebuilds its own host from its own copy. */
 	TaskObj  timeoutTask;
 	int      pending;
 	char    *rxbuf;
@@ -857,17 +867,179 @@ typedef struct AgentData
 
 static NodeObj MCPAgentClass;
 
-/* the Runner child, looked up fresh by path each time - never cached,
-   so a clone's own Runner (registered under the clone's own path by the
-   normal child-clone walk) is what gets found, not the original's */
-static NodeObj MCPSource_FindRunner(NodeObj agentView)
-{
-	char vpath[300], rpath[320];
+int MCPSource_AgentOnRequest(NodeObj agentView, MsgId message, NodeObj data);
 
-	if (!PathOfInstance(agentView, vpath, sizeof(vpath)))
+/* every class whose parent is Script, comma-joined - the options a Language
+   menu offers. Same question ScriptBox asks; being a language host is a fact
+   about the class tree, not a marker anyone has to remember to set. */
+static void MCPAgent_HostList(char *out, int outlen)
+{
+	NodeObj lib, cls;
+	int     used, first = 1;
+	char   *par, *nm;
+
+	out[0] = '\0';
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+		{
+			par = GetPropStr(cls, "Parent");
+			if (!par || strcmp(par, "Script"))
+				continue;
+			nm = GetNameStr(cls);
+			if (!nm)
+				continue;
+			used = (int) strlen(out);
+			snprintf(out + used, outlen - used, "%s%s", first ? "" : ",", nm);
+			first = 0;
+		}
+}
+
+/* The agent's script host, made on demand from the agent's OWN Source
+   property. Lazy deliberately: a clone's MCPAgent_InstanceStart runs before
+   its properties are copied, and nothing calls Activate on a clone, so the
+   host cannot be built at start - it is built the first time anything needs
+   it, by which point Source is there. That is also what makes this survive a
+   load: the file carries Source, not a host. */
+static NodeObj MCPAgent_Host(NodeObj agentView)
+{
+	AgentData *ad = (AgentData *)GetPropLong(agentView, "local");
+	NodeObj    cls, args, text;
+	msgobj     instanceStart;
+	char      *lang, *src;
+
+	if (!ad)
 		return NULL;
-	snprintf(rpath, sizeof(rpath), "%s/Runner", vpath);
-	return ResolvePath(rpath);
+	if (ad->host)
+		return ad->host;
+
+	/* No fallback. Guessing the language is guessing what the source IS, and
+	   being right only because one generator happens to emit Lua is not being
+	   right - it just hides that the agent never said. An agent that does not
+	   say is incomplete, and that is the thing worth reporting. */
+	lang = GetPropStr(agentView, "Language");
+	if (!lang || !lang[0])
+	{
+		char dbg[300];
+
+		snprintf(dbg, sizeof(dbg),
+				 "MCPAgent '%s' has no Language, so nothing knows what to run its"
+				 " Source with - not guessing. Regenerate it, or set Language.",
+				 GetPropStr(agentView, "AgentName"));
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
+
+	cls = FindClass(lang);
+	instanceStart = cls ? (msgobj) GetPropLong(cls, "InstanceStart") : NULL;
+	if (!instanceStart)
+	{
+		DebugPrint("MCPAgent: no script host class to run this agent's logic",
+				   __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
+
+	args = NewNode(INTEGER);
+	SetPropLong(args, "Owner", (long) agentView);
+	SetPropLong(args, "MsgBase", (long) MCPAGENT_CALLBACK);
+	SetPropStr(args, "Port", "ScriptEvt");
+	instanceStart(cls, msg_initialize, args);
+	DelNode(args);
+
+	ad->host = (NodeObj) GetPropLong(cls, "LastInstance");
+	if (!ad->host)
+		return NULL;
+
+	src = GetPropStr(agentView, "Source");
+	if (src && src[0])
+	{
+		text = NewNode(STRING);
+		SetName(text, "Source");
+		SetValueStr(text, src);
+		ScriptSetSource(ad->host, text);
+		DelNode(text);
+		ScriptRun(ad->host);
+	}
+
+	return ad->host;
+}
+
+/* the Language menu moved: drop the old host so the next use builds one in
+   the new language. Without this the dropdown is decorative - the host is
+   made once and cached, so whatever it was first is what it stays. */
+int MCPAgent_OnLanguage(NodeObj agentView, MsgId message, NodeObj data)
+{
+	AgentData *ad = (AgentData *)GetPropLong(agentView, "local");
+	char      *lang = data ? GetValueStr(data) : NULL;
+	char       dbg[200];
+
+	if (!ad || message == msg_eof)
+		return rtrn_dropped;
+
+	if (!lang || !lang[0])
+		return rtrn_dropped;
+
+	/* STORE IT. A property carrying an OnMsg is a port: SetOrDeliverProp
+	   delivers to this handler INSTEAD of writing the value, so unless the
+	   handler writes it the property still says whatever it said before -
+	   and the rebuild below quietly made a Lua host after the menu said
+	   JSScript. SetValueStr, not SetPropStr: the latter would fan out and
+	   re-enter this handler. */
+	SetValueStr(GetPropNode(agentView, "Language"), lang);
+
+	if (ad->host)
+	{
+		NodeObj dying = ad->host;
+
+		ad->host = NULL;			/* clear FIRST - nothing of ours may hold it */
+		DeleteInstance(dying);
+	}
+
+	snprintf(dbg, sizeof(dbg), "MCPAgent language is now '%s' - host dropped, rebuilds on next use",
+			 lang);
+	DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+
+	/* the source is unchanged and is still whatever language it was written
+	   in - switching to a host that cannot read it will fail loudly, which is
+	   the honest outcome */
+	return rtrn_handled;
+}
+
+/* Submit pressed: hand it to the agent's own script, which builds the
+   request and send()s it back out */
+int MCPAgent_OnSubmit(NodeObj agentView, MsgId message, NodeObj data)
+{
+	NodeObj host = MCPAgent_Host(agentView);
+
+	(void) message;
+
+	if (!host)
+		return rtrn_dropped;
+
+	ScriptIn(host, data);
+	return rtrn_handled;
+}
+
+/* what the agent's script says back: send() drives the request, exactly as
+   Connect(Runner, "Out", agentView, "Exec") used to */
+int MCPAgent_OnScriptEvt(NodeObj agentView, MsgId message, NodeObj data)
+{
+	switch (message - MCPAGENT_CALLBACK)
+	{
+		case SCRIPT_OUT:
+			return MCPSource_AgentOnRequest(agentView, msg_send, data);
+
+		case SCRIPT_PRINT:
+		case SCRIPT_ERROR:
+		{
+			char dbg[400];
+
+			snprintf(dbg, sizeof(dbg), "MCPAgent script: %.300s",
+					 data ? GetValueStr(data) : "");
+			DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+			return rtrn_handled;
+		}
+	}
+	return rtrn_dropped;
 }
 
 /* the connector this agent belongs to, resolved fresh from its own
@@ -986,7 +1158,7 @@ int MCPSource_AgentOnInnerRx(NodeObj agentView, MsgId message, NodeObj data)
 
 	{
 		char *agentName = GetPropStr(agentView, "AgentName");
-		NodeObj luaInst = MCPSource_FindRunner(agentView);
+		NodeObj luaInst = MCPAgent_Host(agentView);
 		NodeObj root = JSON_Parse(ad->rxbuf);
 		char *status = JSON_GetStr(root, "status");
 		char dbg[512];
@@ -1021,7 +1193,8 @@ int MCPSource_AgentOnInnerRx(NodeObj agentView, MsgId message, NodeObj data)
 			chunk = NewNode(STRING);
 			SetName(chunk, "Data");
 			SetValueStr(chunk, o.b ? o.b : "{}");
-			DeliverMsg(luaInst, "In", msg_send, chunk);
+			ScriptIn(luaInst, chunk);
+			DelNode(chunk);
 			if (o.b) free(o.b);
 		}
 		else
@@ -1247,7 +1420,7 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 									 char *agentName, char *help,
 									 char *inputsCsv, char *outputsCsv, int startY)
 {
-	NodeObj agentView, luaInst, helpCtl, submitCtl;
+	NodeObj agentView, helpCtl, submitCtl;
 	char copy[512], *tok, *end;
 	char *source;
 	char connectorPath[300];
@@ -1277,16 +1450,12 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 		SetPropStr(helpCtl, "Value", help ? help : "");
 	}
 
-	luaInst = Widget_Create(agentView, "Lua", "Runner");
-	if (!luaInst)
-		DebugPrint("MCPSource: Widget_Create('Lua', 'Runner') failed - agent widget has no logic behind it.", __FILE__, __LINE__, ERROR);
-	/* deliberately NOT marked _Hidden: CloneGroupPass (object.c) skips
-	   _Hidden children entirely when cloning a container ("plumbing is
-	   not content") - Runner is the widget's actual logic, not disposable
-	   plumbing, and MUST survive a clone. _Hidden was the wrong tool here
-	   (it conflates "don't render" with "don't clone"); it may render as
-	   a small stray box since Lua has no X/Y of its own, a cosmetic issue
-	   to fix separately, not at the cost of clone working at all. */
+	/* No "Runner" child any more. The agent's logic is its own Source
+	   property - an ordinary data property on the agent view, so it clones
+	   and serializes with the view, and the private host is rebuilt from it
+	   on demand. That also settles two old warts: there is no stray box for
+	   a Lua with no X/Y, and _Hidden no longer has to mean two things at
+	   once ("do not render" versus "do not clone"). */
 
 	y = 50;
 	snprintf(copy, sizeof(copy), "%s", inputsCsv ? inputsCsv : "");
@@ -1311,8 +1480,10 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 		SetPropInt(submitCtl, "W", 60);
 		SetPropInt(submitCtl, "H", 20);
 		SetPropStr(submitCtl, "Label", "Submit");
-		if (luaInst)
-			Connect(submitCtl, "Value", luaInst, "In");
+		/* the button reaches the AGENT, which forwards into its private host -
+		   there is no host property to wire to, and the agent is the thing
+		   that survives a clone anyway */
+		Connect(submitCtl, "Value", agentView, "Submit");
 	}
 	y += 20 + 30;
 
@@ -1337,14 +1508,46 @@ static int MCPSource_BuildAgentView(NodeObj connector, NodeObj group, char *safe
 	   own InstanceStart (this class's class-level function, called by
 	   CreateObject above) - not here, so a clone gets its own too. */
 
-	if (luaInst)
+	source = MCP_BuildAgentSource(inputsCsv, outputsCsv);
+	SetPropStr(agentView, "Source", source);
+	free(source);
+
+	/* and WHAT IT IS, said at the one place that knows - MCP_BuildAgentSource
+	   emits Lua. On the instance, so a clone and a saved flow both keep it and
+	   nothing downstream has to assume anything. */
+	SetPropStr(agentView, "Language", "Lua");
+
+	/* ...and make it CHANGEABLE, or stating it just locks the agent to one
+	   language forever. Three ordinary properties do the whole job:
+	     Language      the choice, with an OnMsg that drops the old host
+	     LanguageList  the options - <prop>List is the existing convention a
+	                   menu control reads its Items from (Widget_Ctl)
+	     Widget        on the Language property itself, saying it presents as
+	                   a menu. The class Interface is where presentation
+	                   normally comes from, and Language is not published -
+	                   so the property carries its own. */
 	{
-		source = MCP_BuildAgentSource(inputsCsv, outputsCsv);
-		SetPropStr(luaInst, "Source", source);
-		free(source);
-		Connect(luaInst, "Out", agentView, "Exec");
-		ActivateInstance(luaInst);
+		NodeObj port = GetPropNode(agentView, "Language");
+		char    hosts[300];
+
+		if (port)
+		{
+			SetPropLong(port, "OnMsg", (long)MCPAgent_OnLanguage);
+			SetPropInt(port, "Widget", PROP_MENU);
+		}
+
+		MCPAgent_HostList(hosts, sizeof(hosts));
+		SetPropStr(agentView, "LanguageList", hosts);
+
+		port = GetPropNode(agentView, "Source");
+		if (port)
+			SetPropInt(port, "Widget", PROP_TEXTBOX);
 	}
+
+	/* build the host now that Source is set - and from here on it is rebuilt
+	   the same way on any clone or load, with no wire to re-make: the script's
+	   send() arrives on ScriptEvt as SCRIPT_OUT. */
+	MCPAgent_Host(agentView);
 
 	{
 		char verify[300], dbg[400];
@@ -1382,6 +1585,7 @@ static int MCPAgent_InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	(void) message; (void) data;
 
 	ad->inner = NULL;
+	ad->host = NULL;
 	ad->timeoutTask = NULL;
 	ad->pending = 0;
 	ad->rxbuf = NULL;
@@ -1394,6 +1598,8 @@ static int MCPAgent_InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	SetPropLong(instance, "local", (long)ad);
 	Widget_Port(instance, "Exec", "", (void *)MCPSource_AgentOnRequest);
+	Widget_Port(instance, "Submit", "", (void *)MCPAgent_OnSubmit);
+	Widget_Port(instance, "ScriptEvt", "", (void *)MCPAgent_OnScriptEvt);
 	Widget_Port(instance, "InnerRx", "", (void *)MCPSource_AgentOnInnerRx);
 	Widget_Port(instance, "InnerUp", "", (void *)MCPSource_AgentOnInnerUp);
 
@@ -1416,6 +1622,15 @@ static int MCPAgent_InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	{
 		if (ad->timeoutTask) DeleteTask(ad->timeoutTask);
 		if (ad->inner) DeleteInstance(ad->inner);
+		/* the script host is ours alone - unnamed and unregistered, so no
+		   subtree walk knows about it and nothing else can be holding it */
+		if (ad->host)
+		{
+			NodeObj dying = ad->host;
+
+			ad->host = NULL;
+			DeleteInstance(dying);
+		}
 		if (ad->rxbuf) free(ad->rxbuf);
 		if (ad->txbuf) free(ad->txbuf);
 		free(ad);
@@ -1453,6 +1668,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishPosition(MCPAgentClass);
 	PublishProp(MCPAgentClass, "AgentName", PROP_TEXTBOX, "");
 	PublishProp(MCPAgentClass, "ConnectorPath", PROP_TEXTBOX, "");
+
 
 	return rtrn_handled;
 }

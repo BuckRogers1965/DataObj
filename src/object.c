@@ -135,8 +135,17 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 
 	name = GetPropStr(inst, "Name");
 	if (!name || !name[0]){
-		DebugPrint ( "Instance has no name.", __FILE__, __LINE__, ERROR);
-		PrintNode(inst);
+		/* No name means no path - and that is a legitimate answer now, not a
+		   fault. A PRIVATE HANDLE is deliberately unnamed so that nothing can
+		   address it: a language host inside a ScriptBox, a socket inside a
+		   port widget. This was an ERROR back when everything was supposed to
+		   be addressable, and it fired - with a full node dump - on every
+		   registry-wide walk, which is most of them.
+		   Still reported, just as what it is: a placement trace at -v 3, with
+		   the dump kept for -v 3 the same way UnregisterLibrary does it. */
+		DebugPrint ( "instance has no name, so it has no path", __FILE__, __LINE__, PLACE);
+		if (DebugPrintGetLevel() >= 3)
+			PrintNode(inst);
 		return 0;
 	}
 
@@ -760,9 +769,46 @@ int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname)
    for the top instance and for each concrete member it walks. Not a
    public entry: you clone a THING (CloneInstance), which copies the node
    AND whatever the node contains. */
+/* THE rule for "is this property portable data" - the one both directions of
+   copying have to agree on, which is why it lives here rather than in either
+   of them.
+
+   Two tests. A LONG-valued property is a runtime pointer (local, Activate,
+   OnMsg, a task handle) and means nothing to anyone else. An older same-named
+   property is a stale shadow, since SetProp prepends and the newest is the
+   one that counts.
+
+   They disagreed before this existed: the serializer walked the instance's
+   real properties while CloneObject walked the CLASS's published Interface,
+   so an unpublished property survived export/import and was silently lost by
+   clone - which is exactly how a generated MCP agent came back from a clone
+   with no logic in it at all. */
+int IsPortableProp(NodeObj inst, NodeObj prop)
+{
+	NodeObj q;
+	char   *name;
+
+	if (!inst || !prop)
+		return 0;
+
+	if (GetDataType(GetValueNode(prop)) == LONG)
+		return 0;
+
+	name = GetNameStr(prop);
+	if (!name || !name[0])
+		return 0;
+
+	for (q = GetNextProp(inst); q && q != prop; q = GetNextSibling(q))
+		if (strcmp(GetNameStr(q), name) == 0)
+			return 0;
+
+	return 1;
+}
+
+
 static NodeObj CloneObject(NodeObj source)
 {
-	NodeObj class, inst, interface, prop, valnode, owner;
+	NodeObj class, inst, prop, valnode, owner;
 	msgobj instanceStart;
 	char *name, *val;
 
@@ -782,13 +828,20 @@ static NodeObj CloneObject(NodeObj source)
 	if (!inst)
 		return NULL;
 
-	interface = GetClassInterface(class);
-	for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
+	/* Copy what the SOURCE actually carries, not what its class published.
+	   Those are different sets: a property added to one instance - an agent's
+	   generated Source, anything a user annotates a single object with - is
+	   real data that is simply not in the class Interface. Walking the
+	   interface silently dropped all of it, so a clone came back missing
+	   things an export/import of the same thing kept.
+	   IsPortableProp is the shared rule; the serializer walks with the same
+	   one, which is what makes the two paths agree. */
+	for (prop = GetNextProp(source); prop; prop = GetNextSibling(prop))
 	{
-		name = GetPropStr(prop, "Name");
-		if (!name)
+		name = GetNameStr(prop);
+		if (!name || !IsPortableProp(source, prop))
 			continue;
-		if (strcmp(name, "State") == 0)	/* lifecycle, not data */
+		if (strcmp(name, "State") == 0)		/* lifecycle, not data */
 			continue;
 
 		owner = source;

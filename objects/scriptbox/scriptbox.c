@@ -7,6 +7,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "widget.h"
+#include "script.h"
 
 /*
 
@@ -34,12 +35,18 @@ else, its chosen language invisible from outside.
 
 */
 
+/* the callback base WE chose - the host answers on OUR "Evt" port at
+   base + SCRIPT_PRINT / SCRIPT_OUT / SCRIPT_ERROR. Ours to pick, which is
+   what lets one owner hold several hosts and still tell them apart. */
+#define SCRIPTBOX_CALLBACK 0x6100
+
 typedef struct InstanceData
 {
 	int     active;
 	int     enabled;
-	NodeObj inner;		/* the language-host instance we drive */
-	char    lang[64];	/* the class name of `inner`           */
+	NodeObj host;		/* the language host - a PRIVATE handle: no name, no
+						   path, unfindable, unwireable, never serialized */
+	char    lang[64];	/* the class name behind `host` */
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -54,9 +61,10 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* the runtime discovery: every class carrying ScriptHost=1, comma-joined  */
-/* - no list maintained anywhere, drop a new language .object in and it     */
-/* appears in the dropdown                                                   */
+/* the runtime discovery: every class whose PARENT is Script, comma-joined.
+   No list maintained anywhere and no marker property to remember to set -
+   being a language host is now a fact about the class tree. Drop a new
+   language .object in and it appears in the dropdown.                      */
 static void ScriptBox_DiscoverHosts(char *out, int outlen)
 {
 	NodeObj lib, cls;
@@ -66,15 +74,20 @@ static void ScriptBox_DiscoverHosts(char *out, int outlen)
 	out[0] = '\0';
 	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
 		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-			if (GetPropInt(cls, "ScriptHost"))
-			{
-				nm = GetNameStr(cls);
-				if (!nm)
-					continue;
-				used = (int) strlen(out);
-				snprintf(out + used, outlen - used, "%s%s", first ? "" : ",", nm);
-				first = 0;
-			}
+		{
+			char *par = GetPropStr(cls, "Parent");
+
+			if (!par || strcmp(par, "Script"))
+				continue;
+
+			nm = GetNameStr(cls);
+			if (!nm)
+				continue;
+
+			used = (int) strlen(out);
+			snprintf(out + used, outlen - used, "%s%s", first ? "" : ",", nm);
+			first = 0;
+		}
 }
 
 /* append one line to the Output box - a script that emits several times   */
@@ -95,75 +108,80 @@ static void ScriptBox_Append(NodeObj instance, char *value)
 	free(buf);
 }
 
-/* inner host print()/errors -> Output box */
-int ScriptBox_OnInnerPrint(NodeObj instance, MsgId message, NodeObj data)
-{
-	if (message != msg_eof)
-		ScriptBox_Append(instance, data ? GetValueStr(data) : NULL);
-	return rtrn_handled;
-}
-
-/* inner host Out -> Output box AND forwarded out our own Out (a fresh      */
-/* copy - the original belongs to the inner's queued delivery, Filter's     */
-/* rule). So the Output box shows output whatever port a language uses      */
-/* (JS print()->Print, Lua send()->Out), and ScriptBox stays a composable   */
-/* flow object whose Out carries the script's dataflow output.              */
-int ScriptBox_OnInnerOut(NodeObj instance, MsgId message, NodeObj data)
+/* Everything the host says comes back HERE, on our own "Evt" port, as
+   SCRIPTBOX_CALLBACK + ordinal. Not wires to the host's properties - it has
+   none. One handler, and the ordinal says which kind. */
+int ScriptBox_OnEvt(NodeObj instance, MsgId message, NodeObj data)
 {
 	NodeObj copy;
+	char   *text = data ? GetValueStr(data) : "";
 
-	if (message == msg_eof)
-		return rtrn_handled;
+	switch (message - SCRIPTBOX_CALLBACK)
+	{
+		case SCRIPT_PRINT:
+		case SCRIPT_ERROR:
+			ScriptBox_Append(instance, text);
+			return rtrn_handled;
 
-	ScriptBox_Append(instance, data ? GetValueStr(data) : NULL);
+		case SCRIPT_OUT:
+			/* shown AND forwarded out our own Out, so a ScriptBox stays a
+			   composable flow object. A fresh copy: the original belongs to
+			   the sender's own delivery. */
+			ScriptBox_Append(instance, text);
+			copy = NewNode(STRING);
+			SetName(copy, "Data");
+			SetValueStr(copy, text);
+			SndMsg(instance, "Out", msg_send, copy);
+			return rtrn_handled;
+	}
 
-	copy = NewNode(STRING);
-	SetName(copy, "Data");
-	SetValueStr(copy, data ? GetValueStr(data) : "");
-	SndMsg(instance, "Out", message, copy);
-	return rtrn_handled;
+	return rtrn_dropped;
 }
 
-/* our In -> inner host In: deliver straight to the inner's own handler */
+/* our In -> the host, by message. Nothing is wired to it; we hold it. */
 int ScriptBox_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || !local->enabled || !local->inner)
+	(void) message;
+
+	if (!local || !local->enabled || !local->host)
 		return rtrn_dropped;
 
-	DeliverMsg(local->inner, "In", message, data);
+	ScriptIn(local->host, data);
 	return rtrn_handled;
 }
 
-/* build (or rebuild) the inner host of class `lang` and wire it to us */
-static void ScriptBox_SwapInner(NodeObj instance, char *lang)
+/* Build (or rebuild) the language host. It is a PRIVATE HANDLE: created
+   through that class's own InstanceStart, never named, never path-registered,
+   never wired. Nothing else in the session can find it, which is the point -
+   the old version made an addressable child called "Inner" and then held a
+   node belonging to it across its own DeleteInstance, which is a
+   use-after-free ASAN caught.
+   The code itself lives on US, in our Source property, so it survives the
+   swap, a save, and a clone - none of which the host takes part in. */
+static void ScriptBox_SwapHost(NodeObj instance, char *lang)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+	NodeObj       cls, args;
+	msgobj        instanceStart;
+	char         *src;
 
 	if (!local || !lang || !lang[0])
 		return;
 
-	/* the old host and every wire on its ports die together - the         */
-	/* registry-wide subscription scrub (DeleteInstance) also removes the   */
-	/* subscription our own In made onto it                                 */
-	if (local->inner)
+	if (local->host)
 	{
-		DeleteInstance(local->inner);
-		local->inner = NULL;
+		NodeObj dying = local->host;
+
+		/* clear it FIRST: nothing of ours may still be holding it while it
+		   is being torn down */
+		local->host = NULL;
+		DeleteInstance(dying);
 	}
 
-	/* the host belongs to this ScriptBox - created inside it. Named and
-	   path-registered (Widget_Create, not plain CreateObject) - without
-	   this it had a Container but no Name, so PathOfInstance failed for
-	   it forever: not just unfindable itself, but object.c's "Instance
-	   has no name" error firing on EVERY list-instances call system-wide,
-	   for any container, since that walk checks every registered
-	   instance everywhere before filtering by container. A stable
-	   role-based name ("Inner"), not the language name, since the class
-	   changes on every language swap but the role doesn't. */
-	local->inner = Widget_Create(instance, lang, "Inner");
-	if (!local->inner)
+	cls = FindClass(lang);
+	if (!cls)
 	{
 		char buf[160];
 		snprintf(buf, sizeof(buf), "ScriptBox: no script host class '%s'", lang);
@@ -172,13 +190,39 @@ static void ScriptBox_SwapInner(NodeObj instance, char *lang)
 		return;
 	}
 
+	instanceStart = (msgobj) GetPropLong(cls, "InstanceStart");
+	if (!instanceStart)
+	{
+		DebugPrint("ScriptBox: that host class cannot make instances",
+				   __FILE__, __LINE__, ERROR);
+		return;
+	}
+
+	/* the callback address, chosen by us */
+	args = NewNode(INTEGER);
+	SetPropLong(args, "Owner", (long) instance);
+	SetPropLong(args, "MsgBase", (long) SCRIPTBOX_CALLBACK);
+	SetPropStr(args, "Port", "Evt");
+	instanceStart(cls, msg_initialize, args);
+	DelNode(args);
+
+	local->host = (NodeObj) GetPropLong(cls, "LastInstance");
+	if (!local->host)
+		return;
+
 	snprintf(local->lang, sizeof(local->lang), "%s", lang);
 
-	/* the inner host's output and dataflow-out come back to us; our In     */
-	/* reaches its In through ScriptBox_OnIn (a handler, so it survives      */
-	/* every swap without re-wiring)                                         */
-	Connect(local->inner, "Print", instance, "InnerPrint");
-	Connect(local->inner, "Out",   instance, "InnerOut");
+	/* the code carries over: it was always ours */
+	src = GetPropStr(instance, "Source");
+	if (src && src[0])
+	{
+		NodeObj text = NewNode(STRING);
+
+		SetName(text, "Source");
+		SetValueStr(text, src);
+		ScriptSetSource(local->host, text);
+		DelNode(text);
+	}
 }
 
 /* the Language dropdown drove a new value in: swap the inner host */
@@ -197,7 +241,7 @@ int ScriptBox_OnLanguage(NodeObj instance, MsgId message, NodeObj data)
 	SetValueStr(GetPropNode(instance, "Language"), lang);
 
 	if (strcmp(lang, local->lang) != 0)
-		ScriptBox_SwapInner(instance, lang);
+		ScriptBox_SwapHost(instance, lang);
 
 	return rtrn_handled;
 }
@@ -236,25 +280,33 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	   inner host exists yet: it doesn't on the very first call (the
 	   deferred build coming up - build the panel and bring the host up,
 	   but do not run), and does on every call after. */
-	firstCall = !local->inner;
+	firstCall = !local->host;
 
 	/* now the box has a path (deferred build / activation), build the panel and
 	   bring the inner host up - a sub-object needs the box's OWN path first, so
 	   this cannot happen in InstanceStart (the path is set after it returns) */
 	Widget_BuildOnce(instance, ScriptBoxPanel);
-	if (!local->inner)
-		ScriptBox_SwapInner(instance, GetPropStr(instance, "Language"));
+	if (!local->host)
+		ScriptBox_SwapHost(instance, GetPropStr(instance, "Language"));
 
-	if (firstCall || !local->inner)
+	if (firstCall || !local->host)
 		return rtrn_handled;
 
 	local->active = 1;
 	SetPropInt(instance, "State", Running);
 	SetPropStr(instance, "Output", "");
 
+	/* hand over the current text and run it - two messages, no properties */
 	src = GetPropStr(instance, "Source");
-	SetOrDeliverProp(local->inner, "Source", src ? src : "");
-	ActivateInstance(local->inner);
+	{
+		NodeObj text = NewNode(STRING);
+
+		SetName(text, "Source");
+		SetValueStr(text, src ? src : "");
+		ScriptSetSource(local->host, text);
+		DelNode(text);
+	}
+	ScriptRun(local->host);
 
 	return rtrn_handled;
 }
@@ -290,7 +342,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	local->active = 0;
 	local->enabled = 1;
-	local->inner = NULL;
+	local->host = NULL;
 	local->lang[0] = '\0';
 
 	instance = NewNode(INTEGER);
@@ -311,8 +363,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropLong(instance, "Activate", (long)ScriptBox_Activate);
 
 	/* internal wiring ports for the inner host's Print and Out - not published */
-	Widget_Port(instance, "InnerPrint", "0", (void *)ScriptBox_OnInnerPrint);
-	Widget_Port(instance, "InnerOut",   "0", (void *)ScriptBox_OnInnerOut);
+	/* one port for everything the host says back - the ordinal distinguishes
+	   Print from Out from Error, so there is nothing to keep in step */
+	Widget_Port(instance, "Evt", "0", (void *)ScriptBox_OnEvt);
 
 	/* which control stands in for this widget at each end of a wire, so it
 	   can be wired at its closed icon: what arrives is In, what it says is
@@ -343,18 +396,18 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	Widget_CancelBuild(instance);
 	if (local)
 	{
-		/* local->inner is NOT deleted here. It is a real, path-registered
-		   instance (Widget_Create) living under this ScriptBox's own path,
-		   so whenever THIS instance dies through the one path anything
-		   dies through (Bridge_Delete, bridge.c), that call has already
-		   snapshotted the whole subtree - this instance AND inner, as two
-		   independent entries - before deleting either. Deleting inner
-		   here too raced that same snapshot's own turn to reach inner's
-		   entry, calling DeleteInstance twice on the same freed node
-		   (confirmed: SIGABRT/core dump the first time any test deleted a
-		   ScriptBox). Swapping languages while this instance stays alive
-		   is the one time inner genuinely needs an explicit delete -
-		   ScriptBox_SwapInner already does exactly that, on its own. */
+		/* the host IS ours to delete: it is a private handle, not a
+		   path-registered child, so no subtree snapshot knows about it and
+		   nothing else can be holding it. That is the whole difference from
+		   the old addressable "Inner", which could be deleted twice - once
+		   here and once by the caller's own subtree walk. */
+		if (local->host)
+		{
+			NodeObj dying = local->host;
+
+			local->host = NULL;
+			DeleteInstance(dying);
+		}
 		free(local);
 	}
 	return rtrn_handled;

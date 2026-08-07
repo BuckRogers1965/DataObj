@@ -679,7 +679,7 @@ static void Bridge_RegisterClone(InstanceData *local, NodeObj clone, char *pathO
 void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *of = GetPropStr(command, "instance");
-	NodeObj inst, view, class, interface, prop, member, chunk;
+	NodeObj inst, view, prop, member, chunk;
 	char viewAlias[256], memberAlias[256], base[140], num[16];
 	char *existing, *name, *curAlias, *slash;
 	char *escOf, *escView;
@@ -751,16 +751,20 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		Bridge_InstanceEvent(instance, local, viewAlias, "View", GetParent(view),
 							 curAlias, curAlias, 1, local->replyConn);
 
-		/* one Alias member per published property, every direction, no   */
-		/* exceptions - each one a live link into the object itself. No   */
-		/* events: nobody is viewing the new container yet; members        */
-		/* replay when a window opens it.                                  */
-		class = GetParent(inst);
-		interface = class ? GetClassInterface(class) : NULL;
-		for (prop = interface ? GetChild(interface) : NULL; prop; prop = GetNextSibling(prop))
+		/* one Alias member per property the instance carries, every       */
+		/* direction, no exceptions - each one a live link into the object  */
+		/* itself. No events: nobody is viewing the new container yet;      */
+		/* members replay when a window opens it.                           */
+		/* Walk the INSTANCE, not the class Interface. Properties can be added
+		   to one object - a generated agent's Source and Language, anything
+		   annotated onto a single instance - and those are real data that the
+		   class never published. Walking the interface made them invisible
+		   here, the same way it made them invisible to clone.
+		   The interface is still consulted, but only for PRESENTATION. */
+		for (prop = GetNextProp(inst); prop; prop = GetNextSibling(prop))
 		{
-			name = GetPropStr(prop, "Name");
-			if (!name || !name[0])
+			name = GetNameStr(prop);
+			if (!name || !name[0] || !IsPortableProp(inst, prop))
 				continue;
 
 			/* and each control is created IN the panel it appears on */
@@ -779,8 +783,16 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			/* the Interface entry is in hand - stamp the published        */
 			/* presentation on the member so any client renders the row     */
 			/* from the member's own properties, never from the class        */
-			/* Interface (readmefirst repair #2)                              */
-			SetPropInt(member, "Widget", GetPropInt(prop, "Widget"));
+			/* How the row draws: the class Interface if it published this one,
+			   else what the property itself says (a Widget sub-property on the
+			   property node - the same stamp, one level down), else a textbox.
+			   A client renders from the member, never from the Interface. */
+			{
+				NodeObj ipro = InterfacePropForInstance(inst, name);
+				int     widget = ipro ? GetPropInt(ipro, "Widget") : GetPropInt(prop, "Widget");
+
+				SetPropInt(member, "Widget", widget ? widget : PROP_TEXTBOX);
+			}
 
 			SetPropStr(member, "Container", viewAlias);
 			{

@@ -331,6 +331,11 @@ ObjGetTaskList(void);
 /* named In, Out, Enable or Value. Those are names, not kinds.           */
 NodeObj PublishProp(NodeObj class, char * name, int widget, char * defaultValue);
 
+/* is this property portable DATA, as opposed to a runtime pointer or a stale
+   shadow? The single rule a clone and an export must agree on - both call
+   this, so they cannot drift. */
+int IsPortableProp(NodeObj inst, NodeObj prop);
+
 /* One instance property's published metadata - the Interface "Property" */
 /* entry (Name/Widget/Default) on the instance's class, NULL             */
 /* if unpublished. What a translator stamping presentation defaults onto */
