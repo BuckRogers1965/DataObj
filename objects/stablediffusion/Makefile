@@ -102,7 +102,7 @@ stablediffusion.o: /usr/include/bits/types/struct_osockaddr.h
 stablediffusion.o: /usr/include/netinet/in.h /usr/include/bits/stdint-uintn.h
 stablediffusion.o: /usr/include/bits/in.h /usr/include/arpa/inet.h
 stablediffusion.o: /usr/include/netdb.h /usr/include/rpc/netdb.h
-stablediffusion.o: /usr/include/bits/netdb.h /usr/include/sched.h
-stablediffusion.o: /usr/include/bits/sched.h
-stablediffusion.o: /usr/include/bits/types/struct_sched_param.h
-stablediffusion.o: /usr/include/bits/cpu-set.h
+stablediffusion.o: /usr/include/bits/netdb.h ../../src/node.h
+stablediffusion.o: ../../src/data.h ../../src/object.h ../../src/sched.h
+stablediffusion.o: ../../src/callback.h ../../src/DebugPrint.h
+stablediffusion.o: ../../src/widget.h ../../src/control.h

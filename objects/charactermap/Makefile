@@ -67,6 +67,6 @@ charactermap.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 charactermap.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 charactermap.o: /usr/include/bits/types/locale_t.h
 charactermap.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-charactermap.o: /usr/include/sched.h /usr/include/bits/sched.h
-charactermap.o: /usr/include/bits/types/struct_sched_param.h
-charactermap.o: /usr/include/bits/cpu-set.h
+charactermap.o: ../../src/node.h ../../src/data.h ../../src/object.h
+charactermap.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+charactermap.o: ../../src/widget.h ../../src/control.h

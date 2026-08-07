@@ -64,6 +64,6 @@ button.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 button.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 button.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 button.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-button.o: /usr/include/sched.h /usr/include/bits/sched.h
-button.o: /usr/include/bits/types/struct_sched_param.h
-button.o: /usr/include/bits/cpu-set.h
+button.o: ../../src/node.h ../../src/data.h ../../src/object.h
+button.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+button.o: ../../src/control.h

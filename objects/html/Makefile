@@ -62,6 +62,6 @@ html.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 html.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 html.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 html.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-html.o: /usr/include/sched.h /usr/include/bits/sched.h
-html.o: /usr/include/bits/types/struct_sched_param.h
-html.o: /usr/include/bits/cpu-set.h
+html.o: ../../src/node.h ../../src/data.h ../../src/object.h
+html.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+html.o: ../../src/control.h

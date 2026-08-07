@@ -66,6 +66,6 @@ logicgate.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 logicgate.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 logicgate.o: /usr/include/bits/types/locale_t.h
 logicgate.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-logicgate.o: /usr/include/sched.h /usr/include/bits/sched.h
-logicgate.o: /usr/include/bits/types/struct_sched_param.h
-logicgate.o: /usr/include/bits/cpu-set.h
+logicgate.o: ../../src/node.h ../../src/data.h ../../src/object.h
+logicgate.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+logicgate.o: ../../src/widget.h ../../src/control.h

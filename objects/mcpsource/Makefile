@@ -66,7 +66,7 @@ mcpsource.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 mcpsource.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 mcpsource.o: /usr/include/bits/types/locale_t.h
 mcpsource.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-mcpsource.o: /usr/include/ctype.h /usr/include/sched.h
-mcpsource.o: /usr/include/bits/sched.h
-mcpsource.o: /usr/include/bits/types/struct_sched_param.h
-mcpsource.o: /usr/include/bits/cpu-set.h
+mcpsource.o: /usr/include/ctype.h ../../src/node.h ../../src/data.h
+mcpsource.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+mcpsource.o: ../../src/DebugPrint.h ../../src/widget.h ../../src/control.h
+mcpsource.o: ../../src/script.h

@@ -62,6 +62,5 @@ led.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 led.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 led.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 led.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-led.o: /usr/include/sched.h /usr/include/bits/sched.h
-led.o: /usr/include/bits/types/struct_sched_param.h
-led.o: /usr/include/bits/cpu-set.h
+led.o: ../../src/node.h ../../src/data.h ../../src/object.h ../../src/sched.h
+led.o: ../../src/callback.h ../../src/DebugPrint.h ../../src/control.h

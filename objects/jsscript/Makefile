@@ -75,9 +75,9 @@ jsscript.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 jsscript.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 jsscript.o: /usr/include/bits/types/locale_t.h
 jsscript.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-jsscript.o: /usr/include/sys/time.h /usr/include/sched.h
-jsscript.o: /usr/include/bits/sched.h
-jsscript.o: /usr/include/bits/types/struct_sched_param.h
-jsscript.o: /usr/include/bits/cpu-set.h quickjs/quickjs.h
+jsscript.o: /usr/include/sys/time.h ../../src/node.h ../../src/data.h
+jsscript.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+jsscript.o: ../../src/DebugPrint.h ../../src/script.h quickjs/quickjs.h
 jsscript.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint.h
 jsscript.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdint-gcc.h
+jsscript.o: ../../src/control.h

@@ -64,7 +64,7 @@ tcpport.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 tcpport.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 tcpport.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 tcpport.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-tcpport.o: /usr/include/ctype.h /usr/include/sched.h
-tcpport.o: /usr/include/bits/sched.h
-tcpport.o: /usr/include/bits/types/struct_sched_param.h
-tcpport.o: /usr/include/bits/cpu-set.h ../../objects/network/tcp.h
+tcpport.o: /usr/include/ctype.h ../../src/node.h ../../src/data.h
+tcpport.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+tcpport.o: ../../src/DebugPrint.h ../../src/widget.h ../../src/control.h
+tcpport.o: ../network/tcp.h

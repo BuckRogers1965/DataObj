@@ -81,8 +81,6 @@ tcpshim.o: /usr/include/x86_64-linux-gnu/bits/stdlib-float.h
 tcpshim.o: /usr/include/string.h
 tcpshim.o: /usr/include/x86_64-linux-gnu/bits/types/locale_t.h
 tcpshim.o: /usr/include/x86_64-linux-gnu/bits/types/__locale_t.h
-tcpshim.o: /usr/include/strings.h /usr/include/sched.h
-tcpshim.o: /usr/include/x86_64-linux-gnu/bits/sched.h
-tcpshim.o: /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h
-tcpshim.o: /usr/include/x86_64-linux-gnu/bits/cpu-set.h
-tcpshim.o: ../../objects/network/tcp.h
+tcpshim.o: /usr/include/strings.h ../../src/node.h ../../src/data.h
+tcpshim.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+tcpshim.o: ../../src/DebugPrint.h ../network/tcp.h ../../src/control.h

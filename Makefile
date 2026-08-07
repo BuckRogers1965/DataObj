@@ -1,7 +1,7 @@
 
 CC=gcc
 
-SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c buff.c queue.c bufftest.c
+SOURCE= data.c deamon.c DebugPrint.c dirscan.c libload.c list.c namespace.c node.c object.c sched.c timer.c buff.c queue.c
 
 # where those sources live now
 vpath %.c src src/dyn
@@ -118,3 +118,42 @@ depend:
 .PHONY: all subdirs clean depend unit_test
 
 # DO NOT DELETE
+
+build/src/main.o: /usr/include/stdio.h /usr/include/bits/libc-header-start.h
+build/src/main.o: /usr/include/features.h /usr/include/features-time64.h
+build/src/main.o: /usr/include/bits/wordsize.h /usr/include/bits/timesize.h
+build/src/main.o: /usr/include/stdc-predef.h /usr/include/sys/cdefs.h
+build/src/main.o: /usr/include/bits/long-double.h /usr/include/gnu/stubs.h
+build/src/main.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stddef.h
+build/src/main.o: /usr/lib/gcc/x86_64-linux-gnu/12/include/stdarg.h
+build/src/main.o: /usr/include/bits/types.h /usr/include/bits/typesizes.h
+build/src/main.o: /usr/include/bits/time64.h
+build/src/main.o: /usr/include/bits/types/__fpos_t.h
+build/src/main.o: /usr/include/bits/types/__mbstate_t.h
+build/src/main.o: /usr/include/bits/types/__fpos64_t.h
+build/src/main.o: /usr/include/bits/types/__FILE.h
+build/src/main.o: /usr/include/bits/types/FILE.h
+build/src/main.o: /usr/include/bits/types/struct_FILE.h
+build/src/main.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
+build/src/main.o: /usr/include/bits/floatn-common.h /usr/include/unistd.h
+build/src/main.o: /usr/include/bits/posix_opt.h
+build/src/main.o: /usr/include/bits/environments.h
+build/src/main.o: /usr/include/bits/confname.h
+build/src/main.o: /usr/include/bits/getopt_posix.h
+build/src/main.o: /usr/include/bits/getopt_core.h
+build/src/main.o: /usr/include/bits/unistd_ext.h /usr/include/string.h
+build/src/main.o: /usr/include/bits/types/locale_t.h
+build/src/main.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
+build/src/main.o: src/node.h src/data.h src/list.h src/sched.h src/callback.h
+build/src/main.o: src/deamon.h src/dirscan.h src/object.h src/widget.h
+build/src/main.o: src/control.h src/DebugPrint.h src/timer.h
+build/src/main.o: /usr/include/time.h /usr/include/bits/time.h
+build/src/main.o: /usr/include/bits/types/clock_t.h
+build/src/main.o: /usr/include/bits/types/time_t.h
+build/src/main.o: /usr/include/bits/types/struct_tm.h
+build/src/main.o: /usr/include/bits/types/struct_timespec.h
+build/src/main.o: /usr/include/bits/endian.h /usr/include/bits/endianness.h
+build/src/main.o: /usr/include/bits/types/clockid_t.h
+build/src/main.o: /usr/include/bits/types/timer_t.h
+build/src/main.o: /usr/include/bits/types/struct_itimerspec.h src/libload.h
+build/src/main.o: src/namespace.h src/version.h

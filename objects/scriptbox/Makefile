@@ -66,6 +66,6 @@ scriptbox.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 scriptbox.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 scriptbox.o: /usr/include/bits/types/locale_t.h
 scriptbox.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-scriptbox.o: /usr/include/sched.h /usr/include/bits/sched.h
-scriptbox.o: /usr/include/bits/types/struct_sched_param.h
-scriptbox.o: /usr/include/bits/cpu-set.h
+scriptbox.o: ../../src/node.h ../../src/data.h ../../src/object.h
+scriptbox.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+scriptbox.o: ../../src/widget.h ../../src/control.h ../../src/script.h

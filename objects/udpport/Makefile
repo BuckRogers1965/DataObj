@@ -81,8 +81,7 @@ udpport.o: /usr/include/x86_64-linux-gnu/bits/stdlib-float.h
 udpport.o: /usr/include/string.h
 udpport.o: /usr/include/x86_64-linux-gnu/bits/types/locale_t.h
 udpport.o: /usr/include/x86_64-linux-gnu/bits/types/__locale_t.h
-udpport.o: /usr/include/strings.h /usr/include/ctype.h /usr/include/sched.h
-udpport.o: /usr/include/x86_64-linux-gnu/bits/sched.h
-udpport.o: /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h
-udpport.o: /usr/include/x86_64-linux-gnu/bits/cpu-set.h
-udpport.o: ../../objects/udp/udp.h
+udpport.o: /usr/include/strings.h /usr/include/ctype.h ../../src/node.h
+udpport.o: ../../src/data.h ../../src/object.h ../../src/sched.h
+udpport.o: ../../src/callback.h ../../src/DebugPrint.h ../../src/widget.h
+udpport.o: ../../src/control.h ../udp/udp.h

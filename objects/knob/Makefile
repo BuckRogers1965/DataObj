@@ -62,6 +62,6 @@ knob.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 knob.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 knob.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 knob.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-knob.o: /usr/include/sched.h /usr/include/bits/sched.h
-knob.o: /usr/include/bits/types/struct_sched_param.h
-knob.o: /usr/include/bits/cpu-set.h
+knob.o: ../../src/node.h ../../src/data.h ../../src/object.h
+knob.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+knob.o: ../../src/control.h

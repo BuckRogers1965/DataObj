@@ -64,6 +64,6 @@ router.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 router.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 router.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 router.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-router.o: /usr/include/sched.h /usr/include/bits/sched.h
-router.o: /usr/include/bits/types/struct_sched_param.h
-router.o: /usr/include/bits/cpu-set.h
+router.o: ../../src/node.h ../../src/data.h ../../src/object.h
+router.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+router.o: ../../src/widget.h ../../src/control.h

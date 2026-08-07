@@ -166,10 +166,7 @@ tcp.o: /usr/include/x86_64-linux-gnu/bits/pthread_stack_min.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/posix2_lim.h
 tcp.o: /usr/include/openssl/cryptoerr.h /usr/include/openssl/symhacks.h
 tcp.o: /usr/include/openssl/cryptoerr_legacy.h /usr/include/openssl/core.h
-tcp.o: /usr/include/pthread.h /usr/include/sched.h
-tcp.o: /usr/include/x86_64-linux-gnu/bits/sched.h
-tcp.o: /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h
-tcp.o: /usr/include/x86_64-linux-gnu/bits/cpu-set.h
+tcp.o: /usr/include/pthread.h ../../src/sched.h ../../src/callback.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/setjmp.h
 tcp.o: /usr/include/x86_64-linux-gnu/bits/types/struct___jmp_buf_tag.h
 tcp.o: /usr/include/openssl/comperr.h /usr/include/openssl/bio.h
@@ -197,4 +194,5 @@ tcp.o: /usr/include/openssl/sslerr.h /usr/include/openssl/sslerr_legacy.h
 tcp.o: /usr/include/openssl/prov_ssl.h /usr/include/openssl/ssl2.h
 tcp.o: /usr/include/openssl/ssl3.h /usr/include/openssl/tls1.h
 tcp.o: /usr/include/openssl/dtls1.h /usr/include/openssl/srtp.h
-tcp.o: /usr/include/openssl/err.h tcp.h
+tcp.o: /usr/include/openssl/err.h ../../src/node.h ../../src/data.h
+tcp.o: ../../src/object.h ../../src/DebugPrint.h ../../src/dyn/buff.h tcp.h

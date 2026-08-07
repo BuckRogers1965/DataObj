@@ -65,6 +65,6 @@ markdown.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 markdown.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 markdown.o: /usr/include/bits/types/locale_t.h
 markdown.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-markdown.o: /usr/include/sched.h /usr/include/bits/sched.h
-markdown.o: /usr/include/bits/types/struct_sched_param.h
-markdown.o: /usr/include/bits/cpu-set.h
+markdown.o: ../../src/node.h ../../src/data.h ../../src/object.h
+markdown.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+markdown.o: ../../src/control.h

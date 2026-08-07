@@ -65,6 +65,6 @@ checkbox.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 checkbox.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 checkbox.o: /usr/include/bits/types/locale_t.h
 checkbox.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-checkbox.o: /usr/include/sched.h /usr/include/bits/sched.h
-checkbox.o: /usr/include/bits/types/struct_sched_param.h
-checkbox.o: /usr/include/bits/cpu-set.h
+checkbox.o: ../../src/node.h ../../src/data.h ../../src/object.h
+checkbox.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+checkbox.o: ../../src/control.h

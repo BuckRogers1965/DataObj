@@ -73,7 +73,7 @@ bridge.o: /usr/include/bits/dirent_ext.h /usr/include/sys/stat.h
 bridge.o: /usr/include/bits/stat.h /usr/include/bits/struct_stat.h
 bridge.o: /usr/include/time.h /usr/include/bits/time.h
 bridge.o: /usr/include/bits/types/struct_tm.h
-bridge.o: /usr/include/bits/types/struct_itimerspec.h /usr/include/sched.h
-bridge.o: /usr/include/bits/sched.h
-bridge.o: /usr/include/bits/types/struct_sched_param.h
-bridge.o: /usr/include/bits/cpu-set.h
+bridge.o: /usr/include/bits/types/struct_itimerspec.h ../../src/node.h
+bridge.o: ../../src/data.h ../../src/object.h ../../src/sched.h
+bridge.o: ../../src/callback.h ../../src/DebugPrint.h ../../src/serializer.h
+bridge.o: ../../src/control.h

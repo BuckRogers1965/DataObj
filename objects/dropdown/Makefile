@@ -65,6 +65,6 @@ dropdown.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 dropdown.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 dropdown.o: /usr/include/bits/types/locale_t.h
 dropdown.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-dropdown.o: /usr/include/sched.h /usr/include/bits/sched.h
-dropdown.o: /usr/include/bits/types/struct_sched_param.h
-dropdown.o: /usr/include/bits/cpu-set.h
+dropdown.o: ../../src/node.h ../../src/data.h ../../src/object.h
+dropdown.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+dropdown.o: ../../src/control.h

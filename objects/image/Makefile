@@ -63,6 +63,6 @@ image.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 image.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 image.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 image.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-image.o: /usr/include/sched.h /usr/include/bits/sched.h
-image.o: /usr/include/bits/types/struct_sched_param.h
-image.o: /usr/include/bits/cpu-set.h
+image.o: ../../src/node.h ../../src/data.h ../../src/object.h
+image.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+image.o: ../../src/control.h

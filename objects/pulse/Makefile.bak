@@ -6,7 +6,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=pulse.object
 
-INCLUDES=-I../..
+INCLUDES=-I../../src
 
 OPT=-Wall -g
 
@@ -23,7 +23,7 @@ clean:
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives
-DEPINC=-I../.. -I$(shell $(CC) -print-file-name=include)
+DEPINC=-I../../src -I$(shell $(CC) -print-file-name=include)
 
 depend:
 	makedepend $(DEPINC) $(SOURCE)

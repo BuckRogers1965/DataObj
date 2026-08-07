@@ -66,6 +66,9 @@ stopwatch.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 stopwatch.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 stopwatch.o: /usr/include/bits/types/locale_t.h
 stopwatch.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-stopwatch.o: /usr/include/sched.h /usr/include/bits/sched.h
-stopwatch.o: /usr/include/bits/types/struct_sched_param.h
-stopwatch.o: /usr/include/bits/cpu-set.h
+stopwatch.o: ../../src/node.h ../../src/data.h ../../src/object.h
+stopwatch.o: ../../src/sched.h ../../src/callback.h ../../src/timer.h
+stopwatch.o: /usr/include/time.h /usr/include/bits/time.h
+stopwatch.o: /usr/include/bits/types/struct_tm.h
+stopwatch.o: /usr/include/bits/types/struct_itimerspec.h
+stopwatch.o: ../../src/DebugPrint.h ../../src/widget.h ../../src/control.h

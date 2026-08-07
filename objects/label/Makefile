@@ -63,6 +63,6 @@ label.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 label.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 label.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 label.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-label.o: /usr/include/sched.h /usr/include/bits/sched.h
-label.o: /usr/include/bits/types/struct_sched_param.h
-label.o: /usr/include/bits/cpu-set.h
+label.o: ../../src/node.h ../../src/data.h ../../src/object.h
+label.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+label.o: ../../src/control.h

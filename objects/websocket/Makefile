@@ -66,6 +66,6 @@ websocket.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 websocket.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 websocket.o: /usr/include/bits/types/locale_t.h
 websocket.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-websocket.o: /usr/include/sched.h /usr/include/bits/sched.h
-websocket.o: /usr/include/bits/types/struct_sched_param.h
-websocket.o: /usr/include/bits/cpu-set.h
+websocket.o: ../../src/node.h ../../src/data.h ../../src/object.h
+websocket.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+websocket.o: ../../src/widget.h ../../src/control.h ../../src/dyn/buff.h

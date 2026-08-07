@@ -64,6 +64,6 @@ filter.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 filter.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 filter.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 filter.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-filter.o: /usr/include/sched.h /usr/include/bits/sched.h
-filter.o: /usr/include/bits/types/struct_sched_param.h
-filter.o: /usr/include/bits/cpu-set.h
+filter.o: ../../src/node.h ../../src/data.h ../../src/object.h
+filter.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+filter.o: ../../src/widget.h ../../src/control.h

@@ -65,6 +65,6 @@ mobutton.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 mobutton.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 mobutton.o: /usr/include/bits/types/locale_t.h
 mobutton.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-mobutton.o: /usr/include/sched.h /usr/include/bits/sched.h
-mobutton.o: /usr/include/bits/types/struct_sched_param.h
-mobutton.o: /usr/include/bits/cpu-set.h
+mobutton.o: ../../src/node.h ../../src/data.h ../../src/object.h
+mobutton.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+mobutton.o: ../../src/control.h

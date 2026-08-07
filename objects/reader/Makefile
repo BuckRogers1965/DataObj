@@ -66,6 +66,6 @@ reader.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 reader.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 reader.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 reader.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-reader.o: /usr/include/sched.h /usr/include/bits/sched.h
-reader.o: /usr/include/bits/types/struct_sched_param.h
-reader.o: /usr/include/bits/cpu-set.h
+reader.o: ../../src/node.h ../../src/data.h ../../src/object.h
+reader.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+reader.o: ../../src/widget.h ../../src/control.h

@@ -66,6 +66,6 @@ writer.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 writer.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 writer.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 writer.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-writer.o: /usr/include/sched.h /usr/include/bits/sched.h
-writer.o: /usr/include/bits/types/struct_sched_param.h
-writer.o: /usr/include/bits/cpu-set.h
+writer.o: ../../src/node.h ../../src/data.h ../../src/object.h
+writer.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+writer.o: ../../src/widget.h ../../src/control.h ../../src/dyn/buff.h

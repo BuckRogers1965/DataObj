@@ -68,6 +68,6 @@ serializer.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 serializer.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 serializer.o: /usr/include/bits/types/locale_t.h
 serializer.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-serializer.o: /usr/include/sched.h /usr/include/bits/sched.h
-serializer.o: /usr/include/bits/types/struct_sched_param.h
-serializer.o: /usr/include/bits/cpu-set.h
+serializer.o: ../../src/node.h ../../src/data.h ../../src/object.h
+serializer.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+serializer.o: ../../src/widget.h ../../src/control.h ../../src/serializer.h

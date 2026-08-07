@@ -90,7 +90,6 @@ comfyui.o: /usr/include/bits/types/struct_osockaddr.h
 comfyui.o: /usr/include/netinet/in.h /usr/include/bits/stdint-uintn.h
 comfyui.o: /usr/include/bits/in.h /usr/include/arpa/inet.h
 comfyui.o: /usr/include/netdb.h /usr/include/rpc/netdb.h
-comfyui.o: /usr/include/bits/netdb.h /usr/include/sched.h
-comfyui.o: /usr/include/bits/sched.h
-comfyui.o: /usr/include/bits/types/struct_sched_param.h
-comfyui.o: /usr/include/bits/cpu-set.h
+comfyui.o: /usr/include/bits/netdb.h ../../src/node.h ../../src/data.h
+comfyui.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+comfyui.o: ../../src/DebugPrint.h ../../src/widget.h ../../src/control.h

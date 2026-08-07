@@ -63,6 +63,6 @@ alias.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 alias.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 alias.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 alias.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-alias.o: /usr/include/sched.h /usr/include/bits/sched.h
-alias.o: /usr/include/bits/types/struct_sched_param.h
-alias.o: /usr/include/bits/cpu-set.h
+alias.o: ../../src/node.h ../../src/data.h ../../src/object.h
+alias.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+alias.o: ../../src/control.h

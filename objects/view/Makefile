@@ -62,6 +62,6 @@ view.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 view.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 view.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 view.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-view.o: /usr/include/sched.h /usr/include/bits/sched.h
-view.o: /usr/include/bits/types/struct_sched_param.h
-view.o: /usr/include/bits/cpu-set.h
+view.o: ../../src/node.h ../../src/data.h ../../src/object.h
+view.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+view.o: ../../src/control.h

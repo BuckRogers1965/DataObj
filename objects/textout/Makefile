@@ -64,6 +64,6 @@ textout.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 textout.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 textout.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 textout.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-textout.o: /usr/include/sched.h /usr/include/bits/sched.h
-textout.o: /usr/include/bits/types/struct_sched_param.h
-textout.o: /usr/include/bits/cpu-set.h
+textout.o: ../../src/node.h ../../src/data.h ../../src/object.h
+textout.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+textout.o: ../../src/control.h

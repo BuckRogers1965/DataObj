@@ -113,7 +113,6 @@ udp.o: /usr/include/netinet/in.h
 udp.o: /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h
 udp.o: /usr/include/x86_64-linux-gnu/bits/in.h /usr/include/arpa/inet.h
 udp.o: /usr/include/netdb.h /usr/include/rpc/netdb.h
-udp.o: /usr/include/x86_64-linux-gnu/bits/netdb.h /usr/include/sched.h
-udp.o: /usr/include/x86_64-linux-gnu/bits/sched.h
-udp.o: /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h
-udp.o: /usr/include/x86_64-linux-gnu/bits/cpu-set.h udp.h
+udp.o: /usr/include/x86_64-linux-gnu/bits/netdb.h ../../src/node.h
+udp.o: ../../src/data.h ../../src/object.h ../../src/sched.h
+udp.o: ../../src/callback.h ../../src/DebugPrint.h udp.h

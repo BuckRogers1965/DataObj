@@ -64,6 +64,6 @@ textbox.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 textbox.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 textbox.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 textbox.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-textbox.o: /usr/include/sched.h /usr/include/bits/sched.h
-textbox.o: /usr/include/bits/types/struct_sched_param.h
-textbox.o: /usr/include/bits/cpu-set.h
+textbox.o: ../../src/node.h ../../src/data.h ../../src/object.h
+textbox.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+textbox.o: ../../src/control.h

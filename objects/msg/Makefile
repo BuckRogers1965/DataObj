@@ -44,4 +44,5 @@ msg.o: /usr/include/bits/types/__mbstate_t.h
 msg.o: /usr/include/bits/types/__fpos64_t.h /usr/include/bits/types/__FILE.h
 msg.o: /usr/include/bits/types/FILE.h /usr/include/bits/types/struct_FILE.h
 msg.o: /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h
-msg.o: /usr/include/bits/floatn-common.h
+msg.o: /usr/include/bits/floatn-common.h ../../src/node.h ../../src/data.h
+msg.o: ../../src/object.h ../../src/DebugPrint.h ../../src/callback.h

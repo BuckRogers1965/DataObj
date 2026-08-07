@@ -90,7 +90,6 @@ ollama.o: /usr/include/bits/types/struct_osockaddr.h
 ollama.o: /usr/include/netinet/in.h /usr/include/bits/stdint-uintn.h
 ollama.o: /usr/include/bits/in.h /usr/include/arpa/inet.h
 ollama.o: /usr/include/netdb.h /usr/include/rpc/netdb.h
-ollama.o: /usr/include/bits/netdb.h /usr/include/sched.h
-ollama.o: /usr/include/bits/sched.h
-ollama.o: /usr/include/bits/types/struct_sched_param.h
-ollama.o: /usr/include/bits/cpu-set.h
+ollama.o: /usr/include/bits/netdb.h ../../src/node.h ../../src/data.h
+ollama.o: ../../src/object.h ../../src/sched.h ../../src/callback.h
+ollama.o: ../../src/DebugPrint.h ../../src/widget.h ../../src/control.h

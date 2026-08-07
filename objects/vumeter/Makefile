@@ -64,6 +64,6 @@ vumeter.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 vumeter.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 vumeter.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 vumeter.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-vumeter.o: /usr/include/sched.h /usr/include/bits/sched.h
-vumeter.o: /usr/include/bits/types/struct_sched_param.h
-vumeter.o: /usr/include/bits/cpu-set.h
+vumeter.o: ../../src/node.h ../../src/data.h ../../src/object.h
+vumeter.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+vumeter.o: ../../src/control.h

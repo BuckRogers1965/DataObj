@@ -63,6 +63,7 @@ stats.o: /usr/include/bits/struct_mutex.h /usr/include/bits/struct_rwlock.h
 stats.o: /usr/include/alloca.h /usr/include/bits/stdlib-float.h
 stats.o: /usr/include/string.h /usr/include/bits/types/locale_t.h
 stats.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-stats.o: /usr/include/sched.h /usr/include/bits/sched.h
-stats.o: /usr/include/bits/types/struct_sched_param.h
-stats.o: /usr/include/bits/cpu-set.h
+stats.o: ../../src/node.h ../../src/data.h ../../src/object.h
+stats.o: ../../src/sched.h ../../src/callback.h ../../src/dyn/buff.h
+stats.o: ../../src/dyn/queue.h ../../src/DebugPrint.h ../../src/widget.h
+stats.o: ../../src/control.h

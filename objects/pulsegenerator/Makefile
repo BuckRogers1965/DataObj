@@ -70,6 +70,7 @@ pulsegenerator.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 pulsegenerator.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 pulsegenerator.o: /usr/include/bits/types/locale_t.h
 pulsegenerator.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-pulsegenerator.o: /usr/include/sched.h /usr/include/bits/sched.h
-pulsegenerator.o: /usr/include/bits/types/struct_sched_param.h
-pulsegenerator.o: /usr/include/bits/cpu-set.h
+pulsegenerator.o: ../../src/node.h ../../src/data.h ../../src/object.h
+pulsegenerator.o: ../../src/sched.h ../../src/callback.h
+pulsegenerator.o: ../../src/DebugPrint.h ../../src/widget.h
+pulsegenerator.o: ../../src/control.h

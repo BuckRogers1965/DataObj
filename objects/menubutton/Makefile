@@ -66,6 +66,6 @@ menubutton.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 menubutton.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 menubutton.o: /usr/include/bits/types/locale_t.h
 menubutton.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-menubutton.o: /usr/include/sched.h /usr/include/bits/sched.h
-menubutton.o: /usr/include/bits/types/struct_sched_param.h
-menubutton.o: /usr/include/bits/cpu-set.h
+menubutton.o: ../../src/node.h ../../src/data.h ../../src/object.h
+menubutton.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+menubutton.o: ../../src/control.h
