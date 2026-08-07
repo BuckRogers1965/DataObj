@@ -51,6 +51,3 @@ double GetReal(DataObj this);
 /* Set and Get the value of the object as a long number */
 int  SetLong(DataObj this, long value);
 long GetLong(DataObj this);
-
-void
-DataTest ();

@@ -68,6 +68,3 @@ GetTaskCallback(TaskObj task);
 
 NodeObj
 GetTaskData(TaskObj task);
-
-void
-SchedTest ();

@@ -95,7 +95,4 @@ void    DelSibling     (NodeObj sib);
 NodeObj GetSibling     (NodeObj node);
 NodeObj GetNextSibling (NodeObj node);
 
-// Test
-void NodeTest ();
-
 

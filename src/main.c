@@ -13,7 +13,6 @@
 #include "control.h"	/* the palette, the chrome, and placement */
 #include "timer.h"
 #include "libload.h"
-#include "dyn/bufftest.h"
 #include "DebugPrint.h"
 #include "namespace.h"
 
@@ -345,15 +344,6 @@ void LoadDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 	CreateDefaultApp(Main, DefaultRootView);
 }
 
-void PerformTesting(){
-	DebugPrint ( "Entering Perform Testing function.", __FILE__, __LINE__, PROG_FLOW);
-	DataTest();
-	NodeTest();
-	BuffTest();
-	//NameSpaceTest();
-	SchedTest();
-}
-
 void Init(NodeObj Main){
 
 	char * logname;
@@ -391,12 +381,7 @@ void Init(NodeObj Main){
 
 	/* print out the help text if printhelp is turned on */
 	if (GetValueInt(GetPropNode(Main, "printhelp"))) {
-		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -ip   <address> : Address to bind the web GUI to, e.g. 127.0.0.1 or 0.0.0.0 (default 0.0.0.0)\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -port <number>  : Port to serve the web GUI on (default 8083)\n       -t              : Perform Unit Testing of library functions\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
-	}
-
-	/* if -t command line argument is set, perform unit test */
-	if (GetValueInt(GetPropNode(Main, "UnitTest"))) {
-		PerformTesting();
+		printf ("%s %s.%s %s - (C) %s %s\n%s\nhttp://grokthink.org\n\n  Usage: framework <options>\n\n  Options:\n\n       -h              : This help screen\n       -d              : Become a server process\n       -ip   <address> : Address to bind the web GUI to, e.g. 127.0.0.1 or 0.0.0.0 (default 0.0.0.0)\n       -l    <logfile> : logfile to output debug info\n       -p              : Print Main Nodes on exit\n       -port <number>  : Port to serve the web GUI on (default 8083)\n       -v     <number> : Verbose level from 0 to 9, inclusive\n\n", RELEASENAME, RELEASEMAJOR, RELEASEMINOR, RELEASELEVEL, COPYRIGHT, AUTHOR, RELEASETAG);
 	}
 
 	/* if deamon option was turned on, become a deamon */
@@ -560,12 +545,6 @@ void ProcessCmdLine(NodeObj Main, int argc, char * argv[]){
 					break;
 				}
 
-				if (strcmp ( argv[i], "-t" ) == 0 ) {
-					DebugPrint ( "Store perform unit tests.", __FILE__, __LINE__, CMDLINEOPTS);
-					SetPropInt(Main, "UnitTest", 1);
-					break;
-				}
-
 				if (strcmp ( argv[i], "-v" ) == 0 ) {
 					state = STORE_LOGLEVEL;
 					break;
@@ -645,15 +624,13 @@ int main ( int argc, char* argv[] ){
 	/* one inert instance per registered class, so a connecting client's */
 	/* palette is real instances to walk, not a class-description dump  */
 	/* (see BuildPalette's own comment in control.c) - also needs every   */
-	/* class already loaded, same reason FlowTest waits below            */
+	/* class already loaded                                              */
 	BuildPalette();
 
 	/* the topbar's own File/Mode menus - real instances too, discovered */
 	/* the same way the Palette is (see BuildChrome's comment, control.c) */
 	BuildChrome();
 
-	/* needs the classes InstallObjects() just loaded, so it can't run   */
-	/* from PerformTesting() inside Init() alongside the other -t tests  */
 	/* the tests that need registered classes live in the harness now
 	   (src/unit_test.c) - the library ships mechanism, not measurements */
 

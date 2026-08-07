@@ -45,29 +45,38 @@ typedef intptr_t(*func_ptr)(DataObj, int, int, char *);
 struct Data {
 
 	int type;
+
+	/* which representations are currently valid. One bit each, and they   */
+	/* live HERE, together, in the alignment hole after type - six ints    */
+	/* spread between the values they describe cost 40 bytes of the        */
+	/* struct in flags and the padding they forced. Grouped, they cost 1   */
+	/* byte in space that was already being wasted, and struct Data drops  */
+	/* 96 -> 56, so a DataObj is one cache line instead of two.            */
+	/* Only ever 0 or 1 - every use is an assignment of a literal or a     */
+	/* truth test, which is what makes a single bit enough.                */
+	unsigned char str_set  : 1;
+	unsigned char int_set  : 1;
+	unsigned char hex_set  : 1;
+	unsigned char real_set : 1;
+	unsigned char long_set : 1;
+	unsigned char bool_set : 1;
+
+	char bool_val;
+
 	func_ptr call;
-		
-	int str_set;
+
 	char * str_val;
 	int str_len;	/* actual byte count of str_val - may exceed strlen() if it */
 			/* holds bytes set through SetStrLen, which allows embedded NULs */
 
-	int int_set;
 	int int_val;
 
-	int hex_set;
 	char * hex_val;
 
-	int real_set;
 	double real_val;
 
-	int long_set;
 	long long_val;
 
-	int bool_set;
-	char bool_val; 
-
-	
 } Data;
 
 char *
@@ -178,6 +187,7 @@ void clear (DataObj this){
 	this->real_val = 0;
 	this->long_set = 0;
 	this->long_val = 0;
+	this->bool_set = 0;
 
 }
 
@@ -574,85 +584,3 @@ GetReal(DataObj this){
 }
 
 
-
-// TEST
-void
-DataTest (){
-
-	char * str_str;
-	char * str_int;
-	char * str_hex;
-	char * str_real;
-
-	int int_str;
-	int int_int;
-	int int_hex;
-	int int_real;
-
-	char * hex_str;
-	char * hex_int;
-	char * hex_hex;
-	char * hex_real;
-
-	double real_str;
-	double real_int;
-	double real_hex;
-	double real_real;
-
-	DataObj str_do  = NewData(STRING);
-	DataObj int_do  = NewData(INTEGER);
-	DataObj hex_do	= NewData(HEX);
-	DataObj real_do = NewData(REAL);
-
-	//int i = 0;
-
-	SetStr(str_do, "   1000  test me ");
-	SetInt(int_do, 67676);
-	SetHex(hex_do, "BEEF");
-	SetReal(real_do, 12344.56 );
-
-	str_str  = GetStr(str_do);
-	int_str  = GetInt(str_do);
-	hex_str  = GetHex(str_do);
-	real_str = GetReal(str_do);
-
-	str_int  = GetStr(int_do);
-	int_int  = GetInt(int_do);
-	hex_int  = GetHex(int_do);
-	real_int = GetReal(int_do);
-
-	str_hex  = GetStr(hex_do);
-	int_hex  = GetInt(hex_do);
-	hex_hex  = GetHex(hex_do);
-	real_hex = GetReal(hex_do);
-
-	str_real  = GetStr(real_do);
-	int_real  = GetInt(real_do);
-	hex_real  = GetHex(real_do);
-	real_real = GetReal(real_do);
-
-	printf("      str\t\t\tint\t\t\thex\t\t\treal\n");
-	printf("str  >%s<\t %s \t\t\t %s \t\t\t %s \n", str_str, str_int, str_hex, str_real);
-	printf("int   %d \t\t\t>%d<\t\t\t %d \t\t\t %d \n", int_str, int_int, int_hex, int_real);
-	printf("hex   %s \t\t\t %s \t\t\t>%s<\t\t\t %s \n", hex_str, hex_int, hex_hex, hex_real);
-	printf("real  %e \t\t %e \t\t %e \t\t>%e<\n\n", real_str, real_int, real_hex, real_real);
-
-
-	DataObj long_do  = NewData(LONG);
-	SetLong(long_do,  140224278132965);
-	printf("\nLong to string check This long %lu to string %s \n\n", GetLong(long_do), GetStr(long_do));
-
-	/* the test owns these five - DelData takes their converted strings with
-	   them, so the whole conversion matrix it just walked is accounted for */
-	DelData(str_do);
-	DelData(int_do);
-	DelData(hex_do);
-	DelData(real_do);
-	DelData(long_do);
-
-	
-	
-
-
-
-}
