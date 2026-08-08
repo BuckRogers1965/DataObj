@@ -684,6 +684,103 @@ def test_move(raw, r, home):
              bool(err) and cont == home)
 
 
+def test_both_delivery_paths(raw, r, home):
+    """BOTH ways a value reaches a subscriber, asserted separately.
+
+    A property write fans out synchronously (FanOutSubscribers). A message
+    sent out a property is queued and delivered later (SndMsg/DispatchMsg).
+    They are different code paths through one definition of delivery, and a
+    change that keeps one working while silently killing the other is
+    invisible to any test that only exercises the first - which is exactly
+    what happened: every Out-port subscription in the system stopped
+    delivering and the raw suites stayed green.
+
+    A Textbox gives us both from one instance. Its W is a plain property, so
+    writing it fans out. Its Value carries a handler, so a write is DELIVERED
+    to the handler, which stores it with SetValueStr (no fan-out, on purpose -
+    a repeated write is still an event for a box that triggers something) and
+    re-announces it with SndMsg. Same instance, two paths."""
+    box = home + "/DeliveryBox"
+    raw.send({"cmd": "create-instance", "class": "Textbox", "as": box,
+              "container": home, "x": "40", "y": "40"})
+    if not raw.wait_event(lambda e: e.get("event") == "instance-created"
+                          and e.get("instance") == box, timeout=6):
+        r.expect("delivery: staging", "a Textbox to write to", "no event", False)
+        return
+
+    raw.send({"cmd": "subscribe", "instance": box, "port": "W"})
+    raw.send({"cmd": "subscribe", "instance": box, "port": "Value"})
+    time.sleep(0.4)
+
+    raw.events = []
+    raw.send({"cmd": "set-property", "instance": box, "prop": "W", "value": "321"})
+    fan = raw.wait_event(lambda e: e.get("event") == "property-changed"
+                         and e.get("instance") == box and e.get("port") == "W"
+                         and e.get("value") == "321", timeout=5)
+    r.expect("delivery: a property write reaches a subscriber (fan-out path)",
+             "writing W=321 on a plain property arrives as property-changed",
+             "arrived=%s" % bool(fan), bool(fan))
+
+    raw.events = []
+    raw.send({"cmd": "set-property", "instance": box, "prop": "Value", "value": "queued-path"})
+    msg = raw.wait_event(lambda e: e.get("event") in ("property-changed", "message-flowed")
+                         and e.get("instance") == box and e.get("port") == "Value"
+                         and e.get("value") == "queued-path", timeout=5)
+    r.expect("delivery: a message on a property reaches a subscriber (queued path)",
+             "writing Value on a handled property arrives, having gone out as a message",
+             "arrived=%s" % bool(msg), bool(msg))
+
+
+def test_move_survives_a_fresh_connection(raw, r, home):
+    """A move must be true for someone who was not watching.
+
+    The engine re-keys the path index on a move; a client that already holds
+    the instance can look correct purely from its own bookkeeping. The real
+    question is what a connection that arrives afterwards is told - which is
+    what a browser reload is. A move that updated only the Container property
+    and not the index left the instance findable in neither place, and the
+    open window looked fine right up until it was reloaded."""
+    view = home + "/FreshView"
+    raw.send({"cmd": "create-instance", "class": "View", "as": view, "container": home})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == view, timeout=6)
+    raw.send({"cmd": "list-instances", "container": view})
+    raw.wait_event(lambda e: e.get("event") == "instances-done", timeout=5)
+
+    raw.send({"cmd": "create-instance", "class": "Slider", "as": home + "/FreshMover",
+              "container": home, "x": "760", "y": "40"})
+    if not raw.wait_event(lambda e: e.get("event") == "instance-created"
+                          and e.get("instance") == home + "/FreshMover", timeout=6):
+        r.expect("move/reconnect: staging", "a Slider to move", "no event", False)
+        return
+
+    raw.send({"cmd": "move-instance", "of": home + "/FreshMover",
+              "container": view, "x": "20", "y": "20"})
+    ev = raw.wait_event(lambda e: e.get("event") == "instance-renamed"
+                        and e.get("from") == home + "/FreshMover", timeout=6)
+    moved = ev.get("to") if ev else None
+    r.expect("move/reconnect: the move is announced with its new path",
+             "instance-renamed to %s/FreshMover" % view,
+             "renamed to %s" % moved,
+             moved == view + "/FreshMover")
+
+    # a connection that was not here for any of the above
+    fresh = Raw(raw.host, raw.port)
+    try:
+        fresh.send({"cmd": "list-instances", "container": view})
+        fresh.wait_event(lambda e: e.get("event") == "instances-done", timeout=8)
+        fresh.pump()
+        seen = [e.get("instance") for e in fresh.events
+                if e.get("event") == "instance-created"
+                and (e.get("container") or "") == view]
+        r.expect("move/reconnect: a fresh connection finds it in its new container",
+                 "listing %s tells a brand-new client about FreshMover" % view,
+                 "fresh client saw: %s" % sorted(x for x in seen if x),
+                 (view + "/FreshMover") in seen)
+    finally:
+        fresh.close()
+
+
 def test_delete(raw, r, home):
     """Twin of Delete mode: the verb goes out, instance-removed is the
     only truth; an undeletable thing is refused and stays."""
@@ -796,6 +893,14 @@ def main():
 
     g = group_view(raw, home, "Delete")
     guarded(test_delete, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "Delivery")
+    guarded(test_both_delivery_paths, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "MoveReconnect")
+    guarded(test_move_survives_a_fresh_connection, raw, r, g)
     close_group(raw, g)
 
     raw.close()

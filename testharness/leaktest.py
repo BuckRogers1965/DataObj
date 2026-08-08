@@ -124,6 +124,92 @@ def test_structural(raw, r, stats, home):
              after2["Envelopes"] == 0 and d2["Buffs"] == 0 and d2["Queues"] == 0 and d2["Tasks"] == 0)
 
 
+def subscribe_destroy_cycle(raw, home, n=4):
+    """Subscribe to several properties on n instances, then destroy them by a
+    route that is NOT delete-instance.
+
+    Every client subscription makes the bridge record something against the
+    watched property. Whatever that record is, it has to die when the property
+    does - and it must die whichever way the instance is destroyed, not only
+    down the one path somebody remembered to clean up. A script's destroy verb
+    calls DeleteInstance directly, so it is the honest route to test: the leak
+    this catches was invisible to delete-instance."""
+    victims = []
+    for i in range(n):
+        a = "%s/Watched%d" % (home, i)
+        raw.send({"cmd": "create-instance", "class": "Textbox", "as": a,
+                  "container": home, "x": "20", "y": str(20 + i * 30)})
+        raw.wait_event(lambda e: e.get("event") == "instance-created"
+                       and e.get("instance") == a, timeout=6)
+        for prop in ("Value", "W", "H", "X"):
+            raw.send({"cmd": "subscribe", "instance": a, "port": prop})
+        victims.append(a)
+    time.sleep(0.6)
+
+    killer = home + "/Killer"
+    src = "\n".join("destroy('%s')" % v for v in victims) + "\n"
+    raw.send({"cmd": "create-instance", "class": "ScriptBox", "as": killer,
+              "container": home, "x": "260", "y": "20"})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == killer, timeout=6)
+    raw.send({"cmd": "set-property", "instance": killer, "prop": "Language", "value": "Lua"})
+    time.sleep(0.4)
+    raw.send({"cmd": "set-property", "instance": killer, "prop": "Source", "value": src})
+    time.sleep(0.3)
+    raw.send({"cmd": "activate", "instance": killer})
+    time.sleep(1.2)
+    raw.send({"cmd": "delete-instance", "instance": killer})
+    time.sleep(0.6)
+
+
+def test_subscription_teardown(raw, r, stats, home):
+    """What a subscription allocates must come back when the thing it watched
+    is destroyed - by any route. Measured cycle-to-cycle like the structural
+    test, because the flow log grows on purpose; what must not grow is the
+    per-cycle cost."""
+    subscribe_destroy_cycle(raw, home)        # warm-up: first-use allocations
+    subscribe_destroy_cycle(raw, home)
+    base = stable_counters(raw, stats)
+
+    subscribe_destroy_cycle(raw, home)
+    after1 = stable_counters(raw, stats)
+    subscribe_destroy_cycle(raw, home)
+    after2 = stable_counters(raw, stats)
+
+    d1 = delta(base, after1)
+    d2 = delta(after1, after2)
+
+    r.expect("subscribe/destroy: per-cycle growth is constant (nothing accumulates)",
+             "cycle deltas equal within sampling noise: 16 subscriptions torn down by a script cost the same every time",
+             "d1=%s d2=%s" % (d1, d2),
+             abs(d1["Nodes"] - d2["Nodes"]) <= 8 and abs(d1["Datas"] - d2["Datas"]) <= 16
+             and d1["Buffs"] == d2["Buffs"] == 0
+             and d1["Queues"] == d2["Queues"] == 0)
+
+    # a task struct is not sampling noise - one per cycle that never comes back
+    # is a handle nobody freed, and it stays invisible to the constancy check
+    # above precisely because it is perfectly steady
+    r.expect("subscribe/destroy: no task struct is left behind",
+             "task structs flat across the cycle - a deferred build frees its own handle",
+             "dTasks=%d (d1=%d)" % (d2["Tasks"], d1["Tasks"]),
+             d1["Tasks"] == 0 and d2["Tasks"] == 0)
+
+    # the floor is the bridge's command log, which grows on purpose: this cycle
+    # issues ~25 commands (4 creates, 16 subscribes, a ScriptBox, two writes, an
+    # activate, a delete) at a few nodes each. What must NOT be in here is a
+    # retained instance (~15+ nodes) or an orphaned subscription record.
+    r.expect("subscribe/destroy: the subscriptions themselves are reclaimed",
+             "node delta per cycle < 200 - the command log only, no retained instances",
+             "nodes/cycle=%d datas/cycle=%d" % (d2["Nodes"], d2["Datas"]),
+             d2["Nodes"] < 200 and d2["Datas"] < 400)
+
+    r.expect("subscribe/destroy: nothing transient outlives the cycle",
+             "envelopes 0 at rest; buffs, queues and task structs flat",
+             "envelopes=%d dBuffs=%d dQueues=%d"
+             % (after2["Envelopes"], d2["Buffs"], d2["Queues"]),
+             after2["Envelopes"] == 0 and d2["Buffs"] == 0 and d2["Queues"] == 0)
+
+
 def test_message_burst(raw, r, stats, home):
     """THE hypothesis this suite exists to test: are message payloads
     being dropped on the ground instead of freed after delivery?"""
@@ -198,6 +284,10 @@ def main():
 
     g = group_view(raw, home, "MessageBurst")
     test_message_burst(raw, r, stats, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "SubscriptionTeardown")
+    test_subscription_teardown(raw, r, stats, g)
     close_group(raw, g)
 
     raw.close()

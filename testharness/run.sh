@@ -416,6 +416,11 @@ count_for() {   # $1 = variant dir, $2 = suite
 		for s in $SUITES; do
 			[ -f "$ROOT/$v/log/$s.leak" ] && l=$((l + 1))
 		done
+		# the ENGINE's own exit-time leak belongs in this column too. It is not
+		# attributable to any one suite, so it used to show up only in the
+		# sanitizer row - a real 11.6 KB leak read as "leaked 0" in a column of
+		# zeros, which is the wrong way round for the thing this row exists for.
+		grep -q "ERROR: LeakSanitizer" "$ROOT/$v/log/server.log" 2>/dev/null && l=$((l + 1))
 		VARLEAK=$((VARLEAK + l))
 		printf "%-9s" "$l"
 	done < "$ROOT/log/variants"
@@ -426,6 +431,80 @@ count_for() {   # $1 = variant dir, $2 = suite
 		printf "%-9s" "$h"
 	done < "$ROOT/log/variants"
 	echo
+
+	# ---- the same failure count on two runs can be two different sets of bugs.
+	# A count that does not move reads as "nothing changed", which is how four
+	# distinct failures hid behind a steady 6 for a day. So say WHAT failed, and
+	# say it once: identical text across builds is one entry listing the builds
+	# it came from. Text that DIFFERS between builds lists separately on purpose
+	# - that difference is the signal that it is contention rather than a bug.
+	echo "FAILURES"
+	python3 - "$ROOT" "$SUITES" <<'PYFAIL'
+import os, re, sys
+
+root, suites = sys.argv[1], sys.argv[2].split()
+variants = [l.split('|')[0] for l in open(os.path.join(root, 'log', 'variants')) if l.strip()]
+
+def failures(path):
+    """every failed check in one suite log, as (test, expected, observed)"""
+    out = []
+    try:
+        lines = open(path, errors='replace').read().split('\n')
+    except OSError:
+        return out
+    for i, line in enumerate(lines):
+        m = re.search(r'TEST\s+(\S.*)', line)
+        if not m:
+            continue
+        exp = obs = ''
+        verdict = ''
+        for j in range(i + 1, min(i + 8, len(lines))):
+            t = lines[j].strip()
+            if t.startswith('expected:'):   exp = t[len('expected:'):].strip()
+            elif t.startswith('observed:'): obs = t[len('observed:'):].strip()
+            elif t.startswith('result:'):   verdict = t; break
+        if 'FAIL' in verdict:
+            out.append((m.group(1).strip(), exp, obs))
+    # unit_test and anything else that just prints its own failure line
+    for line in lines:
+        t = line.strip()
+        if re.match(r'^[A-Za-z][A-Za-z0-9_]*: Failed', t) or t.startswith('FAIL:'):
+            out.append((t, '', ''))
+    return out
+
+groups = {}
+for s in suites:
+    for v in variants:
+        for f in failures(os.path.join(root, v, 'log', s + '.log')):
+            got = groups.setdefault((s,) + f, [])
+            if v not in got:
+                got.append(v)
+
+if not groups:
+    print("  none")
+for (s, name, exp, obs), vs in sorted(groups.items()):
+    same = len(vs) == len(variants)
+    print("  %s: %s" % (s, name))
+    print("    builds:   %s" % ("all" if same else " ".join(vs)))
+    if exp: print("    expected: %s" % exp)
+    if obs: print("    observed: %s" % obs)
+    print()
+PYFAIL
+
+	# a suite whose count DIFFERS between builds is almost never the engine -
+	# same code in every build, so only the environment can explain it. Look at
+	# the test for a shared resource (a port, a file, a listener) before
+	# reading a line of engine code.
+	for s in $SUITES; do
+		first=; differs=0
+		while IFS='|' read -r v f o; do
+			c=$(count_for "$ROOT/$v" "$s")
+			[ -z "$first" ] && first=$c
+			[ "$c" != "$first" ] && differs=1
+		done < "$ROOT/log/variants"
+		[ "$differs" = 1 ] && echo "NOTE: $s failed a different number of times per build - suspect a shared resource in the test, not a bug in the engine"
+	done
+
 	echo
 	while IFS='|' read -r v f o; do
 		echo "$v: build return code=$(cat "$ROOT/$v/log/build.rc" 2>/dev/null)  web=$((WEB_BASE+o)) raw=$((RAW_BASE+o)) cdp=$((CDP_BASE+o))  logs=$ROOT/$v/log/"

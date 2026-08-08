@@ -56,6 +56,38 @@ capabilities are consequences of it rather than features built on top:
 Each of those is one sentence *because* there is one kind of thing. Every
 species you add costs you the same explanation again for each species.
 
+## Two demonstrations, not two claims
+
+Both of the load-bearing statements above were exercised deliberately, and it is
+worth reading them as evidence rather than as assertions.
+
+**A property was injected into one instance from the GUI, and it changed
+behaviour.** `GUI_Format` is not declared by the Textbox class, is not known to
+the engine, and does not exist on any other Textbox. It was created by the act
+of writing it - `SetPropStr` makes a property that is not there - onto exactly
+one box, and the browser then masked that box's contents as a telephone number.
+A second box got a different mask for social security numbers. Neither one is a
+different kind of Textbox; they are the same class with different properties on
+them. From that alone: a property set is not fixed, a class does not close its
+instances, and the meaning of a name is not the engine's business. It saves with
+the flow, clones, and exports, because it is an ordinary property.
+
+**A script was injected into a view, and the view got new behaviour.** A
+composite gained logic at runtime with nothing recompiled: a ScriptBox placed
+inside a View like any other member, wired to the other members, driving them.
+Change the source and the widget behaves differently - no build, no new class,
+no restart. And the script reaches its neighbours by path and by wire, using the
+same mechanisms a compiled object uses, because there is nothing else to use.
+
+Put together they answer the question that keeps getting asked wrongly. An
+object is not a closed thing with a fixed set of properties and a fixed set of
+behaviours. It is a node in a tree, holding whatever properties it has been
+given, each of which may carry a handler, and any of which may have been added
+a minute ago by a client or a script. Anything reasoning about it as closed will
+invent limits - "this object can only have one of those", "this behaviour has to
+be compiled in" - and then build machinery to work around limits that were never
+there.
+
 ## Delivery, in the same terms
 
 One definition, in `DeliverToSubscriber` (node.c), reached two ways: a property

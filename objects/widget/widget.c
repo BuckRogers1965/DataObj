@@ -376,6 +376,26 @@ int Widget_BuildOnce(NodeObj instance, WidgetItem *table)
 	return 1;
 }
 
+/* A deferred build is ONE-SHOT: the task exists to fire once, so it is freed
+   when it fires rather than left parked. CreateTask always allocates, and
+   RemoveTask only returns an entry to the reuse pool - which nothing in this
+   path draws from, since it calls CreateTask again next time. A handle left
+   behind is one task_entry per widget panel ever built: constant per build, so
+   a compounding check never sees it, and the palette alone arms about
+   twenty-eight of them before anyone touches anything.
+   Freeing it from inside its own callback is safe - ExecTasks unlinks a task
+   from the run list before invoking it and never refers to it again. */
+static void Widget_BuildDone(NodeObj instance)
+{
+	TaskObj task = (TaskObj)GetPropLong(instance, "WidgetBuildTask");
+
+	if (task)
+	{
+		SetPropLong(instance, "WidgetBuildTask", 0);
+		DeleteTask(task);
+	}
+}
+
 /* one tick after creation the bridge has placed this instance and registered
    its path, so the controls and sub-views created inside it resolve. Build the
    panel once (unless an early Activate already did), then run the object's own
@@ -393,6 +413,7 @@ static int Widget_BuildTask(NodeObj instance, NodeObj data, int msgid)
 		if (act)
 			act(instance, msg_initialize, NULL);
 	}
+	Widget_BuildDone(instance);
 	return rtrn_handled;
 }
 
@@ -414,8 +435,10 @@ void Widget_CancelBuild(NodeObj instance)
 
 	if (task)
 	{
-		RemoveTask(task);
+		/* DeleteTask, not RemoveTask: RemoveTask only parks the entry on the
+		   reuse pool, and this path allocates a fresh one every time. */
 		SetPropLong(instance, "WidgetBuildTask", 0);
+		DeleteTask(task);
 	}
 }
 
@@ -429,6 +452,7 @@ static int Widget_BuildTaskQuiet(NodeObj instance, NodeObj data, int msgid)
 	(void) msgid;
 
 	Widget_BuildOnce(instance, table);
+	Widget_BuildDone(instance);
 	return rtrn_handled;
 }
 
