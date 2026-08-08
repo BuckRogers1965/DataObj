@@ -1,0 +1,509 @@
+diff --git a/objects/bridge/bridge.c b/objects/bridge/bridge.c
+index 24612d0..42e2d32 100644
+--- a/objects/bridge/bridge.c
++++ b/objects/bridge/bridge.c
+@@ -1944,6 +1944,80 @@ static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *ev
+ 
+ int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data);
+ 
++/* the watched property announced msg_eoc: let go of the record. No
++   Disconnect - the property that held the subscription is being freed by
++   whoever is deleting the instance, so there is no wire left to unwire.
++   Keyed by the property node, the same identity Bridge_FindTap matches on. */
++static void Bridge_DropTapForProp(NodeObj bridgeInstance, NodeObj propNode)
++{
++	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
++	NodeObj rec, next;
++	char    dbg[256];
++
++	for (rec = taps ? GetChild(taps) : NULL; rec; rec = next)
++	{
++		next = GetNextSibling(rec);
++		if ((NodeObj) GetPropLong(rec, "PropNode") != propNode)
++			continue;
++
++		snprintf(dbg, sizeof(dbg), "eoc: dropped the tap on '%s'.%s",
++				 GetPropStr(rec, "Instance"), GetPropStr(rec, "Port"));
++		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
++
++		DelSibling(rec);
++		DelNode(rec);
++	}
++}
++
++/* is anything still watching this instance? Asked after a record is dropped,
++   so "no" means the wire that just ended was the last one - which is how the
++   deletion is recognised without counting anything. */
++static int Bridge_AnyTapFor(NodeObj bridgeInstance, NodeObj target)
++{
++	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
++	NodeObj rec;
++
++	for (rec = taps ? GetChild(taps) : NULL; rec; rec = GetNextSibling(rec))
++		if ((NodeObj) GetPropLong(rec, "Target") == target)
++			return 1;
++
++	return 0;
++}
++
++/* an instance died by a route the bridge never saw (a script's destroy, a
++   widget tearing down its own children) and the client is still drawing it.
++   Same event Bridge_Delete sends, same container scope: the client has one
++   truth for "it is gone" and does not care who removed it. */
++static void Bridge_AnnounceRemoved(NodeObj owner, char *path)
++{
++	InstanceData *local = (InstanceData *) GetPropLong(owner, "local");
++	char  buf[ALIASLEN + 64], cont[ALIASLEN], *escPath, *slash;
++
++	if (!local || !path || !path[0])
++		return;
++
++	/* the container it lived in - events are scoped by the view the client
++	   has open, and the top view's key is "/Root", never "" */
++	slash = strrchr(path, '/');
++	if (slash && slash != path)
++	{
++		int cut = (int) (slash - path);
++
++		if (cut >= (int) sizeof(cont))
++			cut = (int) sizeof(cont) - 1;
++		memcpy(cont, path, cut);
++		cont[cut] = 0;
++	}
++	else
++		snprintf(cont, sizeof(cont), "/Root");
++
++	escPath = JsonEscapeStr(path);
++	snprintf(buf, sizeof(buf), "{\"event\":\"instance-removed\",\"instance\":%s}", escPath);
++	free(escPath);
++
++	Bridge_SendEventScoped(owner, local, buf, cont);
++}
++
+ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
+ {
+ 	NodeObj owner;
+@@ -1956,6 +2030,42 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	   PAYLOAD and the source appears nowhere in it. Identifying by data
+ 	   silently dropped every Out-port subscription in the system. */
+ 	owner = instance;
++
++	/* the far end is gone, not merely quiet (msg_eoc, callback.h). Drop the
++	   record instead of emitting from it: its Target is about to be freed,
++	   and a record left behind is matched again the moment the allocator
++	   hands its property node's address to something new - which is the
++	   crash this exists to stop. */
++	if (message == msg_eoc)
++	{
++		NodeObj rec    = Bridge_FindTap(owner, MsgFromNode(), NULL);
++		NodeObj target = rec ? (NodeObj) GetPropLong(rec, "Target") : NULL;
++		char    path[ALIASLEN];
++
++		/* the path while the instance is still whole - DeleteInstance
++		   announces before it frees anything, so this is the last moment it
++		   can be asked, and it is the CURRENT path (a record's stored one
++		   predates any rename) */
++		if (!target || !PathOfInstance(target, path, sizeof(path)))
++			path[0] = 0;
++
++		Bridge_DropTapForProp(owner, MsgFromNode());
++
++		/* several properties of one instance were watched, so eoc arrives
++		   several times; the client hears once, when the last wire goes */
++		if (target && !Bridge_AnyTapFor(owner, target))
++			Bridge_AnnounceRemoved(owner, path);
++
++		return rtrn_handled;
++	}
++
++	/* the wire was just made (msg_soc). The record already exists - the
++	   subscribe command that made the wire built it - so there is nothing to
++	   add; it must be swallowed rather than fall through, or a wire coming up
++	   would emit an empty property-changed to every client. */
++	if (message == msg_soc)
++		return rtrn_handled;
++
+ 	instance = Bridge_FindTap(owner, MsgFromNode(), NULL);
+ 	if (!instance)
+ 		return rtrn_propagate;
+@@ -2710,6 +2820,40 @@ static void Bridge_LoadFlowDone(NodeObj container, int ok, void *rawCtx)
+ 	DelNode(command);
+ }
+ 
++/* A LOAD destroys what it loads over, so every subscription this bridge holds
++   into that content is about to name freed nodes - and LoadViewAsync stages the
++   destroy through the scheduler, so it happens after we return, with no
++   per-instance hook to catch it on the way past. Waiting to find out leaves a
++   record whose target is gone, and once a later allocation reuses that node's
++   address the record MATCHES and the delivery reads a freed instance.
++   The bridge is the one performing the load, so this is the moment it knows:
++   let go of everything, here, while every target is still valid enough to
++   disconnect from properly. Clients re-subscribe as they re-render, which they
++   have to do regardless - the instances they were watching no longer exist. */
++static void Bridge_DropAllTaps(NodeObj bridgeInstance)
++{
++	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
++	NodeObj rec, next, target;
++	char   *prop;
++
++	for (rec = taps ? GetChild(taps) : NULL; rec; rec = next)
++	{
++		next   = GetNextSibling(rec);
++		target = (NodeObj) GetPropLong(rec, "Target");
++		prop   = GetPropStr(rec, "Port");
++
++		/* unwire first: the subscription record lives on the watched property,
++		   and for anything OUTSIDE the loaded container that property survives
++		   the load - dropping our record without unwiring would leave it
++		   delivering to a bridge that no longer has anywhere to put it */
++		if (target && prop)
++			Disconnect(target, prop, bridgeInstance, "Taps");
++
++		DelSibling(rec);
++		DelNode(rec);
++	}
++}
++
+ void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
+ {
+ 	char   *into = GetPropStr(command, "into");
+@@ -2730,6 +2874,9 @@ void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
+ 
+ 	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+ 
++	/* before the destroy is staged, not after it has happened */
++	Bridge_DropAllTaps(instance);
++
+ 	ctx = NewNode(INTEGER);
+ 	SetPropLong(ctx, "_instance", (long) instance);
+ 	SetPropLong(ctx, "_local", (long) local);
+diff --git a/objects/checkbox/checkbox.c b/objects/checkbox/checkbox.c
+index 9074159..a918ac9 100644
+--- a/objects/checkbox/checkbox.c
++++ b/objects/checkbox/checkbox.c
+@@ -50,7 +50,9 @@ int Checkbox_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/dropdown/dropdown.c b/objects/dropdown/dropdown.c
+index 708cfc9..d98c9ee 100644
+--- a/objects/dropdown/dropdown.c
++++ b/objects/dropdown/dropdown.c
+@@ -52,7 +52,9 @@ int Dropdown_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/image/image.c b/objects/image/image.c
+index 2b871c0..4949e96 100644
+--- a/objects/image/image.c
++++ b/objects/image/image.c
+@@ -34,7 +34,9 @@ int Image_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/knob/knob.c b/objects/knob/knob.c
+index 8094319..b772127 100644
+--- a/objects/knob/knob.c
++++ b/objects/knob/knob.c
+@@ -49,7 +49,9 @@ int Knob_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/label/label.c b/objects/label/label.c
+index 8548177..328c665 100644
+--- a/objects/label/label.c
++++ b/objects/label/label.c
+@@ -49,7 +49,9 @@ int Label_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/led/led.c b/objects/led/led.c
+index 0f16e8c..ad08247 100644
+--- a/objects/led/led.c
++++ b/objects/led/led.c
+@@ -53,7 +53,9 @@ int LED_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/menubutton/menubutton.c b/objects/menubutton/menubutton.c
+index 17125f5..cbc4c06 100644
+--- a/objects/menubutton/menubutton.c
++++ b/objects/menubutton/menubutton.c
+@@ -59,7 +59,9 @@ int MenuButton_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/slider/slider.c b/objects/slider/slider.c
+index cf06799..c66fcbd 100644
+--- a/objects/slider/slider.c
++++ b/objects/slider/slider.c
+@@ -49,7 +49,9 @@ int Slider_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/textbox/textbox.c b/objects/textbox/textbox.c
+index fa4b12f..b0c6e6e 100644
+--- a/objects/textbox/textbox.c
++++ b/objects/textbox/textbox.c
+@@ -50,7 +50,9 @@ int Textbox_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	NodeObj announce;
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/textout/textout.c b/objects/textout/textout.c
+index ae28bcd..b3af931 100644
+--- a/objects/textout/textout.c
++++ b/objects/textout/textout.c
+@@ -49,7 +49,9 @@ int TextOut_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/objects/vumeter/vumeter.c b/objects/vumeter/vumeter.c
+index f677028..ec5e984 100644
+--- a/objects/vumeter/vumeter.c
++++ b/objects/vumeter/vumeter.c
+@@ -53,7 +53,9 @@ int VUMeter_OnIn(NodeObj instance, MsgId message, NodeObj data)
+ 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
+ 	char *value;
+ 
+-	if (!local || !local->enabled)
++	/* !data is a wire coming up or going down (msg_soc/msg_eoc), which is
++	   not a value to display */
++	if (!local || !local->enabled || !data)
+ 		return rtrn_dropped;
+ 
+ 	value = GetValueStr(data);
+diff --git a/src/callback.h b/src/callback.h
+index 35bacce..5b08606 100755
+--- a/src/callback.h
++++ b/src/callback.h
+@@ -8,7 +8,30 @@ typedef int (*FuncPtr)(NodeObj, NodeObj, int);
+ 
+ // the message_id that is sent in
+ // msg_eof marks the end of a stream, it travels the same path as the data
+-enum { msg_change=0, msg_update, msg_initialize, msg_send, msg_eof };
++//
++// msg_eoc is the end of the CONNECTION, which is a different fact: eof says
++// the data ran out and the wire is still there (a Reader finishing a file),
++// eoc says the wire itself is gone - the instance on the other end was
++// deleted, the socket closed. A subscriber that keeps anything per-wire
++// drops it on eoc; on eof it just stops expecting data. Appended, so the
++// existing ids do not shift.
++// msg_soc is eoc's other half: the wire was just MADE. Together they let a
++// subscriber maintain its own per-wire bookkeeping from messages alone,
++// instead of being told about the start by one route and never about the end.
++//
++// Neither carries a payload - they are facts about the wire, not values on
++// it - so a handler that only special-cases msg_eof and otherwise reads
++// `data` reads nothing and no-ops (the getters return 0/NULL for a NULL
++// node). That is deliberate: a lifecycle message must not read as an
++// arriving value to the twenty-odd handlers that predate it.
++enum { msg_change=0, msg_update, msg_initialize, msg_send, msg_eof, msg_eoc, msg_soc };
++
++// soc and eoc are facts about the WIRE, so they carry the property itself,
++// the same thing a property's own fan-out passes. A handler that reads a
++// value therefore reads a real one and needs to know nothing about them.
++// Only a handler that acts WITHOUT reading the payload has to ask, because
++// nothing else distinguishes a wire event from traffic for it.
++#define MsgIsLifecycle(m)	((m) == msg_soc || (m) == msg_eoc)
+ 
+ // where an object's OWN message ids start, so they never collide with the
+ // framework's. An object declares its verbs and vars as an enum from here,
+diff --git a/src/node.c b/src/node.c
+index 0c6cde6..639f9ef 100755
+--- a/src/node.c
++++ b/src/node.c
+@@ -612,6 +612,15 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
+ 	callback   = (int (*)(NodeObj, int, NodeObj)) GetPropLong(sub, "Callback");
+ 	toInstance = (NodeObj) GetPropLong(sub, "Instance");
+ 
++	/* Nothing rode in, so there is nothing to deliver. Handlers work on data
++	   - that is the whole default contract - and the eighty-odd written
++	   against it read the payload the moment they are called. Dropping here,
++	   once, is what lets a message id be added without auditing every one of
++	   them: an empty delivery reaches nobody instead of reading as an empty
++	   value (a control blanking itself, an Enable going false). */
++	if (!data)
++		return;
++
+ 	prevFrom    = curFromNode;
+ 	curFromNode = fromNode;
+ 
+diff --git a/src/object.c b/src/object.c
+index 4ccb2da..d5a4f5e 100755
+--- a/src/object.c
++++ b/src/object.c
+@@ -141,11 +141,16 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
+ 		   port widget. This was an ERROR back when everything was supposed to
+ 		   be addressable, and it fired - with a full node dump - on every
+ 		   registry-wide walk, which is most of them.
+-		   Still reported, just as what it is: a placement trace at -v 3, with
+-		   the dump kept for -v 3 the same way UnregisterLibrary does it. */
++		   Reported as what it is - a placement trace - and NOTHING MORE. It used
++		   to dump the whole node at -v 3, which was wrong twice over: every
++		   registry-wide walk calls this on every instance, so one unnamed
++		   handle meant dumping its entire subtree on every walk (a firehose,
++		   not a diagnostic); and some of those walks run inside
++		   DeleteInstance, where the scrub is freeing the very nodes the dump
++		   would be reading. That crashed the -O0 builds outright and got past
++		   release and asan on luck. An expected condition does not get a
++		   node dump. */
+ 		DebugPrint ( "instance has no name, so it has no path", __FILE__, __LINE__, PLACE);
+-		if (DebugPrintGetLevel() >= 3)
+-			PrintNode(inst);
+ 		return 0;
+ 	}
+ 
+@@ -901,6 +906,14 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
+ 		SetPropStr(sub, "Port", toPort);
+ 	SetPropLong(sub, "Callback", handler);
+ 	AddProp(fromPort, sub);
++
++	/* the wire exists: say so down it (msg_soc, callback.h), the same way
++	   its ending is announced. A subscriber that keeps anything per wire now
++	   hears both ends from the wire itself and never has to be told out of
++	   band. MsgFromNode() is the property it just subscribed to; no payload,
++	   because this is a fact about the wire and not a value on it. */
++	if (handler)
++		DeliverToSubscriber(sub, msg_soc, fromPort, fromPort);
+ }
+ 
+ /* see the comment in object.h - a copied group has to arrive wired to  */
+@@ -1697,7 +1710,12 @@ int ActivateOnMsg(NodeObj instance, MsgId message, NodeObj data)
+ {
+ 	(void) data;	/* a press is a press, whatever rode in on it */
+ 
+-	if (message == msg_eof)
++	/* ... but a wire coming up or going down is not a press. This one has to
++	   name the ids because it is the only handler that acts without reading
++	   the payload, so the core's empty-delivery drop cannot cover it: every
++	   Connect() to an Activate otherwise fired it at wire time - at boot,
++	   every widget building its panel, cascading. */
++	if (message == msg_eof || MsgIsLifecycle(message))
+ 		return rtrn_handled;
+ 
+ 	ActivateInstance(instance);
+@@ -1963,6 +1981,44 @@ static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
+ 	}
+ }
+ 
++/* Tell everything wired to this instance that the WIRE is ending, not just
++   the data (msg_eoc, callback.h). Without it a subscriber is silently
++   unhooked by the scrub below and never learns, so anything keeping state
++   per wire keeps it forever - pointing at freed memory. The bridge's tap
++   records are the case that found this: an instance destroyed by a script
++   left records whose Target dangled, and the next allocation landing on the
++   same address matched one and dereferenced it.
++
++   Delivered SYNCHRONOUSLY, down the same path a property write fans out on:
++   SndMsg would queue it past the frees below and hand the dispatcher a freed
++   property. MsgFromNode() is the property that ended, which is how a
++   subscriber knows WHICH of its wires this is.
++
++   Only wires with a Callback are told. A wire with none is default delivery
++   - a value copied into the target's property - and there is nothing on that
++   side to release; sending eoc down it would just write the dying value. */
++static void AnnounceEndOfConnection(NodeObj node)
++{
++	NodeObj prop, next;
++
++	if (!node)
++		return;
++
++	prop = GetNextProp(node);
++	while (prop) {
++		next = GetNextSibling(prop);
++
++		if (CmpName(prop, "Subscriber")) {
++			if (GetPropLong(prop, "Callback"))
++				DeliverToSubscriber(prop, msg_eoc, node, node);
++		} else {
++			AnnounceEndOfConnection(prop);	/* properties have properties */
++		}
++
++		prop = next;
++	}
++}
++
+ /* walk every live instance (library -> class -> instance, the same shape */
+ /* FindClass walks) scrubbing any Subscriber entry that targets           */
+ /* deadInstance - see DeleteInstance                                       */
+@@ -2058,6 +2114,9 @@ void DeleteInstance(NodeObj instance)
+ 	if (!instance)
+ 		return;
+ 
++	/* before anything is torn down or freed, while the instance is whole */
++	AnnounceEndOfConnection(instance);
++
+ 	/* instances are registered as children of their class (RegisterInstance) */
+ 	class = GetParent(instance);
+ 	if (class) {

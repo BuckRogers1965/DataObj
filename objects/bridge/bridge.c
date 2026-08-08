@@ -2710,6 +2710,40 @@ static void Bridge_LoadFlowDone(NodeObj container, int ok, void *rawCtx)
 	DelNode(command);
 }
 
+/* A LOAD destroys what it loads over, so every subscription this bridge holds
+   into that content is about to name freed nodes - and LoadViewAsync stages the
+   destroy through the scheduler, so it happens after we return, with no
+   per-instance hook to catch it on the way past. Waiting to find out leaves a
+   record whose target is gone, and once a later allocation reuses that node's
+   address the record MATCHES and the delivery reads a freed instance.
+   The bridge is the one performing the load, so this is the moment it knows:
+   let go of everything, here, while every target is still valid enough to
+   disconnect from properly. Clients re-subscribe as they re-render, which they
+   have to do regardless - the instances they were watching no longer exist. */
+static void Bridge_DropAllTaps(NodeObj bridgeInstance)
+{
+	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
+	NodeObj rec, next, target;
+	char   *prop;
+
+	for (rec = taps ? GetChild(taps) : NULL; rec; rec = next)
+	{
+		next   = GetNextSibling(rec);
+		target = (NodeObj) GetPropLong(rec, "Target");
+		prop   = GetPropStr(rec, "Port");
+
+		/* unwire first: the subscription record lives on the watched property,
+		   and for anything OUTSIDE the loaded container that property survives
+		   the load - dropping our record without unwiring would leave it
+		   delivering to a bridge that no longer has anywhere to put it */
+		if (target && prop)
+			Disconnect(target, prop, bridgeInstance, "Taps");
+
+		DelSibling(rec);
+		DelNode(rec);
+	}
+}
+
 void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char   *into = GetPropStr(command, "into");
@@ -2729,6 +2763,9 @@ void Bridge_LoadFlow(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	Bridge_FlowPath(GetPropStr(command, "file"), path, sizeof(path));
+
+	/* before the destroy is staged, not after it has happened */
+	Bridge_DropAllTaps(instance);
 
 	ctx = NewNode(INTEGER);
 	SetPropLong(ctx, "_instance", (long) instance);

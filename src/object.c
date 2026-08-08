@@ -141,11 +141,16 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 		   port widget. This was an ERROR back when everything was supposed to
 		   be addressable, and it fired - with a full node dump - on every
 		   registry-wide walk, which is most of them.
-		   Still reported, just as what it is: a placement trace at -v 3, with
-		   the dump kept for -v 3 the same way UnregisterLibrary does it. */
+		   Reported as what it is - a placement trace - and NOTHING MORE. It used
+		   to dump the whole node at -v 3, which was wrong twice over: every
+		   registry-wide walk calls this on every instance, so one unnamed
+		   handle meant dumping its entire subtree on every walk (a firehose,
+		   not a diagnostic); and some of those walks run inside
+		   DeleteInstance, where the scrub is freeing the very nodes the dump
+		   would be reading. That crashed the -O0 builds outright and got past
+		   release and asan on luck. An expected condition does not get a
+		   node dump. */
 		DebugPrint ( "instance has no name, so it has no path", __FILE__, __LINE__, PLACE);
-		if (DebugPrintGetLevel() >= 3)
-			PrintNode(inst);
 		return 0;
 	}
 

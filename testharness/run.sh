@@ -34,7 +34,7 @@ gcov|-O0 -g --coverage|5"
 
 # simplest first, browser last - a failure in an early suite makes the later
 # ones unreliable signal for the same root cause
-ALL_SUITES="unit_test rawtest connectiontest leaktest flowtest viewclonetest jstest scriptboxtest scriptedwidgettest widgettest tcpporttest guitest"
+ALL_SUITES="unit_test connectiontest flowtest viewclonetest jstest scriptboxtest scriptedwidgettest widgettest tcpporttest guitest rawtest leaktest"
 SUITES=${SUITES:-$ALL_SUITES}
 
 # overridable so a second run can be pointed somewhere else - two runs on the
@@ -238,9 +238,20 @@ run_variant() {
 		return
 	fi
 
+	# -v 3 ALWAYS, not just when something looks wrong. A forensic log is only
+	# useful if it was already running when the thing happened, and a failure
+	# you have to reproduce at a higher verbosity is a failure you may not be
+	# able to reproduce at all (several of today's were timing-sensitive). This
+	# turns on WIRE, PLACE, CLONE, REGISTER and the rest - every wire made and
+	# removed, every placement, every rename - so a failed assertion has the
+	# engine's own account of what led up to it sitting next to it.
+	#
+	# It costs disk and it costs speed. The speed matters: DebugPrint at this
+	# level is thousands of lines per run, which changes timing, which can hide
+	# a race the way the asan build does. A test must never depend on it.
 	say "[$v] starting framework on web=$web raw=$raw cdp=$cdp (cwd=$d)"
 	pdeath "$PWD/$d" log/server.log env LD_LIBRARY_PATH=build ./build/framework \
-	       -ip 127.0.0.1 -port "$web"
+	       -ip 127.0.0.1 -port "$web" -v 3
 	server=$PDEATH_PID
 	for i in $(seq 1 60); do
 		sleep 1
@@ -274,6 +285,9 @@ PY
 	# be a FILE value: a process exit status is truncated to 0-255 by the
 	# kernel, so an exiting -1 would come back as 255 and read as 255 failures.
 	crashed_by=""
+	# every check writes itself to passed.log / failed.log in here (Report.record),
+	# so a measurement survives the run whether or not it failed
+	export HARNESS_LOGDIR="$PWD/$d/log"
 	for s in $SUITES; do
 		[ "$s" = unit_test ] && continue          # already run, before the server
 		say "[$v] $s ..."

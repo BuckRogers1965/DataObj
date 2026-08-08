@@ -17,7 +17,7 @@ Run through run.sh, or standalone against a running server:
 
     python3 testharness/rawtest.py --host 127.0.0.1 --port 8091
 """
-import argparse, json, socket, sys, time
+import argparse, json, os, socket, sys, time
 
 
 def ensure_raw_bridge(host, rawport, webport=8083):
@@ -147,9 +147,26 @@ class Report:
         self.results = []
         self.label = label
         self.verbose = verbose
+        self.logdir = os.environ.get("HARNESS_LOGDIR", ".")
+
+    def record(self, name, expected, observed, ok):
+        """Every measurement goes to a file - passes to passed.log, failures
+        to failed.log - while the console stays failures-only. A number that
+        was measured and not written down cannot be compared against the next
+        run or the next variant: leaktest's threshold could not be settled
+        because only the one FAILING variant's counts survived anywhere."""
+        path = os.path.join(self.logdir, "passed.log" if ok else "failed.log")
+        try:
+            with open(path, "a") as f:        # append per check, so a suite
+                f.write("%s: %s\n"           # that dies mid-run keeps what
+                        "  expected: %s\n"   # it already measured
+                        "  observed: %s\n\n" % (self.label, name, expected, observed))
+        except OSError:
+            pass                              # a harness that cannot log still runs
 
     def expect(self, name, expected, observed, ok):
         self.results.append((name, expected, observed, bool(ok)))
+        self.record(name, expected, observed, bool(ok))
         if ok and not self.verbose:
             print(".", end="", flush=True)
             return
