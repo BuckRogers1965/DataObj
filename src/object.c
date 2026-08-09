@@ -853,8 +853,53 @@ static NodeObj CloneObject(NodeObj source)
 		owner = source;
 		valnode = ResolvePort(&owner, name);
 		val = valnode ? GetValueStr(valnode) : NULL;
-		if (val)
-			SetOrDeliverProp(inst, name, val);
+		if (!val)
+			continue;
+
+		/* Write it under THE NAME IT WAS READ UNDER. This used to call
+		   SetOrDeliverProp, which resolves the name on the way in and then
+		   rewrites it to whatever the resolution landed on - by design, so a
+		   write through an alias reaches the original's real property. That is
+		   wrong here: a fresh clone has nothing to write through, so the
+		   resolution redirected the value into the target slot's name instead
+		   of its own. A linked slot is called "Value", which is how a cloned
+		   box ended up with its properties written one level down into Value.
+
+		   The handler still gets its chance, but looked up on the CLONE's own
+		   property of that name - never on whatever the name resolves to.
+
+		   IF THIS EVER HAS TO BE REVISITED, here is the case it can break. The
+		   old call had a second purpose besides reaching a handler: writing
+		   THROUGH a link. If an instance's own property is legitimately a link
+		   - a composite whose bind-port exposes an inner member's property as
+		   its own - then copying it with SetPropStr puts a plain value in the
+		   link slot instead of reaching the target, and the clone comes up
+		   with a dead value where the original had a live link. Symptom: a
+		   cloned composite's bound property stops tracking. widgettest and
+		   scriptedwidgettest build bind-port composites, so a sweep should
+		   catch it.
+		   The repair then is NOT to go back to SetOrDeliverProp - that
+		   reintroduces the rename this fixed. It is to notice that the
+		   SOURCE's property is a link and reproduce the LINK on the clone
+		   (LinkPropertyAs against the mapped target), rather than copying a
+		   value at all. A link is not a value and should not be cloned as
+		   one. */
+		{
+			NodeObj dst   = GetPropNode(inst, name);
+			msgobj  onmsg = dst ? (msgobj) GetPropLong(dst, "OnMsg") : NULL;
+
+			if (onmsg)
+			{
+				NodeObj chunk = NewNode(STRING);
+
+				SetName(chunk, name);
+				SetValueStr(chunk, val);
+				onmsg(inst, msg_send, chunk);
+				DelNode(chunk);
+			}
+			else
+				SetPropStr(inst, name, val);
+		}
 	}
 
 	return inst;
@@ -1235,6 +1280,17 @@ NodeObj CloneInstance(NodeObj source, char *containerPath, NodeObj map)
 	CloneGroupPass(srcPath, clonePath, map, 0);
 	CloneGroupPass(srcPath, clonePath, map, 1);
 	CloneGroupPass(srcPath, clonePath, map, 2);
+
+	/* and the CONTAINER'S OWN wires. Pass 2 walks members only, so every wire
+	   whose source is the group's root was silently dropped - which is every
+	   wire a widget's panel makes from the widget's property to its control
+	   (Output -> the Output box's Value, and its siblings). A clone came up
+	   with its controls disconnected from the thing they display: the value
+	   was there, nothing carried it. Done after the passes so every member is
+	   in the map; CloneConnections ignores sinks that are not (a client's own
+	   subscribe tap, anything outside the group), which is what keeps the
+	   copy's traffic out of the original's name. */
+	CloneConnections(source, top, map);
 
 	snprintf(dbg, sizeof(dbg), "CLONE done: '%s' cloned into '%s'", GetPropStr(source, "Name"), clonePath);
 	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
@@ -1700,10 +1756,24 @@ void SetConnState(NodeObj table, long connId, long value)
  */
 int ActivateOnMsg(NodeObj instance, MsgId message, NodeObj data)
 {
-	(void) data;	/* a press is a press, whatever rode in on it */
+	/* A PRESS, not a release. A Button writes its Value "1" then "0" so that
+	   every press is a real change and gets through (button.c); with the value
+	   ignored here, both edges activated and one click ran the target twice.
+	   "0" is the release, and an empty value is nothing happening. */
+	{
+		char *v = data ? GetValueStr(data) : NULL;
 
-	if (message == msg_eof)
-		return rtrn_handled;
+		if (message == msg_eof || !v || !v[0] || strcmp(v, "0") == 0)
+			return rtrn_handled;
+	}
+
+	{
+		char dbg[200];
+
+		snprintf(dbg, sizeof(dbg), "ActivateOnMsg: '%s' activated by value '%s'",
+				 GetPropStr(instance, "Name"), data ? GetValueStr(data) : "(none)");
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	}
 
 	ActivateInstance(instance);
 	return rtrn_handled;

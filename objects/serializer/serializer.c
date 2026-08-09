@@ -1350,6 +1350,22 @@ static int Step(InstanceData *local)
 					sinkInst = (NodeObj) GetPropLong(s, "Instance");
 					if (!sinkInst || !PathOfInstance(sinkInst, sinkPath, sizeof(sinkPath)))
 						continue;
+
+					/* A TAP IS NOT PART OF THE FLOW. A client's subscribe
+					   records an ordinary wire into a Bridge's Taps, so a save
+					   taken while a panel was open baked that browser's
+					   subscriptions into the file - and loading it wired the
+					   flow to a bridge on behalf of a session that ended hours
+					   ago. It also made two saves of the same thing differ by
+					   nothing but who happened to be watching, which is what
+					   made dfdiff unusable as a baseline.
+
+					   Clone already refuses to copy these (CloneConnections
+					   skips sinks outside the group); this is the same rule on
+					   the save path, so the two agree. */
+					if (GetParent(sinkInst)
+						&& strcmp(GetNameStr(GetParent(sinkInst)), "Bridge") == 0)
+						continue;
 					/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 					sinkPort = GetPropStr(s, "Port");
 

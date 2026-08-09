@@ -20,6 +20,13 @@ cd "$(dirname "$0")/.." || exit 1
 for arg in "$@"; do [ "$arg" = "-v" ] && VERBOSE=1; done
 VERBOSE="${VERBOSE:+-v}"
 
+# Cores, please. kernel.core_pattern is a bare filename (no leading /), so a
+# crash dumps into the crashing process's CWD - the variant directory - right
+# beside that variant's log/ and saved/. The soft limit is 0 by default and the
+# hard limit is infinity, so this needs no privilege; without it the kernel
+# refuses to write anything and a segfault leaves no evidence at all.
+ulimit -c unlimited 2>/dev/null || true
+
 STAMP=$(date +%Y%m%d_%H%M%S)
 ROOT=testharness/tests/$STAMP
 INC="-Isrc -Isrc/dyn -Wall -Wextra"

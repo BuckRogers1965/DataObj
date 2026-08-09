@@ -46,7 +46,6 @@ typedef struct InstanceData
 	int     enabled;
 	NodeObj host;		/* the language host - a PRIVATE handle: no name, no
 						   path, unfindable, unwireable, never serialized */
-	char    lang[64];	/* the class name behind `host` */
 } InstanceData;
 
 static NodeObj LibrarySelf;
@@ -92,20 +91,16 @@ static void ScriptBox_DiscoverHosts(char *out, int outlen)
 
 /* append one line to the Output box - a script that emits several times   */
 /* accumulates, rather than each line overwriting the last                  */
+/* Output is SET, not appended. Reading the property back and writing it plus
+   the new text made every write depend on what the property already held -
+   and that same property is written from the other side by the control's
+   mirror, so a write coming back round grew the value again, and again. */
 static void ScriptBox_Append(NodeObj instance, char *value)
 {
-	char *cur, *buf;
-	int len;
-
 	if (!value)
 		return;
 
-	cur = GetPropStr(instance, "Output");
-	len = (int) strlen(cur ? cur : "") + (int) strlen(value) + 2;
-	buf = malloc(len);
-	snprintf(buf, len, "%s%s\n", (cur && cur[0]) ? cur : "", value);
-	SetPropStr(instance, "Output", buf);
-	free(buf);
+	SetPropStr(instance, "Output", value);
 }
 
 /* Everything the host says comes back HERE, on our own "Evt" port, as
@@ -113,7 +108,6 @@ static void ScriptBox_Append(NodeObj instance, char *value)
    none. One handler, and the ordinal says which kind. */
 int ScriptBox_OnEvt(NodeObj instance, MsgId message, NodeObj data)
 {
-	NodeObj copy;
 	char   *text = data ? GetValueStr(data) : "";
 
 	switch (message - SCRIPTBOX_CALLBACK)
@@ -124,14 +118,10 @@ int ScriptBox_OnEvt(NodeObj instance, MsgId message, NodeObj data)
 			return rtrn_handled;
 
 		case SCRIPT_OUT:
-			/* shown AND forwarded out our own Out, so a ScriptBox stays a
-			   composable flow object. A fresh copy: the original belongs to
-			   the sender's own delivery. */
+			/* Output IS the out. There is no second property to keep in step:
+			   writing the value once is both what the box shows and what
+			   anything downstream sees. */
 			ScriptBox_Append(instance, text);
-			copy = NewNode(STRING);
-			SetName(copy, "Data");
-			SetValueStr(copy, text);
-			SndMsg(instance, "Out", msg_send, copy);
 			return rtrn_handled;
 	}
 
@@ -168,6 +158,12 @@ static void ScriptBox_SwapHost(NodeObj instance, char *lang)
 	char         *src;
 
 	if (!local || !lang || !lang[0])
+		return;
+
+	/* already running this language? The host node's own name is the answer -
+	   asked of the thing itself rather than of a copy that can drift. */
+	if (local->host && GetNameStr(local->host)
+		&& strcmp(GetNameStr(local->host), lang) == 0)
 		return;
 
 	if (local->host)
@@ -211,7 +207,6 @@ static void ScriptBox_SwapHost(NodeObj instance, char *lang)
 	if (!local->host)
 		return;
 
-	snprintf(local->lang, sizeof(local->lang), "%s", lang);
 
 	/* the code carries over: it was always ours */
 	src = GetPropStr(instance, "Source");
@@ -224,6 +219,31 @@ static void ScriptBox_SwapHost(NodeObj instance, char *lang)
 		ScriptSetSource(local->host, text);
 		DelNode(text);
 	}
+}
+
+/* Which language a NEW ScriptBox comes up in. DEFAULT_LANGUAGE is looked for
+   in the discovered list and used if it is there; anything else falls back to
+   the first entry, so a tree with no Lua still gets a working box. Note this
+   MUTATES hosts (strtok), which is fine - the caller has already published
+   the untouched copy. */
+#define DEFAULT_LANGUAGE "Lua"
+
+static char *ScriptBox_PickDefault(char *hosts)
+{
+	char *tok, *first = NULL;
+
+	/* strtok terminates each token in place, so every pointer it hands back is
+	   a NUL-terminated name inside `hosts` - no copy needed, and no returning
+	   the whole remainder of the list the way strstr would */
+	for (tok = strtok(hosts, ","); tok; tok = strtok(NULL, ","))
+	{
+		if (!first)
+			first = tok;
+		if (strcmp(tok, DEFAULT_LANGUAGE) == 0)
+			return tok;
+	}
+
+	return first;
 }
 
 /* the Language dropdown drove a new value in: swap the inner host */
@@ -239,10 +259,17 @@ int ScriptBox_OnLanguage(NodeObj instance, MsgId message, NodeObj data)
 	if (!lang || !lang[0])
 		return rtrn_handled;
 
+	/* The dropdown's value IS the property, and it is the only truth about
+	   which language this box is in. There used to be a `local->lang` copy
+	   here and the swap was gated on it differing - so any path that left the
+	   copy disagreeing with the real host (a SwapHost that failed after
+	   deleting the old one, a value set at InstanceStart without going
+	   through this handler) left the label reading one language while another
+	   one ran. Nothing is cached now: the property says what it says, and
+	   SwapHost's own comparison against the live host decides whether there
+	   is work to do. */
 	SetValueStr(GetPropNode(instance, "Language"), lang);
-
-	if (strcmp(lang, local->lang) != 0)
-		ScriptBox_SwapHost(instance, lang);
+	ScriptBox_SwapHost(instance, lang);
 
 	return rtrn_handled;
 }
@@ -293,9 +320,15 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (firstCall || !local->host)
 		return rtrn_handled;
 
-	local->active = 1;
-	SetPropInt(instance, "State", Running);
-	SetPropStr(instance, "Output", "");
+	/* Output is NOT cleared here. Clearing it and then running put two values
+	   into circulation, "" and whatever the script printed - and because the
+	   control's re-announce is queued, the stale one lands after the box has
+	   moved on, writes it back, and the two values regenerate each other
+	   forever. On screen that is the output blinking. A run simply sets the
+	   value it produces.
+
+	   Nothing is latched either: a run is one and done, so there is no
+	   "running" state to enter. */
 
 	/* hand over the current text and run it - two messages, no properties */
 	src = GetPropStr(instance, "Source");
@@ -325,9 +358,8 @@ static WidgetItem ScriptBoxPanel[] = {
 	{ "Textbox",  "Source",   "",  0,  15,  45, 400, 180, LABEL_NONE },
 	{ "Button",   "Run",      "",  0,  15, 235,  70,  24, LABEL_NONE },
 	{ "Checkbox", "In",       "0", 0, 110, 240,   9,   9, LABEL_RIGHT, (void *)ScriptBox_OnIn },
-	{ "LED",      "State",    "1", 0, 165, 240,  12,  12, LABEL_NONE },
+	{ "LED",      "State",    "0", 0, 165, 240,  12,  12, LABEL_NONE },
 	{ "Textbox",  "Output",   "",  0,  15, 270, 400, 120, LABEL_NONE },
-	{ "TextOut",  "Out",      "",  0,  15, 400, 400,  20, LABEL_LEFT },
 
 	{ NULL }
 };
@@ -344,7 +376,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	local->active = 0;
 	local->enabled = 1;
 	local->host = NULL;
-	local->lang[0] = '\0';
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "ScriptBox");
@@ -353,11 +384,14 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   a handler; Source/Output/State/Out are plain data; Run triggers Activate) */
 	Widget_Init(instance, ScriptBoxPanel);
 
-	/* the discovered hosts fill the Language menu; default to the first, set
-	   WITHOUT re-firing the port (SetPropStr on its own name would shadow it) */
+	/* the discovered hosts fill the Language menu. The default is CHOSEN, not
+	   whichever host happened to register first: registration order is scan
+	   order, and AddChild prepends, so "the first one" silently became a
+	   different language every time a host was added to the tree. Set WITHOUT
+	   re-firing the port (SetPropStr on its own name would shadow it). */
 	ScriptBox_DiscoverHosts(hosts, sizeof(hosts));
 	SetPropStr(instance, "LanguageList", hosts);
-	first = strtok(hosts, ",");
+	first = ScriptBox_PickDefault(hosts);
 	SetValueStr(GetPropNode(instance, "Language"), first ? first : "");
 
 	SetPropLong(instance, "local", (long)local);
@@ -373,7 +407,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   Out - both ordinary properties it already has. Same declaration
 	   tcpport makes for TxData/RxData. */
 	SetPropStr(instance, "ReservedIn",  "In");
-	SetPropStr(instance, "ReservedOut", "Out");
+	SetPropStr(instance, "ReservedOut", "Output");
 
 	(void) first;
 

@@ -968,8 +968,12 @@ function updateLiveControl(entry, value) {
   if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
   if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
   if (entry.widgetClass === 'MenuItems') {
-    /* rebuild the <option>s, preserving the current selection */
-    const keep = entry.el.value;
+    /* rebuild the <option>s, then apply the value we were TOLD - not what the
+       DOM happens to hold. A <select> silently discards a value with no
+       matching option, so if Value arrived before Items the DOM holds '' and
+       the browser shows the first option instead. That is how a dropdown came
+       to display one language while the property said another. */
+    const keep = entry.el.wantedValue || entry.el.value;
     entry.el.textContent = '';
     for (const item of (value || '').split(',')) {
       if (!item) continue;
@@ -987,8 +991,11 @@ function updateLiveControl(entry, value) {
     return;
   }
   if (entry.widgetClass === 'MenuValue') {
-    /* selecting a value that isn't among the options yet is harmless -    */
-    /* the MenuItems update re-applies it once the list arrives            */
+    /* remember it on the element, because assigning it now is a no-op when
+       the options have not arrived yet - and the DOM is then not a place the
+       value can be read back from. MenuItems applies this once the options
+       exist, whichever order the two events turn up in. */
+    entry.el.wantedValue = value;
     if (value) entry.el.value = value;
     return;
   }
