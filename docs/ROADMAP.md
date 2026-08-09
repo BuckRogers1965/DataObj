@@ -1025,6 +1025,45 @@ interpreter.
   model a fix in one tiny emailed file, and upgrades it:
   no restart. The web palette makes it self-serve: publishing an
   object to a server *is* deployment.
+- **The client is told once per frame, not once per write.** Every
+  property write currently becomes its own event: an envelope, a
+  dispatch, a WebSocket frame. A dragged slider therefore costs a
+  round of all three per intermediate value, and the browser throws
+  nearly all of them away — it cannot show more than one state per
+  frame. The fix is a per-connection **dirty set** in the bridge
+  (property → latest value) flushed by the bridge's own task at ~60Hz.
+  Coalescing falls out: ten writes between flushes cost one send
+  carrying the last value, and the cost stops scaling with how fast
+  something changes. So does visibility — a property on a closed
+  panel, an unopened view or a collapsed sub-view simply never enters
+  the set, so nothing is spent describing what nobody can see. The
+  core is untouched: `SndMsg` keeps its semantics, the bridge stops
+  forwarding everything it hears. This is also what retires the 1ms
+  sleep cap in `MainLoop`: that cap exists because polled work never
+  declares its own cadence, and the flush task is exactly such a
+  declaration — 16ms while a session is attached, nothing at all when
+  the last client detaches, so an idle instance stops burning a
+  thousand wakeups a second and a process-per-tenant deployment costs
+  what its footprint suggests.
+
+- **A widget's client half ships with its class.** Today a Textbox is
+  defined twice: `objects/textbox/textbox.c` and a branch in
+  `web/app.js`. So adding a widget means editing the host, which is
+  the one remaining place where shipping a new object is not enough —
+  the same debt as `BuildPalette()` above, on the browser side. The
+  renderer belongs to the class that needs it, carried as an ordinary
+  property on the class node so a single `.object` file stays
+  self-contained, and served by the bridge on request like any other
+  property. Then a view is served only the renderers for the classes
+  actually in it (and only the CSS those widget types need), derived
+  from the view's contents at serve time — the bridge already knows
+  both. Two consequences worth the work: `app.js` stops being a switch
+  over every widget type and becomes a loader, and the emailed-fix
+  deployment story finally covers the whole widget, GUI included —
+  drop the file in the scan path and its browser half arrives with it.
+  The costs are real but small: the client loads renderers on demand
+  and caches them per class, and a class node carries a few KB of text
+  the engine never reads.
 
 ---
 
