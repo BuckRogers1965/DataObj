@@ -60,6 +60,11 @@ char *  GetPropStr  (NodeObj node, char * Name);
 void    SetPropLong (NodeObj node, char * Name, long Value);
 long    GetPropLong (NodeObj node, char * Name);
 
+//void    SetPropPrivate     (NodeObj node, char * name, int value);
+void    SetPropIntPrivate  (NodeObj node, char * Name, int Value);
+void    SetPropStrPrivate  (NodeObj node, char * Name, char * Value); 
+void    SetPropLongPrivate (NodeObj node, char * Name, long Value);
+
 /* allocation accounting: nodes currently alive (NewNode minus freed).   */
 /* A count that grows and never shrinks across a create/destroy cycle    */
 /* is a leak. Published into the tree by the Stats object, never by the  */

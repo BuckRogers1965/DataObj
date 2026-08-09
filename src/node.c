@@ -259,7 +259,11 @@ int GetValueLen(NodeObj node)
 void SetValueInt(NodeObj node, int value)
 {
 
-	if (!node || !value)
+	/* ZERO IS A VALUE. This used to read `if (!node || !value)`, so storing 0
+	   was silently a no-op and anything that turned something OFF through it
+	   simply did not happen - an LED that could be lit and never darkened, an
+	   Enable that could not go false. Only the node is checked now. */
+	if (!node)
 		return;
 
 	SetInt(node->value, value);
@@ -268,7 +272,8 @@ void SetValueInt(NodeObj node, int value)
 void SetValueLong(NodeObj node, long value)
 {
 
-	if (!node || !value)
+	/* zero is a value - see SetValueInt */
+	if (!node)
 		return;
 
 	SetLong(node->value, value);
@@ -671,6 +676,27 @@ static void FanOutSubscribers(NodeObj propnode)
 	}
 }
 
+void SetPropLongPrivate(NodeObj node, char *name, long value)
+{
+	NodeObj propnode;
+
+	if (!node || !name)
+		return;
+
+	propnode = GetPropNode(node, name);
+	if (propnode)
+	{
+		SetLong(propnode->value, value);
+		return;
+	}
+
+	/* otherwise create the property */
+	propnode = NewNode(LONG);
+	SetStr(propnode->name, name);
+	SetLong(propnode->value, value);
+	AddProp(node, propnode);
+}
+
 void SetPropLong(NodeObj node, char *name, long value)
 {
 	NodeObj propnode;
@@ -697,6 +723,27 @@ void SetPropLong(NodeObj node, char *name, long value)
 	AddProp(node, propnode);
 }
 
+void SetPropIntPrivate(NodeObj node, char *name, int value)
+{
+	NodeObj propnode;
+
+	if (!node || !name)
+		return;
+
+	propnode = GetPropNode(node, name);
+	if (propnode)
+	{
+		SetInt(propnode->value, value);
+		return;
+	}
+
+	/* otherwise create the property */
+	propnode = NewNode(INTEGER);
+	SetStr(propnode->name, name);
+	SetInt(propnode->value, value);
+	AddProp(node, propnode);
+}
+
 void SetPropInt(NodeObj node, char *name, int value)
 {
 	NodeObj propnode;
@@ -720,6 +767,27 @@ void SetPropInt(NodeObj node, char *name, int value)
 	propnode = NewNode(INTEGER);
 	SetStr(propnode->name, name);
 	SetInt(propnode->value, value);
+	AddProp(node, propnode);
+}
+
+void SetPropStrPrivate(NodeObj node, char *name, char * value)
+{
+	NodeObj propnode;
+
+	if (!node || !name)
+		return;
+
+	propnode = GetPropNode(node, name);
+	if (propnode)
+	{
+		SetStr(propnode->value, value);
+		return;
+	}
+
+	/* otherwise create the property */
+	propnode = NewNode(STRING);
+	SetStr(propnode->name, name);
+	SetStr(propnode->value, value);
 	AddProp(node, propnode);
 }
 

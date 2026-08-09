@@ -38,7 +38,7 @@ source can drive it through Connect().
 
 */
 
-enum { mode_all=0, mode_change, mode_ones, mode_zeros };
+enum { mode_all=0, mode_ones, mode_none, mode_zeros };
 
 typedef struct InstanceData
 {
@@ -63,12 +63,15 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 /* subscription callback: test the message, forward it if it passes */
 int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 {
-	char * str;
+	//char * str;
 	int pass;
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
+	DebugPrint ( "Filter  1.", __FILE__, __LINE__, OBJMSGHANDLING);
 
-	if (!local || !local->active)
+	if (!local || !local->enabled)
 		return rtrn_dropped;
+
+	DebugPrint ( "Filter  2.", __FILE__, __LINE__, OBJMSGHANDLING);
 
 	/* the end of the stream always passes so downstream can finish */
 	if (message == msg_eof)
@@ -77,31 +80,41 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 		return rtrn_handled;
 	}
 
-	if (message != msg_send)
-		return rtrn_dropped;
+	DebugPrint ( "Filter  3.", __FILE__, __LINE__, OBJMSGHANDLING);
 
-	if (!local->enabled)
-		return rtrn_dropped;
+	//if (message != msg_send)
+	//	return rtrn_dropped;
 
-	str = GetValueStr(data);
-	if (!str)
-		return rtrn_dropped;
+	DebugPrint ( "Filter  4.", __FILE__, __LINE__, OBJMSGHANDLING);
+
+	//str = GetValueStr(data);
+	//if (!str)
+	//	return rtrn_dropped;
+
+	char * mode;
+	mode = GetPropStr(instance, "Mode");
+	if (mode && strcmp(mode, "ones") == 0)
+		local->mode = mode_ones;
+	else if (mode && strcmp(mode, "zeros") == 0)
+		local->mode = mode_zeros;
+	else if (mode && strcmp(mode, "none") == 0)
+		local->mode = mode_none;
+	else
+		local->mode = mode_all;
 
 	switch (local->mode)
 	{
-	case mode_change:
-		pass = (!local->last || strcmp(local->last, str) != 0);
-		if (local->last)
-			free(local->last);
-		local->last = strdup(str);
-		break;
 
 	case mode_ones:
-		pass = (GetValueInt(data) == 1);
+		pass = (GetValueInt(data) != 0);
 		break;
 
 	case mode_zeros:
-		pass = (strcmp(str, "0") == 0);
+		pass = (GetValueInt(data) == 0);
+		break;
+
+	case mode_none:
+		pass = 0;
 		break;
 
 	default:
@@ -115,11 +128,16 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 		/* queued send delivered it to us, so it must be copied rather  */
 		/* than forwarded, or two independent deliveries would each     */
 		/* try to free the same node                                    */
+
+		DebugPrint ( "Filter  5.", __FILE__, __LINE__, OBJMSGHANDLING);
+
 		NodeObj forward = NewNode(STRING);
 		SetName(forward, "Data");
-		SetValueStr(forward, str);
+		SetValueStr(forward, GetValueStr(data));
 		SndMsg(instance, "Out", msg_send, forward);
 	}
+
+	DebugPrint ( "Filter  6.", __FILE__, __LINE__, OBJMSGHANDLING);
 
 	return rtrn_handled;
 }
@@ -129,8 +147,8 @@ int Filter_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || message != msg_send)
-		return rtrn_dropped;
+	//if (!local || message != msg_send)
+//		return rtrn_dropped;
 
 	local->enabled = GetValueInt(data) ? 1 : 0;
 	SetValueStr(GetPropNode(instance, "Enable"), local->enabled ? "1" : "0");
@@ -152,8 +170,8 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 		return rtrn_handled;
 
 	mode = GetPropStr(instance, "Mode");
-	if (mode && strcmp(mode, "change") == 0)
-		local->mode = mode_change;
+	if (mode && strcmp(mode, "none") == 0)
+		local->mode = mode_none;
 	else if (mode && strcmp(mode, "ones") == 0)
 		local->mode = mode_ones;
 	else if (mode && strcmp(mode, "zeros") == 0)
@@ -171,14 +189,14 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
    are the flow ports, each shown as a readout of the last message. */
 static WidgetItem FilterPanel[] = {
 	/* cls        prop     def   panel   x    y    w    h  label       [handler] */
-	{ "View",     "Filter","",   0,   0,   0, 300, 245, 0 },			/* 0: main */
+	{ "View",     "Filter","",   0,   0,   0, 300, 260, 0 },			/* 0: main */
 	{ "Help",     "objects/filter/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
 
-	{ "Checkbox", "Enable","1",  0, 270,  12,   9,  9, LABEL_LEFT, (void *)Filter_OnEnable },
-	{ "Textbox",  "Mode",  "all",0,  15,  35, 120, 22, LABEL_NONE },
-	{ "LED",      "State", "1",  0,  15,  78,  12, 12, LABEL_NONE },
-	{ "TextOut",  "In",    "",   0,  15, 118, 260, 20, LABEL_LEFT, (void *)Filter_OnIn },
-	{ "TextOut",  "Out",   "",   0,  15, 160, 260, 20, LABEL_LEFT },
+	{ "Checkbox", "Enable","1",   0, 150, 12,   9,  9, LABEL_LEFT, (void *)Filter_OnEnable },
+	{ "Dropdown", "Mode",  "all", 0,  15, 35, 120, 22, LABEL_NONE },
+	{ "LED",      "State", "1",   0,  100, 35,  12, 12, LABEL_NONE },
+	{ "TextOut",  "In",    "0",   0,  15,  80, 260, 20, LABEL_LEFT, (void *)Filter_OnIn },
+	{ "TextOut",  "Out",   "0",   0,  15, 120, 260, 20, LABEL_LEFT },
 
 	{ NULL }
 };
@@ -202,8 +220,12 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   Mode/State/Out are plain data - In/Out are the ports, read on the panel) */
 	Widget_Init(instance, FilterPanel);
 
+    SetPropStr(instance, "ModeList", "all,none,ones,zeros");
+	SetPropStr(instance, "ReservedIn",  "In");
+	SetPropStr(instance, "ReservedOut", "Out");
+
 	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)Filter_Activate);
+	//SetPropLong(instance, "Activate", (long)Filter_Activate);
 
 	InitPosition(instance);
 	Widget_MainSize(instance, FilterPanel);

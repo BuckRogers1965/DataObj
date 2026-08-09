@@ -79,9 +79,12 @@ int Button_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	/* same shape as Checkbox: the control has a Value and that is all.
 	   Writing it fans out to whoever subscribed. A press is 1 then back
-	   to 0, so every press is a real change and gets through. */
+	   to 0 privately, so every press is a real change and gets through. */
 	SetPropStr(instance, "Value", "1");
-	SetPropStr(instance, "Value", "0");
+
+	// You cannot send two events to the same thing in the same function.
+	// But we want a click to go every time, so we cheated here for now
+	SetPropStrPrivate(instance, "Value", "0");
 
 	return rtrn_handled;
 }

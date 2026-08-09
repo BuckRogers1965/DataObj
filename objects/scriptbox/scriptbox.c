@@ -113,8 +113,15 @@ int ScriptBox_OnEvt(NodeObj instance, MsgId message, NodeObj data)
 	switch (message - SCRIPTBOX_CALLBACK)
 	{
 		case SCRIPT_PRINT:
-		case SCRIPT_ERROR:
 			ScriptBox_Append(instance, text);
+			return rtrn_handled;
+
+		case SCRIPT_ERROR:
+			/* The LED IS the state: lit means the source compiled and In will
+			   step it. An error means it did not, so the light goes out and
+			   stepping stops - there is no second flag saying so. */
+			ScriptBox_Append(instance, text);
+			SetPropStr(instance, "State", "0");
 			return rtrn_handled;
 
 		case SCRIPT_OUT:
@@ -135,7 +142,9 @@ int ScriptBox_OnIn(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message;
 
-	if (!local || !local->enabled || !local->host)
+	/* the LED is the gate: In steps what compiled, and nothing else */
+	if (!local || !local->enabled || !local->host
+		|| !GetPropInt(instance, "State"))
 		return rtrn_dropped;
 
 	ScriptIn(local->host, data);
@@ -279,11 +288,32 @@ int ScriptBox_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local || message != msg_send)
+	/* A value arrived, so act on it. This used to require msg_send, but a
+	   checkbox wired to this property delivers msg_change (a property's own
+	   fan-out) - so clicking Enable ran none of this and disabling did
+	   nothing at all. What matters is that there IS a value, not which route
+	   carried it. */
+	if (!local || !data)
 		return rtrn_dropped;
 
 	local->enabled = GetValueInt(data) ? 1 : 0;
 	SetValueStr(GetPropNode(instance, "Enable"), local->enabled ? "1" : "0");
+
+	/* Enable used to set this flag and nothing else looked at it on the
+	   compile path, so unchecking it stopped nothing.
+
+	   Off means: the light goes out, In stops stepping, and the host DROPS
+	   what it compiled. That last part matters - without it the LED would say
+	   nothing is compiled while the interpreter still held a full dictionary,
+	   which is the same two-truths trap as everything else tonight. Back on is
+	   a blank slate: press Activate to compile again. */
+	if (!local->enabled)
+	{
+		SetPropStr(instance, "State", "0");
+		if (local->host)
+			ScriptStop(local->host);
+	}
+
 	return rtrn_handled;
 }
 
@@ -325,13 +355,26 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	   control's re-announce is queued, the stale one lands after the box has
 	   moved on, writes it back, and the two values regenerate each other
 	   forever. On screen that is the output blinking. A run simply sets the
-	   value it produces.
+	   value it produces. */
 
-	   Nothing is latched either: a run is one and done, so there is no
-	   "running" state to enter. */
+	/* ACTIVATE IS THE COMPILE BUTTON. It hands the current text over and has
+	   the host compile it - that is all. Stepping is the In line: each arrival
+	   there runs one step against what was compiled. Splitting the two is what
+	   lets a stateful language work here at all; re-evaluating the source per
+	   step re-allocated every definition and overflowed the interpreter's heap
+	   after a dozen presses.
 
-	/* hand over the current text and run it - two messages, no properties */
+	   State is the LED: lit means compiled and ready to step. */
+	if (!local->enabled)
+		return rtrn_handled;
+
+	/* Nothing to compile is not a compile. An empty box gets activated at
+	   startup - the palette builds one of everything and activates it - and
+	   lighting the LED there said "compiled and ready to step" about a box
+	   with no source in it. */
 	src = GetPropStr(instance, "Source");
+	if (!src || !src[0])
+		return rtrn_handled;
 	{
 		NodeObj text = NewNode(STRING);
 
@@ -340,7 +383,17 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 		ScriptSetSource(local->host, text);
 		DelNode(text);
 	}
-	ScriptRun(local->host);
+	/* Lit BEFORE the run, and the return value checked. The host reports a
+	   compile error synchronously while running - ScriptBox_OnEvt puts the
+	   light out - so setting it green afterwards painted over the failure and
+	   a broken source came up green. And DeliverMsg returns 0 when the host
+	   never took the message at all, which is not a compile either.
+
+	   The client colours this LED straight from the value: 0 grey, 1 yellow,
+	   2 green (web/style.css). */
+	SetPropStr(instance, "State", "2");
+	if (!ScriptRun(local->host))
+		SetPropStr(instance, "State", "0");
 
 	return rtrn_handled;
 }
@@ -419,7 +472,12 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   that is where the panel AND the inner host come up (both need the path, so
 	   NEITHER can be created here in InstanceStart). msg_initialize does not run
 	   the script; only the Run button (msg_send) does. */
-	Widget_DeferBuild(instance, ScriptBoxPanel);
+	/* QUIET: build the panel, do NOT call Activate. Creating a ScriptBox must
+	   not compile or run anything - the palette builds one of everything at
+	   boot and a catalog entry is looked at, not run (BuildPalette's own
+	   contract, control.c). The loud variant called Activate one tick after
+	   creation, which is what compiled and lit every box at startup. */
+	Widget_DeferBuildQuiet(instance, ScriptBoxPanel);
 
 	return rtrn_handled;
 }

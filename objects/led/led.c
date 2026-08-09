@@ -85,7 +85,6 @@ int LED_Activate(NodeObj instance, MsgId message, NodeObj data)
 		return rtrn_dropped;
 
 	local->active = 1;
-	SetPropInt(instance, "State", Running);
 
 	return rtrn_handled;
 }
@@ -102,8 +101,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetName(instance, "LED");
 	SetPropStr(instance, "Value", "0");
 	WatchableProp(instance, "Value");
-	SetPropInt(instance, "State", Starting);
-	WatchableProp(instance, "State");
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)LED_Activate);
 
@@ -154,7 +151,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishProp(ClassSelf, "Value", PROP_LED, "0");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "State", PROP_LED, "1");
+	/* No State. The VALUE is the state - that is the whole control, and
+	   there is nothing else to be out of step with it. */
 
 	return rtrn_handled;
 }

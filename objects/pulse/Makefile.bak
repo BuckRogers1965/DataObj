@@ -65,6 +65,6 @@ pulseobj.o: /usr/include/bits/struct_rwlock.h /usr/include/alloca.h
 pulseobj.o: /usr/include/bits/stdlib-float.h /usr/include/string.h
 pulseobj.o: /usr/include/bits/types/locale_t.h
 pulseobj.o: /usr/include/bits/types/__locale_t.h /usr/include/strings.h
-pulseobj.o: /usr/include/sched.h /usr/include/bits/sched.h
-pulseobj.o: /usr/include/bits/types/struct_sched_param.h
-pulseobj.o: /usr/include/bits/cpu-set.h
+pulseobj.o: ../../src/node.h ../../src/data.h ../../src/object.h
+pulseobj.o: ../../src/sched.h ../../src/callback.h ../../src/DebugPrint.h
+pulseobj.o: ../../src/widget.h ../../src/control.h

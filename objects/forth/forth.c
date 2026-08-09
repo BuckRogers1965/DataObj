@@ -55,7 +55,8 @@ typedef struct InstanceData
 	int     enabled;
 	NodeObj instance;
 	char   *source;			/* our own copy - the owner holds the real one */
-	char   *onin;			/* the word to run when data arrives */
+	char   *onin;			/* the word to run when data arrives, and the
+							   entry point a step executes */
 	int     marked;			/* this instance has a dictionary mark */
 	atl_statemark mark;
 } InstanceData;
@@ -236,6 +237,22 @@ static void Forth_VmStart(void)
 	if (VmReady)
 		return;
 
+	/* Sized generously ON PURPOSE. Every activate re-evaluates the whole
+	   source, so each run allocates its buffers and definitions again; with
+	   atlast's default heap that overflows after a handful of presses, in the
+	   middle of `string`. Five megabytes is nothing on a host that measures
+	   its instances in megabytes, and it turns "dies on the thirteenth press"
+	   into "runs until something is actually wrong".
+
+	   ltempstr matters too: it is the width of the buffers Forth_TempStr
+	   hands back, so it is the longest string a verb can return - the default
+	   would quietly truncate a Source or an Output. */
+	atl_stklen   = 2048;
+	atl_rstklen  = 1024;
+	atl_heaplen  = 16384;			/* stackitems - a Forth's worth, not a heap */
+	atl_ltempstr = 4096;			/* the widest string a verb can return */
+	atl_ntempstr = 8;
+
 	atl_init();
 	atl_redef = 1;		/* re-running source redefines its own words quietly */
 
@@ -313,6 +330,20 @@ static void Forth_Run(NodeObj instance)
 
 	if (!local->source || !local->source[0])
 		return;
+
+	/* RUN IS COMPILE. The driver's Activate hands the text over and asks for
+	   this; stepping is the In line, which executes the entry word against
+	   what was compiled (Forth_Deliver).
+
+	   Rewind this instance's own definitions first, so compiling twice does
+	   not stack a second copy of everything the source defines. Without it
+	   each compile permanently consumed dictionary and heap - another buffer,
+	   another definition - and the interpreter overflowed after a dozen
+	   presses. That is what the mark is for. */
+	if (local->marked)
+		atl_unwind(&local->mark);
+	atl_mark(&local->mark);
+	local->marked = 1;
 
 	Forth_Eval(instance, local->source);
 }
