@@ -657,23 +657,50 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	curFromNode = prevFrom;
 }
 
+/* object.c, same library. Declared here rather than including object.h,  */
+/* which redeclares the node types this file defines.                     */
+int   SndMsgNode(NodeObj instance, NodeObj outPort, int message, NodeObj data);
+void *ObjGetTaskList(void);
+
 /* every property write fans out, unconditionally, to whatever has       */
 /* subscribed to it - Connect() (object.c) already leaves "Subscriber"   */
 /* children on whatever node it targets, port or plain property alike    */
-/* (see AddSubscription/SndMsg); this walks the same shape natively so   */
-/* node.c does not have to call up into object.c. There is no opt-in     */
-/* step - a property is watchable simply by existing, same as a port.    */
-static void FanOutSubscribers(NodeObj propnode)
+/* (see AddSubscription/SndMsg). There is no opt-in step - a property is */
+/* watchable simply by existing, same as a port.                          */
+/*                                                                        */
+/* The delivery is QUEUED, not done here: SndMsgNode envelopes the write  */
+/* onto the scheduler and DispatchMsg walks the Subscriber list later,    */
+/* from ExecTasks. So a write costs one task insert and returns, and no   */
+/* subscriber's handler ever runs inside the setter's own call stack.     */
+/*                                                                        */
+/* The payload is a copy: DispatchMsg frees the envelope's data after the */
+/* last subscriber, and propnode belongs to owner. The copy carries the   */
+/* property's name and value, the shape port traffic already arrives in.  */
+static void FanOutSubscribers(NodeObj owner, NodeObj propnode)
 {
-	NodeObj sub;
+	NodeObj sub, chunk;
 
+	/* main.c installs the task list after the core has already written  */
+	/* properties; nothing is subscribed that early                       */
+	if (!ObjGetTaskList())
+		return;
+
+	/* an unwired property costs the walk and no allocation - this fires */
+	/* on every changed write in the system, and most are unwired         */
 	sub = GetNextProp(propnode);
 	while (sub)
 	{
 		if (CmpName(sub, "Subscriber"))
-			DeliverToSubscriber(sub, msg_change, propnode, propnode);
+			break;
 		sub = GetNextSibling(sub);
 	}
+	if (!sub)
+		return;
+
+	chunk = NewNode(STRING);
+	SetName(chunk, GetNameStr(propnode));
+	SetValueStr(chunk, GetValueStr(propnode));
+	SndMsgNode(owner, propnode, msg_change, chunk);
 }
 
 void SetPropLongPrivate(NodeObj node, char *name, long value)
@@ -712,7 +739,7 @@ void SetPropLong(NodeObj node, char *name, long value)
 		int changed = old != value;
 		SetLong(propnode->value, value);
 		if (changed)
-			FanOutSubscribers(propnode);
+			FanOutSubscribers(node, propnode);
 		return;
 	}
 
@@ -759,7 +786,7 @@ void SetPropInt(NodeObj node, char *name, int value)
 		int changed = old != value;
 		SetInt(propnode->value, value);
 		if (changed)
-			FanOutSubscribers(propnode);
+			FanOutSubscribers(node, propnode);
 		return;
 	}
 
@@ -811,7 +838,7 @@ void SetPropStr(NodeObj node, char *name, char * value)
 		int changed = !old || !value || strcmp(old, value) != 0;
 		SetStr(propnode->value, value);
 		if (changed)
-			FanOutSubscribers(propnode);
+			FanOutSubscribers(node, propnode);
 		return;
 	}
 

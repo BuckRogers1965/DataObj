@@ -1552,26 +1552,22 @@ static void CancelPendingSends(NodeObj deadInstance)
 /* built one) must build its own copy to send onward, since the original */
 /* is owned by the sender's own queued delivery, not by whoever received */
 /* it (see Filter_OnIn for the pattern).                                 */
+/*                                                                       */
+/* Two entry points, one body. SndMsg takes a property NAME and resolves */
+/* it; SndMsgNode takes the resolved node, which is what node.c's        */
+/* property fan-out already holds - and is what lets a property write    */
+/* queue a message instead of walking the subscriber list itself.        */
 int
-/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
+SndMsgNode(NodeObj instance, NodeObj outPort, MsgId message, NodeObj data){
 
-	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-	NodeObj outPort, owner;
 	MsgEnvelope * env;
 	TaskObj task;
 
-	/* sending out an alias port sends out the original - the envelope   */
-	/* records the original as its source so CancelPendingSends matches   */
-	/* the instance whose port the envelope actually holds                 */
-	owner = instance;
-	outPort = ResolvePort(&owner, port);
 	if (!outPort) {
 		if (data)
 			DelNode(data);
 		return 0;
 	}
-	instance = owner;
 
 	env = malloc(sizeof(MsgEnvelope));
 	envelopesAlive++;
@@ -1588,6 +1584,22 @@ SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 	AddTaskNow(task, (FuncPtr)DispatchMsg, message, (NodeObj)env);
 
 	return 1;
+}
+
+int
+/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
+SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
+
+	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
+	NodeObj outPort, owner;
+
+	/* sending out an alias port sends out the original - the envelope   */
+	/* records the original as its source so CancelPendingSends matches   */
+	/* the instance whose port the envelope actually holds                 */
+	owner = instance;
+	outPort = ResolvePort(&owner, port);
+
+	return SndMsgNode(owner, outPort, message, data);
 }
 
 /*

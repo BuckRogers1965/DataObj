@@ -90,6 +90,11 @@ int
 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data);
 
+/* the same send, given the resolved property node rather than a name -  */
+/* node.c's property fan-out queues through this.                        */
+int
+SndMsgNode(NodeObj instance, NodeObj outPort, MsgId message, NodeObj data);
+
 /* Deliver straight to one named port's own handler, bypassing whatever  */
 /* Subscriber list is attached to it - for something that decides at     */
 /* delivery time which single target gets a message (Router), rather    */
