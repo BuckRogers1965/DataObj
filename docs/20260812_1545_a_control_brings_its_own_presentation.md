@@ -105,80 +105,115 @@ with no `presentation/web` renders a visibly wrong placeholder naming the class,
 logs to the console, and logs on the engine side. It must never quietly fall
 back to a Textbox — that is the exact failure this work exists to end.
 
-## The one open decision: how the blob is served
+## Where the presentation lives: a property on the class node
 
-The intent (stated 2026-08-11, recorded in the ROADMAP): **the Bridge walks the
-registered classes at instance start, concatenates every `presentation/web` it
-finds into one JS blob and one CSS blob, and holds them in RAM.** The palette
-shows one of everything, so the page needs all of it anyway — selecting a subset
-would be work done to save nothing.
+Not a directory the Bridge scans. **The control loads its own `.js` and `.css`
+onto its class node, once, at `ClassStart`** — the same moment and the same way
+it already publishes `Value`, `Enable`, its parent class and its version.
 
-The obstacle is that `Http_Serve` (objects/http/http.c:134) answers a request by
-`fopen`ing a path under `Root`. It has no way to ask anyone for a body. Two ways
-to close that, and this is a decision to make before Step 3, not during it:
+    ClassSelf
+      Presentation
+        web
+          js      <- this control's registration code
+          css     <- this control's rules
 
-- **(a) Http learns to ask.** A path that is not on disk goes out as a message,
-  and a subscriber may answer with a body. This is the message-interface shape
-  the I/O objects already use — send a request carrying your callback, catch the
-  reply — and it makes Http generally useful, not just useful here. Cost: it is
-  an object-level change to http.c, and responses become genuinely asynchronous,
-  so "nobody answered" needs a defined outcome.
-- **(b) The Bridge writes the blob once at start**, into the directory Http
-  already serves, and Http serves it as an ordinary file. Zero new mechanism.
-  Built once rather than per request, which was the point of "cached in RAM".
-  Bonus: the assembled file is on disk and can be read when a control's fragment
-  is malformed — for a build step, that is a feature, not a leak.
+Properties are nodes and nodes hold properties, so this needs no new mechanism
+whatsoever: `PublishProp` already puts things on a class node and the Bridge
+already walks the registry. `web` is a sub-property rather than a prefix because
+`rest`, `macos` and `mcp` are the same shape later, and none of them is
+privileged. (Names are provisional — they are yours to set.)
 
-**Recommendation: (b) for this work, (a) as its own piece later if wanted.** (b)
-is not an interim mechanism that has to be unwound — the assembling code is the
-same either way; only the last two lines differ. But it is your call, and (a) is
-closer to what you described.
+Three things fall out of it, and they are why this beats a directory convention:
+
+- **Nothing scans anything.** The Bridge does not look at the filesystem, needs
+  no path convention, and needs no notion of which classes have a web half. It
+  walks the classes it already walks and reads a property, the way it already
+  reads `Parent` and the published interface.
+- **Once, at class time.** Not per instance, not per request, not per page load.
+  A class is registered once per process, so the read happens once.
+- **It ships inside the `.object`.** Customer support can still mean emailing a
+  single file, and now the browser half travels in it. Exactly the deployment
+  promise the engine half already keeps.
+
+**How the text gets into the module.** Editing JavaScript inside a C string
+literal would be miserable, so it should not be done. Keep
+`objects/led/presentation/web/led.js` as an ordinary editable file and have that
+object's Makefile generate a C string from it at build time (`xxd -i`, or three
+lines of shell) for the module to publish at `ClassStart`. Source stays a `.js`
+file with syntax highlighting; the shipped artifact is self-contained. That is a
+per-object Makefile addition, which is where per-object build rules already live.
+
+## How it reaches the browser
+
+Three hops, and only the first is new work:
+
+1. **The class holds it** (above).
+2. **The Bridge collects it** — at instance start it walks the registry,
+   concatenates every `Presentation/web/js` into one blob and every `…/css` into
+   another, and holds them. One walk, one time; the same registry walk that
+   already builds the palette and discovers script hosts.
+3. **The web layer loads it, once.** Either the Bridge hands over the list or the
+   client derives it from the classes it already knows — either way one time at
+   page load, before the first `instance-created` is rendered.
+
+The one remaining mechanical question is how the bytes get out, since
+`Http_Serve` (objects/http/http.c:134) answers a request by `fopen`ing a path
+under `Root` and cannot ask anyone for a body. Either Http learns to ask (a path
+not on disk goes out as a message and a subscriber may answer — the
+message-interface shape the I/O objects already use, and useful beyond this), or
+the Bridge writes its assembled blob once at start into the directory Http
+already serves. The second needs no new mechanism and can be swapped for the
+first later without touching a single control, because the assembling code is
+identical either way.
 
 ## The steps
 
-Each step ends green on all five variants, and each is separately revertable.
+The shape is the one the alias conversion had: **make one control work through
+the general mechanism, then the rest are that control again.** Nothing is built
+generically ahead of a working case.
+
+Each step ends green on all five variants and is separately revertable.
 
 **Step 0 — the golden snapshot.** Before anything moves: capture, per palette
 class, the DOM structure, computed size and class list of its rendered element.
-Store it as the expected shape. This is the only thing that can prove "identical"
-rather than "still passes". *Proof: a new guitest assertion that compares live
-rendering against the snapshot, passing on today's code.*
+The only thing that can prove "identical" rather than "still passes". *Proof: a
+guitest assertion comparing live rendering to the snapshot, passing on today's
+code.*
 
-**Step 1 — the `.value` contract, in place.** Give every control class a `.value`
-get/set on the element it already builds, and rewrite `updateLiveControl` /
-`updateReadout` to use it. No files move, no loading, nothing new — this is a
-refactor inside app.js that deletes two ladders. *Proof: the golden snapshot is
-unchanged, all 43 still draw, guitest green.*
+**Step 1 — one control, end to end. The LED.** Easiest by measurement, not by
+impression: its entire client footprint is **two executable branches**
+(`app.js:527` sets `node-led state-0`, `app.js:1463` sets `node-led state-<v>`),
+one entry in `DISPLAY_WIDGET_CLASS`, and five CSS rules. No gesture, no commit
+path, no editing — it only displays. So it exercises the whole chain (class
+property → Bridge → browser → renders → updates on a value) with the least
+possible else in the way.
 
-**Step 2 — the registry, still inside app.js.** Introduce `register()` and the
-class map; convert each existing maker into a registration at the bottom of
-app.js. Still one file, still no loading. At the end of this step the host reads
-from the map and has no class-name branch left. *Proof: `grep -c "=== '[A-Z]"`
-on app.js goes 27 → 0; snapshot unchanged.*
+At the end of this step the LED renders from its own `.js`, its two branches are
+gone from app.js, and all 42 other controls still work through the old path.
+Both paths live at once, deliberately — that is what makes this one control's
+worth of risk.
 
-**Step 3 — the delivery path, empty.** Bridge assembles a blob from zero
-`presentation/web` directories, serves it, `index.html` loads it before app.js.
-Nothing has moved yet, so the blob is empty and the page is identical. *Proof:
-page loads, snapshot unchanged. This step proves the plumbing alone.*
+*Proof: the LED draws and changes colour on a value; the snapshot is unchanged
+for all 43; guitest green.*
 
-**Step 4 — one control moves.** Checkbox: `objects/checkbox/presentation/web/
-checkbox.js` gets its registration, app.js loses it. One control, one commit.
-*Proof: Checkbox still draws and still toggles under gesture; the other 42
-untouched.*
+**Step 2 — the `.value` contract, proven on the LED.** Its element answers
+`.value`, its setter swaps the class name, and the host's update path for it
+becomes `el.value = incoming` with no branch. Prove the contract on one control
+before asking 42 others to honour it.
 
-**Step 5 — the rest, in small batches.** Grouped by shape, simplest first:
-LED/Label/TextOut (display only), Slider/Knob (input), then Markdown/HTML/Image
+**Step 3 — the rest, in batches, simplest first.** Label and TextOut (the LED's
+shape), then Checkbox/Slider/Knob (input and commit), then Markdown/HTML/Image
 (renderers), then MenuButton/Dropdown and the Buttons (their own gestures), then
-the panels. *Proof each time: 43 drew, snapshot unchanged, no page errors.*
+the panels. Each batch is the LED again with more in it. *Proof each time: 43
+drew, snapshot unchanged, no page errors.*
 
-**Step 6 — CSS follows.** The 13 control-specific rules move to their controls'
-`presentation/web/*.css`; the blob gains a stylesheet half. *Proof: computed
-styles in the snapshot unchanged.*
+**Step 4 — CSS follows the same route.** The 13 control-specific rules move to
+their controls' `Presentation/web/css`. *Proof: computed styles unchanged.*
 
-**Step 7 — delete the scaffolding.** `WIDGET_CLASSES`, `INPUT_WIDGET_CLASS`,
+**Step 5 — delete the scaffolding.** `WIDGET_CLASSES`, `INPUT_WIDGET_CLASS`,
 `DISPLAY_WIDGET_CLASS`, `READOUT_WIDGET_CLASSES`, `buildValueControl`,
-`makeReadoutEl`, the maker functions. Only once nothing references them. *Proof:
-the file shrinks by ~350 lines and everything is still green.*
+`makeReadoutEl`, the maker functions — only once nothing references them.
+*Proof: ~350 lines and 27 class-name branches gone, everything still green.*
 
 ## What must not change
 
