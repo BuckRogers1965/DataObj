@@ -103,25 +103,99 @@ def members(t, view, pattern):
 # --------------------------------------------------------------------------
 
 def install_error_trap(t):
-    t.js("window.__errs=window.__errs||[];"
-         "window.addEventListener('error',(e)=>window.__errs.push(String(e.message)))")
+    """Armed BEFORE the page has run a line, and re-armed on every later
+    navigation, because the errors that matter most happen during boot -
+    a control's own client code failing as it loads is exactly the thing
+    that must not be invisible. Installing it after the page settled (as
+    this used to) could only ever see what broke afterwards.
+
+    Promise rejections count: anything fetched or imported asynchronously
+    fails that way and never reaches the 'error' event."""
+    src = ("window.__errs=window.__errs||[];"
+           "window.addEventListener('error',"
+           "(e)=>window.__errs.push(String(e.message)));"
+           "window.addEventListener('unhandledrejection',"
+           "(e)=>window.__errs.push('unhandled rejection: '+String(e.reason)));")
+    t.call("Page.addScriptToEvaluateOnNewDocument", {"source": src})
+
+
+def drain_errors(t):
+    """Take and clear whatever the page has reported, so an error belongs
+    to the test that caused it instead of appearing once, unattributed,
+    at the end of the run."""
+    try:
+        errs = t.js("(()=>{const e=window.__errs||[];window.__errs=[];return e;})()")
+        return errs or []
+    except Exception:
+        return []
+
+
+def palette_seeds_drawn(t):
+    """Every palette member that did NOT draw, and why. The palette is
+    already the enumeration - BuildPalette walks the registry and seeds one
+    instance per class that has a view - so this needs no list of its own
+    and a new control joins the check by existing.
+
+    Registered is not drawn: a control whose client half fails still lands
+    in instances{}, it just never puts anything on the page. So the claim
+    is about the element."""
+    return t.js("(()=>{const bad=[];"
+                "for(const k of Object.keys(instances)){"
+                "if(!k.startsWith('/Root/Palette/'))continue;"
+                "const i=instances[k],e=i&&i.el;"
+                "if(!e){bad.push(k+' (no element)');continue;}"
+                "if(!e.isConnected){bad.push(k+' (not in the page)');continue;}"
+                "const r=e.getBoundingClientRect();"
+                "if(!r.width||!r.height)bad.push(k+' (0x0)');}"
+                "return bad;})()")
+
+
+def palette_seeds_missing(t):
+    """What the ENGINE put in the palette that the CLIENT does not have.
+    __evts is what arrived on the wire, instances{} is what the client
+    built out of it, so comparing them asks the one question that matters
+    for any change to how the client is assembled: does the app still get
+    everything it was always given?"""
+    t.clear_events()
+    t.js("send({cmd:'list-instances',container:'/Root/Palette'})")
+    t.wait_js("(window.__evts||[]).some(m=>m.event==='instances-done')",
+              "the palette listing to finish")
+    return t.js("(()=>{const seen=new Set();"
+                "for(const m of (window.__evts||[]))"
+                "if(m.event==='instance-created'&&m.container==='/Root/Palette')"
+                "seen.add(m.instance);"
+                "return [...seen].filter(k=>!instances[k]);})()")
 
 
 def test_boot(t, r):
     t.call("Page.enable")
+    install_error_trap(t)
     t.call("Page.navigate", {"url": APP})
     time.sleep(2)
     t.wait_js("typeof instances !== 'undefined' && !!views['/Root/Palette']", "boot replay")
     time.sleep(1.5)
-    install_error_trap(t)
     t.hook_events()
 
     palette_open = t.js("panels['/Root/Palette'].el.style.display !== 'none'")
     seeds = t.js("Object.keys(instances).filter(k=>k.startsWith('/Root/Palette/')).length")
     r.expect("boot: palette view opens with its seeds",
-             "palette panel open (initial Open=1) and >5 class seeds fetched on open",
+             "palette panel open (initial Open=1) and class seeds fetched on open",
              "open=%s, seeds=%s" % (palette_open, seeds),
              palette_open and seeds and seeds > 5)
+
+    # WHICH seeds, not how many. A count passes while most of the palette
+    # is broken, which is exactly the kind of green that means nothing.
+    missing = palette_seeds_missing(t)
+    r.expect("boot: the client holds every palette member the engine placed",
+             "nothing the engine put in /Root/Palette is missing from the client",
+             "missing: %s" % (missing if missing else "none"),
+             not missing)
+
+    undrawn = palette_seeds_drawn(t)
+    r.expect("boot: every palette member actually drew",
+             "every /Root/Palette member has an element in the page with a real size",
+             "did not draw: %s" % (undrawn if undrawn else "none (all %s drew)" % seeds),
+             not undrawn)
 
     # '/Root' belongs in this set: the root became a REAL View (CreateRoot),
     # so anything at top level carries Container='/Root' where it used to
@@ -1181,11 +1255,18 @@ def main():
                      "skipped - earlier failure left no %s" % ", ".join(missing), False)
             return None
         try:
-            return fn()
+            out = fn()
         except Exception as e:
             r.expect(name, "the test runs to completion", "aborted: %s" % e, False)
             post_mortem(t)
+            drain_errors(t)
             return None
+        errs = drain_errors(t)
+        if errs:
+            r.expect("%s: no page errors" % name,
+                     "the browser console saw no uncaught error during this test",
+                     "%s" % errs, False)
+        return out
 
     def close_view(label):
         """Delete a make_test_view's View once every test using it is done -
