@@ -1086,3 +1086,378 @@ and reloaded; 2 — an object whose properties fire callbacks; 3 — the
 framework serving a page that lists live instances; 4 — dragging a
 Pulse onto a canvas and watching its LED blink; 5 — that canvas on
 the palette as an object.
+
+---
+
+## Found 2026-08-11 — the day writes became messages
+
+The session that queued property fan-out through the scheduler and took the
+on-change gate out of `SetProp*`. Both landed; the engine runs quiet with them.
+What follows is what that work turned up and did not fix.
+
+### The rule that came out of it
+
+**A control never owns data. It points at the property it shows.** A Checkbox
+in a panel and a Checkbox on a canvas are the same thing pointing at different
+properties. "Alias" is that RELATIONSHIP, not a species — `class=Alias` vs
+`class=Button` is not a distinction anything should branch on. Pointing is
+invisible on the wire: a control arrives as its real class and answers about
+itself, under its own name. Resolving is how the data is FOUND, never a reason
+to re-address the answer.
+
+Everything below is either a place that rule is not yet true, or damage from
+the years when it wasn't.
+
+### Next steps of this work
+
+- **Reads resolve like writes, everywhere.** Done in the two translators
+  (`Bridge_Subscribe`; `ScriptReadProp` behind `get`/`sibget`/`pathget`) and in
+  the plain setters (`ResolveOwned`, node.c). Not done for `GetPropStr` /
+  `GetPropNode` / `GetValueStr` generally, so any new reader can still stop at
+  the link and see nothing.
+- **Should a handler-backed property announce?** A write to a property carrying
+  `OnMsg` is delivered to the handler, and a handler that stores with
+  `SetValueStr` fans nothing out — so nobody hears. That is why an `Enable`
+  checkbox shows the right value at creation and then never tracks a change
+  made elsewhere. Pre-existing, unresolved.
+- **Alias creation is bridge-only.** `Bridge_CreateAlias` holds the recipe;
+  object.c has a second copy inside `CloneAliasNode`. A headless host, a script
+  host, or any other translator cannot make one. (Engine verbs `AliasProperty`
+  / `CreateAlias` were added for this and have no callers — remove them or use
+  them, but the gap is real either way.)
+- **`Widget_Ctl`'s remaining reflect.** The Dropdown still copies `<prop>List`
+  into its `Items` with `Widget_Reflect`. Last copy in the panel builder.
+- **Two constructors for a panel.** A widget brings its own, laid out by a
+  table compiled into its `.c`; everything else gets one synthesized by
+  `bridge.c`'s `internals` command from the class Interface. Same product, two
+  builders, so each must independently remember to stamp `Widget`, apply
+  `W`/`H`, honour `LabelPos`. Every rendering bug that evening was one of them
+  forgetting something the other did.
+- **Panels build eagerly.** `Widget_DeferBuild` arms a 1ms task, so every widget
+  materialises its controls whether or not anyone opens it. Lazy panels become
+  possible once nothing subscribes to a control — nothing is lost by destroying
+  one.
+
+### Bugs found, not fixed
+
+- **A queued message can be delivered to a deleted private instance.**
+  `DeleteInstance` guards with `ScrubRegistrySubscriptions`, which is a REGISTRY
+  walk; a ScriptBox's inner host is made through `InstanceStart` and never
+  registered, so records aimed at it survive the delete. Observed as a QuickJS
+  abort (`quickjs.c:1991 JS_FreeRuntime`, core dumped) during a ScriptBox
+  teardown; the mechanism is inferred, not proven — build the asan variant and
+  run a create/delete to confirm. **Queued fan-out widens this window**: writes
+  used to deliver before the setter returned, so a write-then-delete left
+  nothing in flight. Related to "registry walks need categories" — a private
+  instance is exactly where "walk the registry" and "everything that can
+  receive a message" stop being the same question.
+- **`Widget_Create` adopts on PATH alone**, no class check (control.c:
+  `ResolvePath` → return existing). A saved flow whose control changed class
+  hands back the old class.
+- **`Bridge_Subscribe` re-keyed the instance but not the property name** — fixed
+  by resolving for the value instead, but the same shape may exist elsewhere:
+  resolve for the node, never for the address.
+- **Root `widget.c`** is tracked in git (last touched `fd5eb91`) and appears
+  nowhere in the Makefile — a leftover from the move into `objects/widget/`.
+
+### Debug that was missing
+
+Nothing logged that a write crossed a link, and `ScriptBox_Activate` printed
+nothing at all, so an entire evening of failures were invisible and had to be
+inferred. Now: `SetOrDeliverProp` logs every write by name at `-v 3` (`WIRE`) —
+what was asked for, the value, **STORE** vs **DELIVER**, what it resolved to,
+and `[crossed a link]`; `ScriptBox_Activate` logs `firstCall`/host/enabled/
+language at `PROG_FLOW`. The general lesson: a mechanism with no debug output
+is a mechanism whose failures cost hours.
+
+### Retired by this work
+
+The change-check in `SetProp*` was a fixed-point detector for a two-copy sync
+protocol nobody meant to write — two nodes for one datum, each announcing to
+the other, stopping only when the values matched. That is why alternating
+values (a Button's 1-then-0) never converged and crashed the engine, and why
+`button.c` needed `SetPropStrPrivate` to hide its falling edge. With one node
+there is nothing to reconcile: `Activate` can take a 1 as often as it likes,
+and button.c's private `0` is now vestigial.
+
+### Defaults versus saved values — needs a decision
+
+Adding `change` to the Filter's `ModeList` did not reach anything that already
+existed. The list is set at `InstanceStart`, so a fresh Filter offers the new
+option — but a Filter restored from a saved flow gets its saved `ModeList` back
+and keeps offering the old four. **A default that lives in code is shadowed by
+any value a file remembers**, so changing one only reaches instances nobody has
+saved yet.
+
+That is sharpest for a property like `ModeList`, which is not instance state at
+all — it is the same string for every Filter that will ever exist, a fact about
+the class. Saving it per instance is what lets it go stale, and no amount of
+care at the writing end fixes that as long as the file pins it.
+
+**Idea worth pursuing: do not serialize a property whose value equals its
+published default.** `PublishProp` already records the default in the class
+Interface, so the serializer can compare and omit. Two things fall out of one
+change:
+
+- **Files get smaller** — most properties on most instances are untouched
+  defaults, and today every one of them is written out.
+- **Defaults become live.** A property nobody overrode carries no saved value,
+  so it picks up whatever the code says today. Adding an option to a list, or
+  correcting a default, reaches every flow that never touched it.
+
+Open questions before doing it:
+
+- **"Never set" versus "deliberately set to the default".** Today they are
+  indistinguishable in the file, and after this change they behave differently
+  the next time the default moves. Does anything need to pin a value *at* the
+  default? If so it needs a way to say so.
+- **Which properties are class facts, not instance state.** `ModeList` is the
+  obvious one; there are likely others (published option lists, sizes that come
+  from a widget table). Those may want to live on the class node and never be
+  saved per instance at all, which would make the default question moot for
+  them.
+- **Load order.** A default now comes from the class at load time rather than
+  from the file, so the class must be registered and its Interface available
+  before instances are rebuilt. Probably already true, worth confirming.
+- **What a diff of two flows means.** Omitting defaults makes files smaller but
+  also makes two flows harder to compare literally, since absence now carries
+  meaning. `flowdiff.py` would need to know the rule.
+
+### Filter widget: In/Out readouts stay blank, and `change` looks dead
+
+Observed 2026-08-12 on the Filter panel. Both need tracing rather than
+theorising; what follows is what is known and what is only suspected.
+
+**`In` does not update as traffic passes.** A store-on-arrival was just added -
+`DeliverToSubscriber` (node.c) and `SetOrDeliverProp` (object.c) now set the
+property before calling its handler, so a value that arrived at a port is on
+that port. If the readout is still blank, then either Filter's `In` does not
+take that path, or the readout is not bound to what it looks bound to. Not yet
+traced.
+
+**`Out` will not update, and the reason is known: sending does not store.**
+`SndMsg`/`SndMsgNode` builds an envelope and dispatches it to the property's
+subscribers; the source property itself never holds what went out. So a readout
+on `Out` has nothing to show, and no amount of traffic changes that. This is
+the exact mirror of the `In` gap - **arriving now stores, leaving still does
+not** - and it wants the same answer: what left a property is that property's
+value. One store in the send path, symmetric with the one in the delivery path.
+Watch for the loop it could create: storing on `Out` fans out to `Out`'s
+subscribers, which are the very things the send is already being dispatched to.
+That likely means storing without announcing, or storing before the dispatch
+rather than as a second delivery.
+
+**`change` mode appears not to work.** Implemented 2026-08-11 (compare against
+the last value that PASSED, not the last seen), added to `ModeList`. Reported
+as having no effect. Candidates, in order of cheapness to check: the instance
+is still carrying a saved `ModeList` without the option (see "Defaults versus
+saved values" above, which is exactly this failure); the mode string never
+reaches `local->mode` because `Activate` reads `Mode` once and the panel's
+set-property lands later (there is already a comment in filter.c about that
+race); or the comparison itself is wrong. The `-v 3` `SET` line will say which,
+since it reports every write by name, what it resolved to, and whether it
+stored or delivered.
+
+### Presentation belongs to the control — and there is more than one surface
+
+Extends the Phase 8 item "A widget's client half ships with its class", which
+had the renderer as a property on the class node and assumed one client. The
+generalisation: **a control carries its own presentation, per surface, and the
+host never enumerates controls at all.**
+
+    objects/checkbox/
+        checkbox.c                    what it IS
+        presentation/web/             how a browser draws it   (.js, .css)
+        presentation/rest/            how it answers over REST
+        presentation/macos/           a native surface
+        presentation/mcp/             how an agent sees it
+
+Same object, several presentations, none of them privileged. `web` is simply
+the one that exists today.
+
+**Why this and not more branches.** Right now a control is defined twice -
+`objects/checkbox/checkbox.c` and, in `web/app.js`, an entry in
+`INPUT_WIDGET_CLASS`, a `case` in `buildValueControl`, sometimes a
+`className ===` branch, sometimes a whole bespoke maker. Adding a control means
+editing the host, and forgetting the client half fails **silently**: the lookup
+misses, the switch falls through, and the control renders as a textbox with no
+error anywhere.
+
+That is not hypothetical. Every rendering failure on 2026-08-11 was one of
+those ladders missing a rung: `PROP_BUTTON` absent from `INPUT_WIDGET_CLASS`;
+no `case 'Button'` in the factory; `makeMoButtonEl` and
+`makeSelfActivateButton` building DOM directly and so skipping the sizing every
+other control got; the input/display/readout split deciding a control's kind
+before drawing it. Hours went into those, and each fix was another rung rather
+than a reason for the ladder.
+
+**What it retires.** `app.js` stops being a switch over widget types and
+becomes a loader: an `instance-created` names a class, the client fetches that
+class's `presentation/web` if it has not already, caches it, and asks it to
+render. `INPUT_WIDGET_CLASS`, `DISPLAY_WIDGET_CLASS`,
+`READOUT_WIDGET_CLASSES`, `buildValueControl`'s switch and the `className`
+branches all go, and a control written tomorrow renders today without the host
+being told it exists - the same promise the engine already keeps for
+`.object` loading.
+
+**How it is served: build it once, at bridge start.** No per-view scanning, no
+lazy fetch, no cache negotiation. When a Bridge instance comes up it walks the
+registered classes, concatenates every `presentation/web` it finds into one JS
+blob and one CSS blob, holds them in RAM, and serves them as a single file that
+`app.js` pulls in. The palette shows one instance of every class, so the page we
+are actually building for needs all of it anyway - selecting a subset would be
+work done to save nothing.
+
+That also settles what "adding a control" means end to end: drop the `.object`
+in the scan path, restart, and its browser half is in the blob the bridge
+serves. Same deployment story as the engine half, same moment, no host edit.
+
+**The contract that keeps the host generic.** Splitting the rendering out is
+only half of it - if the host still needs a `case` per widget type to UPDATE a
+control, the ladder has just moved. The Pico W framework linked below solves
+this in about forty lines: every value-bearing element it emits carries
+`data-rid="<item id>"`, and the whole client update path is one selector over
+that attribute. A bar needs min/max, so it emits its own hidden element
+carrying them; the generic loop reads what is there. **A widget's per-type
+knowledge travels in the markup it emitted, not in the host's JavaScript.**
+
+The DataObj form: a control's presentation emits markup tagged with the
+property it stands for, plus whatever its own updater needs; the host
+subscribes to that property and drives every tagged element the same way, with
+no case for what kind of control it is. That contract is what determines
+whether the ladder comes back - more than the file layout does.
+
+**A surface is not chosen, it is composed.** You get the web presentation
+because you ran a Bridge; you get the MCP one because you ran an MCP object.
+Each translator reads the presentation directory that matches it - Bridge reads
+`presentation/web`, an MCP object reads `presentation/mcp`, a REST object reads
+`presentation/rest` - and builds its own blob at its own instance start. There
+is no negotiation, no surface parameter, and no registry of surfaces: the
+surface IS the object, exactly as an application is a set of objects and their
+wiring. Run two and you have both at once, over the same live instances, with
+neither knowing about the other.
+
+Open question:
+- **What a presentation is allowed to be.** For `web` it is code (js/css). For
+  `rest` and `mcp` it is closer to a schema - a description of the control's
+  value and how it is written. Those may not be the same kind of artifact, and
+  pretending they are would be its own special case.
+- **The fallback.** A class with no presentation for the asked-for surface has
+  to do something. Today that fallback is "textbox", chosen by accident of a
+  switch's `default`. Whatever it becomes should be a stated rule, and should
+  say so out loud rather than silently drawing the wrong control.
+
+**What every surface actually is.** Underneath, all of them reduce to the same
+tiny thing: **get and set on an addressable property, plus verbs you can define
+on top.** That is already true of both surfaces that exist. The bridge speaks
+`set-property` / `subscribe` and then a verb list - create-instance, connect,
+activate, clone, save-flow. A script host speaks `get`/`set`, `sibget`/`sibset`,
+`pathget`/`pathset` and then the same verb list in its own syntax. Neither is
+a different protocol; they are the same two ideas wearing different notation,
+which is why `script.c` and `bridge.c` keep needing the identical fix on the
+identical day.
+
+So a new surface is not a project. It is: get and set over whatever transport
+it has, then whichever verbs make sense there. The engine owns what a verb
+DOES - the mechanisms live in object.c as language-neutral calls - and the
+surface owns only how it is spelled. `presentation/<surface>` is the rendering
+half of the same split, and the verb table is the control half.
+
+That is also the honest test of any new surface work: if adding one requires
+teaching the engine something, the split has been drawn in the wrong place.
+
+**And underneath that: hold the data so a functor can carry it.** The point of
+get/set plus verbs is not that the protocol is small - it is that if the node
+graph is held in a faithful enough shape, one structure-preserving mapping can
+carry it into a target's data map, instead of a translator being written per
+control per surface. Containment maps to containment. A property maps to a
+field, an endpoint, a binding. A value maps to a value. A link - a control
+pointing at its data - maps to whatever that surface calls a reference.
+
+If that holds, then `presentation/<surface>` only has to carry what is
+genuinely presentational: how a slider LOOKS, not how its value is found or
+written. The data plumbing is generated from the graph, once, for every object
+at once - including objects that did not exist when the surface was written.
+That is the difference between a surface being a project and a surface being a
+mapping.
+
+**What it demands of us, and where we currently fail it:** a functor cannot
+carry a convention it has to parse. Today the annotations a presentation needs
+are held four different ways - `Widget` as an integer on the class Interface,
+a control's options as a comma-separated string in a companion `<prop>List`,
+min/max/width packed into a `"min:0,max:100"` props string in a widget table,
+sizes as ordinary `W`/`H` properties. Only the last of those is node data. The
+rest are encodings that every consumer has to know how to unpack, which is
+exactly the per-surface knowledge the mapping is supposed to remove.
+
+So the enabling work is not the surfaces - it is making the annotations
+ordinary nodes, the way `W`/`H` already are. Properties can have properties;
+nothing new is needed for a control's min, max, options, or widget type to be
+nodes hanging off the property they describe. Once they are, a mapping can walk
+them without knowing what any of them mean, and the surface stops being a
+place where the framework's own vocabulary has to be re-implemented.
+
+**Nor does a value have to be a scalar.** `DataObj` holds STRING / INTEGER /
+HEX / REAL / LONG, and everything that crosses a boundary crosses as text.
+That is why the MCP work was tractable in a day - both sides are stringly
+typed, so no schema layer was needed - and it is also exactly where that
+approach stops, the moment something wants real nested or typed data.
+
+The way out is not more scalar types in `data.c`. It is **topology nodes:
+objects that carry a shape** - a table, a graph, a linked list, a JSON or XML
+document, a custom format - addressable, subscribable, and get/set like
+anything else. A Table is an object in the same sense a Reader is. Nothing in
+the core changes; the structure lives in the object that carries it, which is
+the same answer this framework gives to everything else.
+
+For the mapping, this is what makes it shape-to-shape instead of
+string-to-string. A REST resource, a SQL row, an MCP schema, an RDF triple:
+each is a topology the graph can hold directly rather than flattening into
+text and hoping the far end parses it back the same way.
+
+**The discipline that keeps it honest:** the structure has to be WALKABLE
+through the node interface - a table's rows and fields reachable as nodes -
+never an opaque payload in a format only its consumers understand. An opaque
+blob is the convention-parsing problem again, one level up, and it costs the
+automatic conversion that makes the data model work at all: the moment a value
+is a private encoding, nothing generic can read it, and every surface is back
+to needing bespoke knowledge of every object. Properties can have properties;
+a structure made of nodes needs no new mechanism and stays legible to a mapping
+that knows nothing about what it is looking at.
+
+### A date is a widget, not a type
+
+Worth settling because the instinct pulls the other way: a date looks like it
+wants to be a `DataObj` type with a default representation and an override.
+
+It should not be. The **value** does not change between ISO 8601, Julian, epoch
+seconds, or a locale rendering - only how it is written down does. Putting a
+DATE type in `data.c` puts representation in the core, and then every surface,
+every script, and every serializer has to know about it. Whereas a control that
+renders a value in a chosen format is just a control, and the engine keeps
+holding what it already holds.
+
+The mechanism is also already here, one step short. A property can carry
+`GUI_Format` - today a character MASK, `"(###) ###-####"` - and `GUI_Pattern`,
+a regex the raw value must match. Both are ordinary properties, read by the
+client, ignored by the engine. A date control is that with **named
+representations** rather than a mask: a dropdown of presets, plus `custom` and
+a format string to fill in.
+
+Two things to keep straight when it is built:
+
+- **Keep the preset and the custom pattern as separate nodes**, not one
+  overloaded string. "The name of a format" and "a format spec" are different
+  facts, and squashing them into one field is the encoding-instead-of-node
+  problem from the section above - a mapping to another surface would have to
+  parse its way back out.
+- **The list of presets is the same shape as a Dropdown's `<prop>List`**, which
+  is currently a comma-separated string. Whatever fixes that fixes this too;
+  they should not get separate answers.
+
+One consequence worth noticing, and it is only true since controls point at
+their data rather than owning it: **two controls on the same timestamp can
+render it two different ways at once.** An ISO readout and a Julian readout
+side by side, neither of them owning the value, no argument about which is
+"the" representation, and nothing to keep in sync. Under the old copy-and-
+reconcile model that was two copies drifting; now it is one node seen twice.

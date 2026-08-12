@@ -744,7 +744,7 @@ int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propna
 	if (!targetProp)
 		return 0;
 
-	SetPropStr(owner, slot, "");
+	SetPropStrPrivate(owner, slot, "");		/* never through an existing link */
 	linknode = GetPropNode(owner, slot);
 	if (!linknode)
 		return 0;
@@ -753,6 +753,63 @@ int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propna
 	LinkNode(linknode, targetProp);
 
 	return 1;
+}
+
+/* Turn an existing Alias instance into a doorway onto one property of    */
+/* another instance. The link lives in the alias's own "Value" slot, so    */
+/* the value, the subscribers, and anything wired to it stay on the        */
+/* original - a doorway, not a copy that has to be kept in step.           */
+/* Target/TargetProp name the FINAL original (aliasing an alias collapses  */
+/* at the link level, and events always carry the original's name), and    */
+/* Widget is the presentation that owner's class published for the         */
+/* property. Safe to re-apply: a link is a pointer, which a saved flow     */
+/* cannot carry, so a restored alias needs it put back.                    */
+int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
+{
+	NodeObj owner, node, pub;
+	char path[256];
+
+	if (!aliasInst || !targetInst || !propname || !propname[0])
+		return 0;
+
+	if (!LinkPropertyAs(aliasInst, "Value", targetInst, propname))
+		return 0;
+
+	owner = targetInst;
+	node = ResolvePort(&owner, propname);
+	if (node)
+		propname = GetNameStr(node);
+
+	pub = InterfacePropForInstance(owner, propname);
+	if (pub)
+		SetPropInt(aliasInst, "Widget", GetPropInt(pub, "Widget"));
+
+	if (PathOfInstance(owner, path, sizeof(path)))
+		SetPropStr(aliasInst, "Target", path);
+	SetPropStr(aliasInst, "TargetProp", propname);
+
+	return 1;
+}
+
+/* the same, making the Alias instance too - the caller places and names it */
+NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
+{
+	NodeObj inst;
+
+	if (!container)
+		return NULL;
+
+	inst = CreateObject(container, "Alias");
+	if (!inst)
+		return NULL;
+
+	if (!AliasProperty(inst, targetInst, propname))
+	{
+		DeleteInstance(inst);
+		return NULL;
+	}
+
+	return inst;
 }
 
 /* same, exposed under the target property's own name */
@@ -1658,12 +1715,32 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 	/* caller used: an Alias keeps its link in a "Value" slot that may    */
 	/* stand for the target's Name, Enable, anything - writing "Value"    */
 	/* on the owner would hit the wrong property entirely.                 */
-	owner = target;
-	propnode = ResolvePort(&owner, propname);
-	if (propnode)
-		propname = GetNameStr(propnode);
+	{
+		char *asked = propname;
+		char  dbg[512];
+
+		owner = target;
+		propnode = ResolvePort(&owner, propname);
+		if (propnode)
+			propname = GetNameStr(propnode);
+
+		snprintf(dbg, sizeof(dbg),
+				 "SET '%s'.%s = '%.60s' -> %s '%s'.%s%s",
+				 GetPropStr(target, "Name") ? GetPropStr(target, "Name") : "?",
+				 asked ? asked : "?",
+				 value ? value : "(null)",
+				 (propnode && GetPropLong(propnode, "OnMsg")) ? "DELIVER" : "STORE",
+				 GetPropStr(owner, "Name") ? GetPropStr(owner, "Name") : "?",
+				 propname,
+				 (owner != target) ? "  [crossed a link]" : "");
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+	}
 	if (propnode && GetPropLong(propnode, "OnMsg"))
 	{
+		/* the value arrived, so the property holds it - see the same
+		   store in DeliverToSubscriber (node.c) */
+		SetPropStr(owner, propname, value);
+
 		chunk = NewNode(STRING);
 		SetName(chunk, propname);
 		SetValueStr(chunk, value);

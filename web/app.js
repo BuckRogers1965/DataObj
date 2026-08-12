@@ -1026,7 +1026,7 @@ function makeSelfDisplay(alias, propName, widget) {
    what an edge MEANS (its Out, its auto-repeat); this only reports what
    the hand did. Released outside the button counts as a release, exactly
    as the VNOS control behaved. */
-function makeMoButtonEl(alias) {
+function makeMoButtonEl(alias, momentary) {
   const btn = document.createElement('button');
   btn.className = 'mo-button';
   btn.textContent = 'Press';
@@ -1046,8 +1046,15 @@ function makeMoButtonEl(alias) {
     btn.classList.remove('pressed');
     press('0');
   };
-  btn.addEventListener('pointerup', release);
-  btn.addEventListener('pointerleave', release);
+  /* a momentary button reports the release too; a plain Button just sends
+     the 1. That is the whole difference between them. */
+  if (momentary) {
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointerleave', release);
+  } else {
+    btn.addEventListener('pointerup', () => { held = false; btn.classList.remove('pressed'); });
+    btn.addEventListener('pointerleave', () => { held = false; btn.classList.remove('pressed'); });
+  }
 
   /* the caption is the object's Label - engine state, like any property */
   (liveControls[alias + '.Label'] = liveControls[alias + '.Label'] || []).push({ el: btn, widgetClass: 'MoLabel' });
@@ -1055,12 +1062,11 @@ function makeMoButtonEl(alias) {
   return btn;
 }
 
+/* a Button is a MoButton that only sends the 1 - it is not a different
+   kind of thing, and "Activate" is a property name a panel may happen to
+   use, never a caption */
 function makeSelfActivateButton(alias) {
-  const btn = document.createElement('button');
-  btn.className = 'activate-btn';
-  btn.textContent = 'Activate';
-  btn.onclick = () => send({ cmd: 'activate', instance: cur(alias) });
-  return btn;
+  return makeMoButtonEl(alias, 0);
 }
 
 /* The hidden helper widgets (makeInputWidget/makeDisplayWidget/            */
@@ -1100,7 +1106,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
     send({ cmd: 'subscribe', instance: alias, port: 'Items' });
     control = sel;
   } else if (className === 'MoButton') {
-    control = makeMoButtonEl(alias);
+    control = makeMoButtonEl(alias, 1);
   } else if (className === 'Button') {
     control = makeSelfActivateButton(alias);
   } else {

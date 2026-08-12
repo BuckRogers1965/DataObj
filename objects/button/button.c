@@ -99,7 +99,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	instance = NewNode(INTEGER);
 	SetName(instance, "Button");
-	SetPropStr(instance, "Label", "");
+	SetPropStr(instance, "Label", "Activate");
 	SetPropInt(instance, "State", Starting);
 	WatchableProp(instance, "State");
 	/* Value IS the button, both directions: writing it presses it (the
@@ -150,7 +150,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishPosition(ClassSelf);
 
-	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "");
+	PublishProp(ClassSelf, "Label", PROP_TEXTBOX, "Activate");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "Value", PROP_NULL, "0");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");

@@ -24,8 +24,15 @@ The Mode property picks the test:
 
     "all"      pass everything (the default)
     "change"   pass only when the value differs from the last one seen
+    "none"     pass nothing
     "ones"     pass only messages whose value is 1
     "zeros"    pass only messages whose value is 0
+
+"change" is dedupe, chosen and visible, on the one wire that wants it. The
+core used to do this to every property in the system - comparing a write
+against the value already there and dropping it if they matched - which made
+a repeated value unsendable everywhere. That is gone, so this is now the only
+place the behaviour exists, and the only place it belongs.
 
 msg_eof always passes, even through a disabled filter, so a stream can
 always finish downstream.
@@ -38,7 +45,7 @@ source can drive it through Connect().
 
 */
 
-enum { mode_all=0, mode_ones, mode_none, mode_zeros };
+enum { mode_all=0, mode_ones, mode_none, mode_zeros, mode_change };
 
 typedef struct InstanceData
 {
@@ -99,6 +106,8 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 		local->mode = mode_zeros;
 	else if (mode && strcmp(mode, "none") == 0)
 		local->mode = mode_none;
+	else if (mode && strcmp(mode, "change") == 0)
+		local->mode = mode_change;
 	else
 		local->mode = mode_all;
 
@@ -116,6 +125,23 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 	case mode_none:
 		pass = 0;
 		break;
+
+	case mode_change:
+	{
+		/* the last value that PASSED, not the last one seen - a value
+		   blocked by this filter never reached anyone, so it cannot be
+		   what the far end is holding */
+		char *now = GetValueStr(data);
+
+		pass = (!local->last || !now || strcmp(local->last, now) != 0);
+		if (pass)
+		{
+			if (local->last)
+				free(local->last);
+			local->last = now ? strdup(now) : NULL;
+		}
+		break;
+	}
 
 	default:
 		pass = 1;
@@ -172,6 +198,8 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 	mode = GetPropStr(instance, "Mode");
 	if (mode && strcmp(mode, "none") == 0)
 		local->mode = mode_none;
+	else if (mode && strcmp(mode, "change") == 0)
+		local->mode = mode_change;
 	else if (mode && strcmp(mode, "ones") == 0)
 		local->mode = mode_ones;
 	else if (mode && strcmp(mode, "zeros") == 0)
@@ -220,7 +248,7 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   Mode/State/Out are plain data - In/Out are the ports, read on the panel) */
 	Widget_Init(instance, FilterPanel);
 
-    SetPropStr(instance, "ModeList", "all,none,ones,zeros");
+    SetPropStr(instance, "ModeList", "all,change,none,ones,zeros");
 	SetPropStr(instance, "ReservedIn",  "In");
 	SetPropStr(instance, "ReservedOut", "Out");
 

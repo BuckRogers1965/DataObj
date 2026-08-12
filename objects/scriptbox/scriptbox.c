@@ -340,6 +340,16 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 	   but do not run), and does on every call after. */
 	firstCall = !local->host;
 
+	{
+		char dbg[400];
+		snprintf(dbg, sizeof(dbg),
+				 "ScriptBox_Activate '%s': firstCall=%d host=%p enabled=%d lang='%s'",
+				 GetPropStr(instance, "Name") ? GetPropStr(instance, "Name") : "?",
+				 firstCall, (void *) local->host, local->enabled,
+				 GetPropStr(instance, "Language") ? GetPropStr(instance, "Language") : "");
+		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
+	}
+
 	/* now the box has a path (deferred build / activation), build the panel and
 	   bring the inner host up - a sub-object needs the box's OWN path first, so
 	   this cannot happen in InstanceStart (the path is set after it returns) */
@@ -409,7 +419,7 @@ static WidgetItem ScriptBoxPanel[] = {
 	{ "Checkbox", "Enable",   "1", 0, 410,  12,   9,   9, LABEL_LEFT,  (void *)ScriptBox_OnEnable },
 	{ "Dropdown", "Language", "",  0,  15,  12, 150,  20, LABEL_NONE,  (void *)ScriptBox_OnLanguage },
 	{ "Textbox",  "Source",   "",  0,  15,  45, 400, 180, LABEL_NONE },
-	{ "Button",   "Run",      "",  0,  15, 235,  70,  24, LABEL_NONE },
+	{ "Button",   "Run",      "0", 0,  15, 235,  70,  24, LABEL_NONE,  (void *)ScriptBox_Activate },
 	{ "Checkbox", "In",       "0", 0, 110, 240,   9,   9, LABEL_RIGHT, (void *)ScriptBox_OnIn },
 	{ "LED",      "State",    "0", 0, 165, 240,  12,  12, LABEL_NONE },
 	{ "Textbox",  "Output",   "",  0,  15, 270, 400, 120, LABEL_NONE },

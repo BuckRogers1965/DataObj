@@ -314,11 +314,32 @@ static NodeObj Sibling(NodeObj self, char *name)
 
 /* --- state ------------------------------------------------------------- */
 
+/* Reading a property resolves the way writing one already does. A control
+   points its Value at the object's property, so a read that stopped at the
+   named slot would see the link rather than the data - and a script would
+   get "" where it asked for a value. Writes have always gone through
+   SetOrDeliverProp/ResolvePort; this is the same rule on the way out, and
+   the same one the Bridge's subscribe follows. A property that owns its
+   value resolves to itself, so this is what GetPropStr did plus the link. */
+static char *ScriptReadProp(NodeObj inst, char *name)
+{
+	NodeObj owner = inst, node;
+
+	if (!inst || !name)
+		return NULL;
+
+	node = ResolvePort(&owner, name);
+
+	return node ? GetValueStr(node) : NULL;
+}
+
 static DataObj V_getprop(NodeObj self, DataObj *argv, long cb)
 {
 	NodeObj owner = VerbOwner(self);
+	char   *v;
 	(void) cb;
-	return Str(owner ? GetPropStr(owner, Arg(argv, 0)) : "");
+	v = owner ? ScriptReadProp(owner, Arg(argv, 0)) : NULL;
+	return Str(v ? v : "");
 }
 
 static DataObj V_setprop(NodeObj self, DataObj *argv, long cb)
@@ -333,8 +354,10 @@ static DataObj V_setprop(NodeObj self, DataObj *argv, long cb)
 static DataObj V_sibget(NodeObj self, DataObj *argv, long cb)
 {
 	NodeObj sib = Sibling(self, Arg(argv, 0));
+	char   *v;
 	(void) cb;
-	return Str(sib ? GetPropStr(sib, "Value") : "");
+	v = sib ? ScriptReadProp(sib, "Value") : NULL;
+	return Str(v ? v : "");
 }
 
 static DataObj V_sibset(NodeObj self, DataObj *argv, long cb)
@@ -349,8 +372,10 @@ static DataObj V_sibset(NodeObj self, DataObj *argv, long cb)
 static DataObj V_pathget(NodeObj self, DataObj *argv, long cb)
 {
 	NodeObj inst = ResolvePath(Arg(argv, 0));
+	char   *v;
 	(void) self; (void) cb;
-	return Str(inst ? GetPropStr(inst, Arg(argv, 1)) : "");
+	v = inst ? ScriptReadProp(inst, Arg(argv, 1)) : NULL;
+	return Str(v ? v : "");
 }
 
 static DataObj V_pathset(NodeObj self, DataObj *argv, long cb)

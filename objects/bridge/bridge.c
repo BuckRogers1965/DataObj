@@ -2095,7 +2095,7 @@ NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char
 void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *alias, *port, *eventType;
-	NodeObj inst, tap;
+	NodeObj inst, tap, valueNode;
 
 	alias = GetPropStr(command, "instance");
 	port  = GetPropStr(command, "port");
@@ -2111,24 +2111,19 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	/* subscribing to an alias IS subscribing to the original: resolve   */
-	/* and relabel up front, so the eventType lookup, the tap, its       */
-	/* dedupe, and every event it emits all speak the original's name -  */
-	/* one tap serves the original and every alias of it (clients render */
-	/* aliases from Target/TargetProp and subscribe to the target, so    */
-	/* the names line up)                                                 */
+	/* A control's own properties - X, Y, W, H, Label - live on the        */
+	/* control. Its VALUE may not: a control in a panel points its Value   */
+	/* at the object's property, so the value has to be found through      */
+	/* that link. Resolving is how the DATA is located; it is not a        */
+	/* reason to re-address the answer. The client asked about this        */
+	/* control and gets told about this control, exactly as it always      */
+	/* did - which is why nothing about the protocol changes when a        */
+	/* control starts standing for someone else's property.                */
+	valueNode = NULL;
 	{
 		NodeObj owner = inst;
-		char *realAlias;
-		char realAliasBuf[ALIASLEN];
 
-		if (ResolvePort(&owner, port) && owner != inst)
-		{
-			inst = owner;
-			realAlias = Bridge_AliasForInstance(local, inst, realAliasBuf, sizeof(realAliasBuf));
-			if (realAlias)
-				alias = realAlias;
-		}
+		valueNode = ResolvePort(&owner, port);
 	}
 
 	/* One kind of event, because there is one kind of thing. Every
@@ -2144,11 +2139,7 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 	/* every client, N-1 of them leaked. Taps broadcast (Conn 0), so     */
 	/* one tap per port+event already serves every client at once.       */
 	tap = NULL;
-	{
-		NodeObj portNode = GetPropNode(inst, port);
-
-		tap = portNode ? Bridge_FindTap(instance, portNode, eventType) : NULL;
-	}
+	tap = valueNode ? Bridge_FindTap(instance, valueNode, eventType) : NULL;
 
 	if (!tap)
 	{
@@ -2161,7 +2152,7 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 			Bridge_Error(instance, "subscribe", "connect failed");
 			return;
 		}
-		propNode = GetPropNode(inst, port);
+		propNode = valueNode ? valueNode : GetPropNode(inst, port);
 		tap = Bridge_MakeTap(instance, inst, alias, port, eventType, propNode);
 		if (!tap)
 		{
@@ -2189,7 +2180,8 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 	/* to touch it. A port has no such resting value, so this only applies   */
 	/* to "data" properties.                                                  */
 	if (strcmp(eventType, "property-changed") == 0)
-		Bridge_TapEmit(instance, tap, msg_change, GetPropNode(inst, port));
+		Bridge_TapEmit(instance, tap, msg_change,
+					   valueNode ? valueNode : GetPropNode(inst, port));
 }
 
 /* targeted - only the client that logged in needs to see it */

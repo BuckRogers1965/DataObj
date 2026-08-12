@@ -37,6 +37,24 @@ void Widget_Reflect(NodeObj src, char *sp, NodeObj dst, char *dp)
 NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 				   int x, int y, int w, int h)
 {
+	/* A control POINTS AT the property it shows. It is the same control
+	   it would be anywhere else, standing for a different property - its
+	   class does not change and nothing new goes on the wire, so a client
+	   sees exactly what it always saw. The link is the engine's business:
+	   everything that resolves a property (Connect, SndMsg,
+	   SetOrDeliverProp, and through Connect the Bridge's subscribe) lands
+	   on the original, so a client asks about the control and is answered
+	   about the control.
+
+	   Subscribing the two to each other instead made them clones - two
+	   nodes for one datum, each announcing to the other, terminating only
+	   because SetProp* stopped when the values matched. One node has
+	   nothing to keep in step and so nothing to stop it.
+
+	   Markdown is the one that stands for nothing: it loads its content
+	   on open. */
+	int     points = (strcmp(cls, "Markdown") != 0);
+
 	/* create, name (after its property), and register the control in one call */
 	NodeObj c = Widget_Create(container, cls, prop);
 	int     made = !Widget_WasAdopted();
@@ -58,28 +76,19 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 			SetPropStr(c, "Label", prop);
 	}
 
-	if (strcmp(cls, "MoButton") == 0)
-		Connect(c, "Value", target, prop);			/* a command: press writes prop */
-	else if (strcmp(cls, "Button") == 0)
-		Connect(c, "Value", target, "Activate");
-	else if (strcmp(cls, "Markdown") == 0)
+	if (strcmp(cls, "Markdown") == 0)
 		;											/* loaded on open, not wired here */
-	else if (strcmp(cls, "LED") == 0 || strcmp(cls, "TextOut") == 0
-			 || strcmp(cls, "Label") == 0 || strcmp(cls, "VUMeter") == 0)
-		Widget_Reflect(target, prop, c, "Value");	/* a readout */
 	else if (strcmp(cls, "Dropdown") == 0)
 	{
 		char listprop[64];
 		snprintf(listprop, sizeof(listprop), "%sList", prop);
-		Connect(c, "Value", target, prop);			/* the pick drives prop */
-		Widget_Reflect(target, listprop, c, "Items");	/* options from prop+List */
-		SetOrDeliverProp(c, "Value", GetPropStr(target, prop));
+		LinkPropertyAs(c, "Value", target, prop);		/* the pick IS the property */
+		Widget_Reflect(target, listprop, c, "Items");	/* options are a different property */
 	}
-	else										/* Checkbox / Textbox */
-	{
-		Connect(c, "Value", target, prop);			/* control edits prop */
-		Widget_Reflect(target, prop, c, "Value");		/* prop reflects into control */
-	}
+	else if (points)
+		/* re-applied every build: a link is a pointer, and a saved flow
+		   cannot carry one */
+		LinkPropertyAs(c, "Value", target, prop);
 
 	return c;
 }

@@ -350,6 +350,12 @@ static void ImportDeferAlias(NodeObj propbag, char *containerPath, NodeObj defer
 	SetPropStr(c, "Widget", v ? v : "");
 	v = propbag ? GetPropStr(propbag, "Label") : NULL;
 	SetPropStr(c, "Label", v ? v : "");
+	/* an alias keeps its Name like every other instance: it is how a panel
+	   build finds the control it already made (Widget_Create adopts by
+	   name) and how a script reaches it (sibget/sibset). Dropping it here
+	   is what left a reloaded panel full of Alias_1/Alias_2. */
+	v = propbag ? GetPropStr(propbag, "Name") : NULL;
+	SetPropStr(c, "name", v ? v : "");
 	AppendChild(deferred, c);
 }
 
@@ -702,8 +708,8 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 
 	for (d = GetChild(deferred); d; d = GetNextSibling(d))
 	{
-		char    of[320], fresh[320];
-		char   *container, *prop, *w, *lb, *alias, *slash;
+		char    of[320], fresh[320], want[320];
+		char   *container, *prop, *w, *lb, *alias, *slash, *saved;
 		NodeObj target, home, inst, owner, node, pub;
 
 		ImportResolveTarget(importRoot, GetPropStr(d, "of_old"), of, sizeof(of));
@@ -756,8 +762,22 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 
 		PlaceInstance(inst, container, GetPropStr(d, "x"), GetPropStr(d, "y"));
 
-		ImportFreshName(container, "Alias", fresh, sizeof(fresh));
-		alias = fresh;
+		/* the saved name wins when it is free - same rule create-alias
+		   uses for a client-supplied "as". A mint is the fallback, not
+		   the default, or every reload renames the panel's controls. */
+		saved = GetPropStr(d, "name");
+		alias = NULL;
+		if (saved && saved[0])
+		{
+			snprintf(want, sizeof(want), "%s/%s", container, saved);
+			if (!ResolvePath(want))
+				alias = want;
+		}
+		if (!alias)
+		{
+			ImportFreshName(container, "Alias", fresh, sizeof(fresh));
+			alias = fresh;
+		}
 		RegisterPath(alias, inst);
 		slash = strrchr(alias, '/');
 		SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);

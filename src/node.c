@@ -644,6 +644,14 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	onmsg = portnode ? (int (*)(NodeObj, int, NodeObj)) GetPropLong(portnode, "OnMsg") : NULL;
 	if (onmsg)
 	{
+		/* what arrived is the property's value now. The handler decides
+		   what to DO with it; the node still holds what came, so anything
+		   reading or displaying that property sees the traffic - a panel
+		   readout on In showed its default forever without this. Set
+		   before the handler runs, so a handler reading its own property
+		   sees what it was just handed. */
+		SetPropStr(toInstance, port, value);
+
 		chunk = NewNode(STRING);
 		SetName(chunk, port);
 		SetValueStr(chunk, value);
@@ -662,6 +670,33 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 int   SndMsgNode(NodeObj instance, NodeObj outPort, int message, NodeObj data);
 void *ObjGetTaskList(void);
 
+/* WRITING A PROPERTY THAT POINTS SOMEWHERE ELSE.
+
+   A control points its Value at the object's property, and an object writes
+   its own properties with SetProp* - Button_Activate writing "1" onto its
+   Value, say. Those two facts meet here: without this, such a write lands on
+   the link slot and the data it points at never hears about it, so a button
+   press reaches nothing. Everything that goes through object.c (Connect,
+   SndMsg, SetOrDeliverProp) has always resolved; this is the same rule for
+   the plain setters, so it holds no matter who does the writing.
+
+   A property that owns its value resolves to itself, so this is a no-op for
+   everything that does not point anywhere. The owner comes back too, because
+   the fan-out envelope names the instance the property belongs to. */
+static NodeObj ResolveOwned(NodeObj *ownerp, NodeObj propnode)
+{
+	NodeObj link;
+
+	if (!propnode || !GetNodeLink(propnode))
+		return propnode;
+
+	link = (NodeObj) GetPropLong(propnode, "LinkInst");
+	if (link && ownerp)
+		*ownerp = link;
+
+	return ResolveNode(propnode);
+}
+
 /* every property write fans out, unconditionally, to whatever has       */
 /* subscribed to it - Connect() (object.c) already leaves "Subscriber"   */
 /* children on whatever node it targets, port or plain property alike    */
@@ -670,8 +705,9 @@ void *ObjGetTaskList(void);
 /*                                                                        */
 /* The delivery is QUEUED, not done here: SndMsgNode envelopes the write  */
 /* onto the scheduler and DispatchMsg walks the Subscriber list later,    */
-/* from ExecTasks. So a write costs one task insert and returns, and no   */
-/* subscriber's handler ever runs inside the setter's own call stack.     */
+/* from ExecTasks. A write costs one task insert and returns, so no       */
+/* subscriber's handler ever runs inside the setter's own call stack and  */
+/* a handler runs to completion before anything it causes is dispatched.  */
 /*                                                                        */
 /* The payload is a copy: DispatchMsg frees the envelope's data after the */
 /* last subscriber, and propnode belongs to owner. The copy carries the   */
@@ -686,7 +722,7 @@ static void FanOutSubscribers(NodeObj owner, NodeObj propnode)
 		return;
 
 	/* an unwired property costs the walk and no allocation - this fires */
-	/* on every changed write in the system, and most are unwired         */
+	/* on every write in the system, and most properties are unwired      */
 	sub = GetNextProp(propnode);
 	while (sub)
 	{
@@ -734,12 +770,9 @@ void SetPropLong(NodeObj node, char *name, long value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
-		/* unchanged writes do not re-fan-out - see SetPropStr */
-		long old = GetLong(propnode->value);
-		int changed = old != value;
+		propnode = ResolveOwned(&node, propnode);
 		SetLong(propnode->value, value);
-		if (changed)
-			FanOutSubscribers(node, propnode);
+		FanOutSubscribers(node, propnode);
 		return;
 	}
 
@@ -781,12 +814,9 @@ void SetPropInt(NodeObj node, char *name, int value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
-		/* unchanged writes do not re-fan-out - see SetPropStr */
-		int old = GetInt(propnode->value);
-		int changed = old != value;
+		propnode = ResolveOwned(&node, propnode);
 		SetInt(propnode->value, value);
-		if (changed)
-			FanOutSubscribers(node, propnode);
+		FanOutSubscribers(node, propnode);
 		return;
 	}
 
@@ -828,17 +858,14 @@ void SetPropStr(NodeObj node, char *name, char * value)
 	propnode = GetPropNode(node, name);
 	if (propnode)
 	{
-		/* an unchanged data-property write is not a change and must NOT   */
-		/* re-fan-out: that is what makes a two-way binding (a control      */
-		/* both edits and reflects a property, so control.Value ->          */
-		/* prop -> control.In -> control.Value) self-terminating instead    */
-		/* of an unbounded synchronous feedback loop that overflows the     */
-		/* stack. The bridge already calls this event "property-CHANGED".   */
-		char *old = GetStr(propnode->value);
-		int changed = !old || !value || strcmp(old, value) != 0;
+		/* every write fans out, whether or not the value differs: a     */
+		/* write is an event, and a repeated value is a repeated event   */
+		/* (a button pressed twice, a clock held at 1). Comparing the    */
+		/* payload to decide whether anything happened inspects the one  */
+		/* field an event is free to keep constant.                       */
+		propnode = ResolveOwned(&node, propnode);
 		SetStr(propnode->value, value);
-		if (changed)
-			FanOutSubscribers(node, propnode);
+		FanOutSubscribers(node, propnode);
 		return;
 	}
 

@@ -160,6 +160,13 @@ NodeObj ResolvePort(NodeObj * instp, char * name);
 /* The ...As form names the local slot: an Alias keeps its link in its    */
 /* own "Value" slot so its own Name/Container/X/Y stay its own.           */
 int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propname);
+
+/* Make a doorway onto one property of another instance: an Alias whose    */
+/* own "Value" slot links to it, carrying Target/TargetProp/Widget so a    */
+/* client can see what it stands for. AliasProperty applies that to an     */
+/* instance that already exists; CreateAlias makes one first.              */
+int     AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname);
+NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname);
 int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname);
 
 /* Clone the wires INSIDE a group being copied: for each of srcInst's    */
