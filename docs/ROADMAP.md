@@ -1370,12 +1370,35 @@ Open questions before doing it:
 Observed 2026-08-12 on the Filter panel. Both need tracing rather than
 theorising; what follows is what is known and what is only suspected.
 
-**`In` does not update as traffic passes.** A store-on-arrival was just added -
-`DeliverToSubscriber` (node.c) and `SetOrDeliverProp` (object.c) now set the
-property before calling its handler, so a value that arrived at a port is on
-that port. If the readout is still blank, then either Filter's `In` does not
-take that path, or the readout is not bound to what it looks bound to. Not yet
-traced.
+**`In` does not update as traffic passes.** A store-on-arrival was tried -
+`DeliverToSubscriber` (node.c) and `SetOrDeliverProp` (object.c) setting the
+property BEFORE calling its handler - and it was a double send: every control's
+own handler stores what arrived, so the same value was written twice for one
+arrival, and with the on-change gate gone both writes fanned out. One click of a
+Checkbox reached its subscribers twice; a script counting rising edges counted
+six for three.
+
+**Settled 2026-08-12: the handler says whether it stored, and the deliverer
+believes it.** The three existing return codes already carry exactly that, so
+nothing new was added and no handler was edited:
+
+    rtrn_handled    took it, and a control that takes a value stores it -
+                    deliverer stores nothing
+    rtrn_propagate  watched it without consuming it (a probe) - the universal
+                    default applies, the value lands on the property and its
+                    write fans on
+    rtrn_dropped    nothing took it (a disabled control refuses the value
+                    rather than displaying it) - deliverer stores nothing
+
+The handler runs first and ANSWERS, instead of being told afterwards. Both
+delivery paths follow it. `SetOrDeliverProp` calls the handler directly rather
+than through `DeliverMsg`, because `DeliverMsg` reports whether a handler
+EXISTED, not what it decided - and its 0 return collides with `rtrn_handled`
+being 0, so widening its meaning would break tcp, udp, mcpsource and router.
+
+Filter still returns `rtrn_handled` (it consumes and sends its own filtered
+copy), so its `In` readout is unchanged by this and stays open - and it is
+Filter's own business, in filter.c.
 
 **`Out` will not update, and the reason is known: sending does not store.**
 `SndMsg`/`SndMsgNode` builds an envelope and dispatches it to the property's
@@ -1399,6 +1422,159 @@ set-property lands later (there is already a comment in filter.c about that
 race); or the comparison itself is wrong. The `-v 3` `SET` line will say which,
 since it reports every write by name, what it resolved to, and whether it
 stored or delivered.
+
+### Subscribing to a property that is not there — needs a decision
+
+Found 2026-08-12, and it cost most of a day's confusion before it was named.
+`ScriptBox.Out` was removed in 9283c27 (Output IS the out), but six harness
+tests still subscribed to it and wired from it. Not one of them errored. They
+ran green-ish and silent and reported nothing forever, because `Bridge_Subscribe`
+calls `Connect(inst, port, bridge, "Taps")`, and **Connect creates the source
+property if it is absent**. So asking about a property that does not exist
+brings a dead one into being, hands back a subscription to it, and every party
+believes the wire is made.
+
+That behaviour is not an accident and it is not obviously wrong. It falls
+straight out of "a property is a node": naming one is how you get one, and the
+alternative — refusing to wire to a name until something has created it — would
+make wiring order-dependent, which is the thing the whole subscriber model
+avoids. A late-arriving handler still wins, since `DeliverToSubscriber` reads
+`OnMsg` off the node at delivery time, not at Connect time.
+
+But the cost is that a typo, a renamed property, and a property that has not
+been created yet are all the same event, and the system's answer to all three
+is silence. Which is the one bug class this design is otherwise very good at
+surfacing loudly.
+
+**What the code actually does, checked 2026-08-12.** The asymmetry is already
+half-decided, and in the opposite direction to the intuition. `Connect` (object.c)
+requires the **sink** to exist - if `ResolvePort` cannot find it, it logs an
+ERROR naming the instance and the property and returns 0. Only the **source** is
+invented, and even that is careful: a property that exists but whose link dangles
+is refused rather than overwritten, because writing 0 over it would destroy the
+link and the value it carried. So the whole of create-on-demand is five lines:
+
+    /* genuinely absent - make the source property exist */
+    SetPropInt(fromNode, from, 0);
+    fromPort = GetPropNode(fromNode, from);
+
+Making both ends behave the same is deleting those five and letting the source
+take the sink's error path. `Bridge_Subscribe` already handles a failed Connect
+("connect failed"), so the silence becomes a reported error with no new
+mechanism anywhere.
+
+**The leaning, 2026-08-12: both ends must exist.** A connection is between two
+properties that are there. The ordering worry that justifies create-on-demand is
+about INSTANCES, not properties - an instance arrives whole, every property its
+`InstanceStart` declares already on it, so there is no real window where a
+property is legitimately missing but about to appear. Load and import already
+defer on missing *instances*; that is the mechanism that handles order, and it
+is untouched by this.
+
+**"A connection is not finished until both sides have been updated."** The
+larger idea behind it: today the record lives only on the source, so "what am I
+connected to" is a registry-wide walk (one of the 22 - see the walks/categories
+work). If the sink held its half, that question would be local, and deletion
+would not need a registry-wide scrub. Worth wanting.
+
+**The two ends hold different things, which is why this is not the two-copy
+trap.** What wedged the engine on 2026-08-11 was two nodes holding the SAME
+value and each trying to bring the other into step - a convergence protocol
+with no fixed point. A wire recorded at both ends is not that. The source's
+list answers "who do I send to" and is walked at delivery; the sink's answers
+"who sends to me" and is walked by a gather, by delete, and by every
+introspection question that currently has to walk the whole registry
+(docs/20260807_1335_wires_that_know_both_ends.md: the Sum widget is the visible
+motivation, deletion is the real prize - O(my edges) instead of O(the session),
+and correctness stops depending on a walker being exhaustive). Two questions,
+two answers, nothing converging.
+
+What it does cost is referential integrity - the two entries must appear and
+disappear together across delete, rename, clone, import and scrub. That is a
+much cheaper problem than value sync, and the plan already addresses it
+directly: teardown sends break-connection down its own list and the far end
+just removes its entry (nobody negotiates), and the doc's Phase 0/Phase 2 are
+an oracle and a checker built BEFORE any reader is allowed to trust the mirror.
+
+Which also settles this section's question. If a connection is something both
+ends take part in, **both ends must be there to take part** - you cannot notify,
+or be refused by, a property that does not exist. Create-on-demand is not a
+separate decision; it falls out.
+
+The questions to settle:
+
+- **Does anything legitimately rely on the source being invented?** The cheap
+  way to find out is to delete the five lines and run the harness - it exercises
+  create, clone, save/load, export/import, scripts and the GUI, so anything that
+  depended on a conjured property will say so. Answer by measurement, not by
+  argument.
+- **Is there something to check against?** A class already publishes what it
+  has (`PublishProp` / the class interface the bridge sends as `interface`). A
+  wire to a name the class never published is a different thing from a wire to
+  a name it published but no instance has written yet. That distinction exists
+  today and nothing consults it.
+- **Should this be loud without being fatal?** The cheapest version is a WIRE
+  line at `-v 3` saying a property was conjured rather than found, which costs
+  nothing and turns silence into evidence. The next version up is that
+  translators (bridge, script, MCP) refuse and report, while the C API keeps
+  creating — the translator is where a human's typo enters, the C call is where
+  an object builds its own shape.
+- **Does the same question apply to reads?** `get-property` on a name that does
+  not exist returns empty, which is indistinguishable from a property holding
+  an empty string. Same failure, same silence, probably the same answer.
+
+Worth deciding before the palette grows: every new widget is a new set of
+property names, and every renamed property is another silent wire.
+
+### Naming is not happening at a low enough level
+
+Raised 2026-08-12, off the back of the silent-subscribe find: too many things
+cannot say who they are, so too many error messages say `?` or `(unnamed)`.
+Counted in the tree today: **27** call sites carry a fallback string for a
+subject whose name could not be got.
+
+The cause is that there are two naming systems at two different levels, and the
+lower one is not the one instances use.
+
+- **node.c gives every node a name slot** - `SetName` / `GetNameStr`, one call,
+  works on anything, used 68 times. That is naming at the right level: a
+  property, a data chunk, a class node and an instance are all nodes, so all
+  four should answer the same question the same way.
+- **An instance is named by a `Name` PROPERTY instead** - `GetPropStr(inst,
+  "Name")`, 32 sites. And its own name slot holds something else entirely: the
+  CLASS name (`SetName(instance, "Checkbox")` in every InstanceStart), which is
+  a third copy of what the class node it is registered under already says.
+
+So a function holding a bare node can always name a property and can never name
+an instance without knowing the convention that lives a layer up. Every error
+message written from the core has to guess which kind of thing it was handed,
+and the ones that guess wrong print `?`.
+
+Downstream of that:
+
+- `PathOfInstance` derives from the `Name` and `Container` PROPERTIES, so
+  anything mid-rename has no path at all (already a known sharp edge - capture
+  the path before mutating either).
+- The serializer treats the `Name` prop as the identity (`the node's IDENTITY
+  is its "Name" PROP (Slider_1), NOT the JSON key`) - so the file format is
+  built on the upper system, and any change here is a format question too.
+- "What is this" and "who is this" are answered from different places, and one
+  of them is stored twice.
+
+**Two steps, and they are independent.**
+
+1. *Cheap and uncontroversial:* one accessor that names any node and never
+   returns NULL - property name, instance name, class name, whatever it holds -
+   so every DebugPrint site becomes one call with no ternary. That deletes 27
+   fallbacks without deciding anything, and it is the lowest layer, which is
+   where it belongs.
+2. *The real question:* which slot is the identity. The uniform answer is that
+   the node's own name IS its name, for an instance exactly as for a property,
+   and "what class is it" is answered by the class node it is already
+   registered under - no copy needed. The cost is the `Name` property's 32
+   readers and the saved-flow format. Worth doing, worth not doing by halves,
+   and NOT worth two live copies of the name during a transition - that is
+   precisely the shape that wedged the engine.
 
 ### Presentation belongs to the control — and there is more than one surface
 

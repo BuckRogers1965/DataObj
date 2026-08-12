@@ -692,7 +692,7 @@ def test_script_pulse(t, r, lang, snippet):
     t.js("send({cmd:'set-property',instance:'%s',prop:'Interval',value:'150'})" % pulse)
     t.js("send({cmd:'set-property',instance:'%s',prop:'Count',value:'3'})" % pulse)
     t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'In'})" % (pulse, box))
-    t.js("send({cmd:'connect',from:'%s',fromPort:'Out',to:'%s',toPort:'Value'})" % (box, sink))
+    t.js("send({cmd:'connect',from:'%s',fromPort:'Output',to:'%s',toPort:'Value'})" % (box, sink))
     t.js("send({cmd:'subscribe',instance:'%s',port:'Value'})" % sink)
     time.sleep(0.4)
     t.js("send({cmd:'activate',instance:'%s'})" % box)
@@ -974,10 +974,10 @@ def test_gesture_checkbox_counts(t, r):
     t.click(src["x"], src["y"])                      # arms Checkbox.Value
     t.click(din["x"], din["y"])                      # finishes -> ScriptBox.In
     t.wait_js(wired(cb, 'Value', box, 'In'), "checkbox.Value -> scriptbox.In")
-    t.click(dout["x"], dout["y"])                    # starts -> arms ScriptBox.Out
+    t.click(dout["x"], dout["y"])                    # starts -> arms ScriptBox.Output
     snk = t.center_of("instances['%s']" % sink)
     t.click(snk["x"], snk["y"])                      # finishes -> Textbox.Value
-    t.wait_js(wired(box, 'Out', sink, 'Value'), "scriptbox.Out -> textbox.Value")
+    t.wait_js(wired(box, 'Output', sink, 'Value'), "scriptbox.Output -> textbox.Value")
     # WHICH two wires. "wires.length>=2" passes for any two, and the sink
     # receiving the checkbox's raw values means the second one is not the
     # one this gesture meant to draw.

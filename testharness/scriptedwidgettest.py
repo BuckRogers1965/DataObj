@@ -6,7 +6,7 @@ clone, alias, export/import, save/load. This is the MCPSource agent-widget
 pattern's own twin, built self-contained (no external MCP service) so it
 runs anywhere run.sh does.
 
-The shape, every test: InBox (Textbox) -> ScriptBox.In, and ScriptBox.Out
+The shape, every test: InBox (Textbox) -> ScriptBox.In, and ScriptBox.Output
 -> OutBox (Textbox). The script appends "_done" to whatever arrives and
 send()s it back out. The ScriptBox is an ordinary member of the view, so
 it joins the flow by WIRE - nothing in the Source names an address, which
@@ -129,7 +129,7 @@ def build_scripted_view(raw, home, name):
     raw.send({"cmd": "set-property", "instance": runner, "prop": "Source", "value": RUNNER_SOURCE})
     raw.send({"cmd": "connect", "from": view + "/InBox", "fromPort": "Value",
               "to": runner, "toPort": "In"})
-    raw.send({"cmd": "connect", "from": runner, "fromPort": "Out",
+    raw.send({"cmd": "connect", "from": runner, "fromPort": "Output",
               "to": view + "/OutBox", "toPort": "Value"})
     time.sleep(0.3)
 

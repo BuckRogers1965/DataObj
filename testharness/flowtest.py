@@ -117,6 +117,13 @@ def test_filter_gate(raw, r, home):
               "to": home + "/FgFilter", "toPort": "Enable"})
     raw.send({"cmd": "subscribe", "instance": home + "/FgFilter", "port": "Out"})
 
+    # Subscribing is truth-on-demand: it hands over what the property holds
+    # right now, and Filter's Out rests at the "0" its panel declares. That
+    # resting value is not part of the edge stream this test is about, so
+    # let it land and drop it before anything is activated.
+    time.sleep(0.3)
+    raw.events = []
+
     raw.send({"cmd": "activate", "instance": home + "/FgFilter"})
     raw.send({"cmd": "activate", "instance": home + "/FgPulse"})
     raw.send({"cmd": "activate", "instance": home + "/FgGate"})

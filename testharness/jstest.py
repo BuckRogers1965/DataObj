@@ -16,7 +16,7 @@ be addressable and the use-after-free that motivated all this would be back.
 Four things to prove:
 
  1. a JS script is an ordinary dataflow object - wire a Pulse into its owner's
-    In, oninput counts rising edges, send() comes out the owner's Out
+    In, oninput counts rising edges, send() lands in the owner's Output
  2. print() reaches the owner's Output box
  3. a broken script is never silent - the error lands in the same place
  4. a script speaks the engine's verbs directly (create/exists), which is what
@@ -81,16 +81,16 @@ def test_js_dataflow(raw, r, home):
     raw.send({"cmd": "set-property", "instance": pulse, "prop": "Count", "value": "3"})
     raw.send({"cmd": "connect", "from": pulse, "fromPort": "Out",
               "to": box, "toPort": "In"})
-    raw.send({"cmd": "subscribe", "instance": box, "port": "Out"})
+    raw.send({"cmd": "subscribe", "instance": box, "port": "Output"})
     time.sleep(0.3)
     raw.events = []
     raw.send({"cmd": "activate", "instance": pulse})
     time.sleep(1.5)
 
-    got = values_on(raw, box, "Out")
+    got = values_on(raw, box, "Output")
     r.expect("js dataflow: the script counts pulses and speaks",
-             "oninput fires per rising edge; the owner's Out carries 1,2,3",
-             "Out values: %s" % got,
+             "oninput fires per rising edge; the owner's Output carries 1,2,3",
+             "Output values: %s" % got,
              got == ["1", "2", "3"])
 
 

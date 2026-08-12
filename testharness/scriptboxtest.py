@@ -69,21 +69,20 @@ def test_run_lua(raw, r, home):
     make(raw, "ScriptBox", box, home, 220, 20)
     raw.send({"cmd": "set-property", "instance": box, "prop": "Language", "value": "Lua"})
     time.sleep(0.2)
-    # Lua's Script host: send() emits, but its "print" analog is log/send;
-    # the ScriptBox wires the host's Print/Out - Lua Script sends out Out.
-    # Use send() which Lua supports; ScriptBox forwards Out -> its Out, but
-    # Output collects Print. Lua Script has no Print, so drive via Out here.
-    raw.send({"cmd": "subscribe", "instance": box, "port": "Out"})
+    # Lua's Script host has no print(), so this drives send(). Everything the
+    # host says - print, send, error - lands in the one Output box, so that is
+    # what to watch either way.
+    raw.send({"cmd": "subscribe", "instance": box, "port": "Output"})
     time.sleep(0.2)
     raw.events = []
     raw.send({"cmd": "set-property", "instance": box, "prop": "Source",
               "value": "local n = 6 * 7\nsend('lua says ' .. n)\n"})
     raw.send({"cmd": "activate", "instance": box})
     ev = raw.wait_event(lambda e: e.get("event") in ("message-flowed", "property-changed")
-                        and e.get("instance") == box and e.get("port") == "Out", timeout=4)
+                        and e.get("instance") == box and e.get("port") == "Output", timeout=4)
     r.expect("scriptbox: swapping Language to Lua runs the same shell under Lua",
-             "the Lua host's send() flows out ScriptBox.Out ('lua says 42')",
-             "Out: %s" % (ev.get("value") if ev else None),
+             "the Lua host's send() lands in ScriptBox.Output ('lua says 42')",
+             "Output: %s" % (ev.get("value") if ev else None),
              bool(ev) and "lua says 42" in (ev.get("value") or ""))
 
 

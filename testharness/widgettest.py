@@ -66,7 +66,7 @@ def build_widget(raw, home):
     # the widget's LOGIC, in editable script. The ScriptBox is a member of
     # the view like any other control, so it joins the flow by WIRE, not by
     # address: Input.Value -> ScriptBox.In, script doubles it and send()s it,
-    # ScriptBox.Out -> Output.Value. Nothing in the source names a path, so
+    # ScriptBox.Output -> Output.Value. Nothing in the source names a path, so
     # the same widget works wherever it is cloned or imported to.
     src = ("oninput(function(v, k) {\n"
            "  if (k === 'eof') return;\n"
@@ -75,7 +75,7 @@ def build_widget(raw, home):
     raw.send({"cmd": "set-property", "instance": js, "prop": "Language", "value": "JSScript"})
     raw.send({"cmd": "set-property", "instance": js, "prop": "Source", "value": src})
     raw.send({"cmd": "connect", "from": slider, "fromPort": "Value", "to": js, "toPort": "In"})
-    raw.send({"cmd": "connect", "from": js, "fromPort": "Out", "to": out, "toPort": "Value"})
+    raw.send({"cmd": "connect", "from": js, "fromPort": "Output", "to": out, "toPort": "Value"})
     time.sleep(0.3)
 
     # ONE activate: setting Language already built the inner host, so this

@@ -644,19 +644,32 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	onmsg = portnode ? (int (*)(NodeObj, int, NodeObj)) GetPropLong(portnode, "OnMsg") : NULL;
 	if (onmsg)
 	{
-		/* what arrived is the property's value now. The handler decides
-		   what to DO with it; the node still holds what came, so anything
-		   reading or displaying that property sees the traffic - a panel
-		   readout on In showed its default forever without this. Set
-		   before the handler runs, so a handler reading its own property
-		   sees what it was just handed. */
-		SetPropStr(toInstance, port, value);
+		/* THE VERDICT SAYS WHETHER THE VALUE STILL NEEDS STORING, and the
+		   three existing codes already say it exactly:
+
+		     rtrn_handled    the handler took it, and a control that takes a
+		                     value stores it (one SetPropStr, which is what a
+		                     control IS) - storing here too would write the
+		                     same value twice for one arrival, and every write
+		                     fans out, so every subscriber would hear it twice
+		     rtrn_propagate  the handler watched it and did not consume it (a
+		                     probe), so the universal default applies and the
+		                     value lands on the property, whose write fans on
+		     rtrn_dropped    nothing took it - a disabled control refuses the
+		                     value rather than displaying it
+
+		   So the handler runs first and answers, rather than being told. */
+		int verdict;
 
 		chunk = NewNode(STRING);
 		SetName(chunk, port);
 		SetValueStr(chunk, value);
-		onmsg(toInstance, message, chunk);
+		verdict = onmsg(toInstance, message, chunk);
 		DelNode(chunk);
+
+		if (verdict == rtrn_propagate)
+			SetPropStr(toInstance, port, value);
+
 		curFromNode = prevFrom;
 		return;
 	}

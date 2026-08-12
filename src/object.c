@@ -1737,15 +1737,22 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 	}
 	if (propnode && GetPropLong(propnode, "OnMsg"))
 	{
-		/* the value arrived, so the property holds it - see the same
-		   store in DeliverToSubscriber (node.c) */
-		SetPropStr(owner, propname, value);
+		/* the handler answers whether the property still needs writing -
+		   the same rule, and the same three codes, as DeliverToSubscriber
+		   (node.c). The handler is called here rather than through
+		   DeliverMsg because DeliverMsg reports whether a handler existed,
+		   not what it decided. */
+		msgobj handler = (msgobj) GetPropLong(propnode, "OnMsg");
+		int    verdict;
 
 		chunk = NewNode(STRING);
 		SetName(chunk, propname);
 		SetValueStr(chunk, value);
-		DeliverMsg(owner, propname, msg_send, chunk);
+		verdict = handler(owner, msg_send, chunk);
 		DelNode(chunk);
+
+		if (verdict == rtrn_propagate)
+			SetPropStr(owner, propname, value);
 		return;
 	}
 
