@@ -11,3 +11,5 @@ testharness/logs/
 testharness/tests/
 __pycache__/
 saved/
+web/widgets.js
+objects/*/*_web.h
