@@ -1,0 +1,9 @@
+/* the image's own rules, travelling with the image */
+.image-view {
+  display: block;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  object-fit: contain;
+  max-width: 100%;
+}

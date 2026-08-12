@@ -2893,6 +2893,113 @@ int Bridge_OnFileCmd(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* WHAT THE CONTROLS BROUGHT WITH THEM, assembled once.
+
+   Every class that has a browser half carries it as Show/web/js on its own
+   class node (see led.c). This walks the classes already registered
+   - the same walk that builds the palette and finds the script hosts - and
+   writes them out as one file for the page to load. No directory is
+   scanned, no path convention is assumed, and no list of "classes that have
+   a web half" exists anywhere: a class either carries one or it does not.
+
+   Once per process, not per Bridge and not per request: classes register at
+   load and never change afterwards. */
+/* WHAT THE CONTROLS BROUGHT WITH THEM, assembled once.
+
+   Every class that has a browser half carries it as Show/web/js on its own
+   class node (see led.c). This walks the classes already registered
+   - the same walk that builds the palette and finds the script hosts - and
+   writes them out as one file for the page to load. No directory is
+   scanned, no path convention is assumed, and no list of "classes that have
+   a web half" exists anywhere: a class either carries one or it does not.
+
+   Once per process, not per Bridge and not per request: classes register at
+   load and never change afterwards. */
+
+/* WHAT THE CONTROLS BROUGHT WITH THEM, assembled once.
+
+   Every class that shows itself in a browser carries that half as
+   Show/web/js and Show/web/css on its own class node (see led.c). This
+   walks the classes already registered - the same walk that builds the
+   palette and finds the script hosts - and writes them out as the two files
+   the page loads. No directory is scanned, no path convention is assumed,
+   and no list of "classes that have a web half" exists anywhere: a class
+   either carries one or it does not.
+
+   Once per process, not per Bridge and not per request: classes register at
+   load and never change afterwards. */
+static void Bridge_BuildShow(NodeObj instance)
+{
+	static int   built = 0;
+	NodeObj      lib, cls, show, web;
+	char        *jsPath, *cssPath, *js, *css, *name, *esc;
+	int          n = 0, t;
+	FILE        *jf, *cf;
+	char         dbg[300];
+
+	if (built)
+		return;
+	built = 1;
+
+	jsPath  = GetPropStr(instance, "ShowFile");
+	cssPath = GetPropStr(instance, "ShowCssFile");
+	if (!jsPath || !jsPath[0] || !cssPath || !cssPath[0])
+		return;
+
+	jf = fopen(jsPath, "w");
+	cf = fopen(cssPath, "w");
+	if (!jf || !cf)
+	{
+		snprintf(dbg, sizeof(dbg), "show: cannot write '%s' / '%s'", jsPath, cssPath);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		if (jf) fclose(jf);
+		if (cf) fclose(cf);
+		return;
+	}
+
+	/* the registry the controls register INTO - written here because these
+	   files are the whole of what the page loads, so they stand alone */
+	fprintf(jf, "window.GTWidgets = window.GTWidgets || {};\n"
+				"window.GTWidgetTypes = window.GTWidgetTypes || {};\n"
+				"function register(name, def) { window.GTWidgets[name] = def; }\n");
+	fprintf(cf, "/* assembled from each class's own Show/web/css */\n");
+
+	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
+		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+		{
+			show = GetPropNode(cls, "Show");
+			web  = show ? GetPropNode(show, "web") : NULL;
+			if (!web)
+				continue;
+
+			name = GetNameStr(cls);
+			js   = GetPropStr(web, "js");
+			css  = GetPropStr(web, "css");
+
+			if (js && js[0])
+				fprintf(jf, "\n/* ---- %s ---- */\n%s\n", name ? name : "?", js);
+			if (css && css[0])
+				fprintf(cf, "\n/* ---- %s ---- */\n%s\n", name ? name : "?", css);
+
+			/* which property type this class renders - the class SAID so
+			   (PublishShow), it is not guessed from anything */
+			t = GetPropInt(show, "renders");
+			if (t && name)
+			{
+				esc = JsonEscapeStr(name);
+				fprintf(jf, "window.GTWidgetTypes[%d] = %s;\n", t, esc);
+				free(esc);
+			}
+			n++;
+		}
+
+	fclose(jf);
+	fclose(cf);
+	snprintf(dbg, sizeof(dbg), "show: %d class%s wrote their web half into '%s' and '%s'",
+			 n, n == 1 ? "" : "es", jsPath, cssPath);
+	DebugPrint(dbg, __FILE__, __LINE__, REGISTER);
+}
+
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 {
 	NodeObj instance, port;
@@ -2950,6 +3057,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	/* menu's own Selected back to "" once it's handled an action - set    */
 	/* externally after CreateObject("Bridge"), see main.c                 */
 	SetPropLong(instance, "FileMenu", (long) NULL);
+
+	/* where the assembled browser halves are written, so the page can load
+	   them. A property, so it follows whatever serves the pages rather than
+	   being agreed by two files that never mention each other. */
+	SetPropStr(instance, "ShowFile",    "web/widgets.js");
+	SetPropStr(instance, "ShowCssFile", "web/widgets.css");
+	Bridge_BuildShow(instance);
 
 	/* input port: commands arrive here, from whatever transport is wired up */
 	SetPropInt(instance, "In", 0);

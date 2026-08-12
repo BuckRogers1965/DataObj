@@ -1,0 +1,25 @@
+/* the textbox's own rules, travelling with the textbox */
+.textbox {
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.4;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  display: block;
+}
+.wireable > .textbox {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.textbox.gui-invalid {
+  border-color: #d9463f;
+  outline: 1px solid #d9463f;
+}

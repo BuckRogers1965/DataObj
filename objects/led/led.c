@@ -8,6 +8,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "control.h"
+#include "show_web.h"
 
 /*
 
@@ -151,6 +152,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	PublishProp(ClassSelf, "Value", PROP_LED, "0");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
+
+	/* how it shows itself, carried by the class - see show/web/ */
+	PublishShow(ClassSelf, PROP_LED, show_web_js, show_web_css);
 	/* No State. The VALUE is the state - that is the whole control, and
 	   there is nothing else to be out of step with it. */
 

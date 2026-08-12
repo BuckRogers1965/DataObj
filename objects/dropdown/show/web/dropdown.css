@@ -1,0 +1,11 @@
+/* the dropdown's own rules, travelling with the dropdown */
+.prop-row select, select.widget-menu {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}

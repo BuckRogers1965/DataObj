@@ -101,7 +101,7 @@ already uses: one uniform accessor over every value-bearing element, so the
 update path is written once.
 
 **3. A missing presentation is loud.** The bug being retired is silence. A class
-with no `presentation/web` renders a visibly wrong placeholder naming the class,
+with no `show/web` renders a visibly wrong placeholder naming the class,
 logs to the console, and logs on the engine side. It must never quietly fall
 back to a Textbox — that is the exact failure this work exists to end.
 
@@ -112,7 +112,7 @@ onto its class node, once, at `ClassStart`** — the same moment and the same wa
 it already publishes `Value`, `Enable`, its parent class and its version.
 
     ClassSelf
-      Presentation
+      Show
         web
           js      <- this control's registration code
           css     <- this control's rules
@@ -120,7 +120,7 @@ it already publishes `Value`, `Enable`, its parent class and its version.
 Properties are nodes and nodes hold properties, so this needs no new mechanism
 whatsoever: `PublishProp` already puts things on a class node and the Bridge
 already walks the registry. `web` is a sub-property rather than a prefix because
-`rest`, `macos` and `mcp` are the same shape later, and none of them is
+`rest`, `xml` and `macos` are the same shape later, and none of them is
 privileged. (Names are provisional — they are yours to set.)
 
 Three things fall out of it, and they are why this beats a directory convention:
@@ -137,7 +137,7 @@ Three things fall out of it, and they are why this beats a directory convention:
 
 **How the text gets into the module.** Editing JavaScript inside a C string
 literal would be miserable, so it should not be done. Keep
-`objects/led/presentation/web/led.js` as an ordinary editable file and have that
+`objects/led/show/web/led.js` as an ordinary editable file and have that
 object's Makefile generate a C string from it at build time (`xxd -i`, or three
 lines of shell) for the module to publish at `ClassStart`. Source stays a `.js`
 file with syntax highlighting; the shipped artifact is self-contained. That is a
@@ -149,7 +149,7 @@ Three hops, and only the first is new work:
 
 1. **The class holds it** (above).
 2. **The Bridge collects it** — at instance start it walks the registry,
-   concatenates every `Presentation/web/js` into one blob and every `…/css` into
+   concatenates every `Show/web/js` into one blob and every `…/css` into
    another, and holds them. One walk, one time; the same registry walk that
    already builds the palette and discovers script hosts.
 3. **The web layer loads it, once.** Either the Bridge hands over the list or the
@@ -208,7 +208,7 @@ the panels. Each batch is the LED again with more in it. *Proof each time: 43
 drew, snapshot unchanged, no page errors.*
 
 **Step 4 — CSS follows the same route.** The 13 control-specific rules move to
-their controls' `Presentation/web/css`. *Proof: computed styles unchanged.*
+their controls' `Show/web/css`. *Proof: computed styles unchanged.*
 
 **Step 5 — delete the scaffolding.** `WIDGET_CLASSES`, `INPUT_WIDGET_CLASS`,
 `DISPLAY_WIDGET_CLASS`, `READOUT_WIDGET_CLASSES`, `buildValueControl`,
@@ -248,9 +248,9 @@ a new file.
 
 ## What this unlocks, and what it deliberately does not
 
-It unlocks the rest of that ROADMAP section: `presentation/rest`,
-`presentation/macos`, `presentation/mcp` become directories a control can grow,
-because `presentation/web` stopped being special by being the only one. And it
+It unlocks the rest of that ROADMAP section: `show/rest`,
+`show/xml`, `show/macos` become directories a control can grow,
+because `show/web` stopped being special by being the only one. And it
 settles what "adding a control" means end to end — drop the `.object` in the
 scan path, restart, and its browser half is in the blob the Bridge serves. The
 same deployment story as the engine half, at the same moment, with no host edit.

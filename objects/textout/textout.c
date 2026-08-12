@@ -8,6 +8,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "control.h"
+#include "show_web.h"
 
 /*
 
@@ -147,6 +148,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetClassParent(ClassSelf, "Control");
 
 	PublishPosition(ClassSelf);
+
+	/* how it shows itself, carried by the class - see show/web/ */
+	PublishShow(ClassSelf, PROP_TEXTOUT, show_web_js, show_web_css);
 
 	PublishProp(ClassSelf, "Value", PROP_TEXTOUT, "");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");

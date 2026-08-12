@@ -229,6 +229,11 @@ run_variant() {
 	# (main.c:211), and the framework runs with cwd=$d - without these the
 	# page 404s, the browser boots empty, and every guitest cascades off boot.
 	ln -f web/* "$d/web/" 2>/dev/null
+	# ...but NOT the generated ones. Each variant's own Bridge writes its
+	# controls' web halves at start; hardlinked, all five variants and the
+	# repo would be truncating and rewriting ONE inode at once, so a variant
+	# would be testing whichever build won the race rather than its own.
+	rm -f "$d/web/widgets.js" "$d/web/widgets.css"
 	say "[$v] $(ls "$d/objects" | wc -l) objects, $(ls "$d/web" | wc -l) web files hardlinked into $d"
 
 	# unit_test links libframework directly and speaks to no server, so it goes

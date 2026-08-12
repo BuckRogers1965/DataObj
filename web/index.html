@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>GrokThink</title>
 <link rel="stylesheet" href="style.css">
+<!-- each control's own rules, assembled by the Bridge from its class node -->
+<link rel="stylesheet" href="widgets.css">
 </head>
 <body>
 
@@ -25,6 +27,10 @@
      nothing can be fiddled with against a server that isn't there -->
 <div id="offline"><span id="offline-msg">disconnected</span></div>
 
+<!-- what the controls themselves brought: assembled by the Bridge from
+     each class's own Presentation/web, loaded before the host so the
+     registrations exist by the time anything is rendered -->
+<script src="widgets.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

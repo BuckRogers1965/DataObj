@@ -1,0 +1,131 @@
+/* assembled from each class's own Show/web/css */
+
+/* ---- Dropdown ---- */
+/* the dropdown's own rules, travelling with the dropdown */
+.prop-row select, select.widget-menu {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+
+/* ---- HTML ---- */
+/* the html's own rules, travelling with the html */
+.html-view {
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  width: 46ch;
+  max-width: 100%;
+  height: 16em;
+}
+
+
+/* ---- Image ---- */
+/* the image's own rules, travelling with the image */
+.image-view {
+  display: block;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  object-fit: contain;
+  max-width: 100%;
+}
+
+
+/* ---- LED ---- */
+/* the LED's own rules, travelling with the LED */
+.node-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  flex: 0 0 auto;
+}
+.node-led.state-0 { background: #666; }
+.node-led.state-1 { background: #e6c66b; }
+.node-led.state-2 { background: #6be69a; box-shadow: 0 0 6px #6be69a; }
+
+/* stretched when it is the wireable cell of a row */
+.wireable > .node-led {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+
+/* ---- Markdown ---- */
+/* the markdown's own rules, travelling with the markdown */
+.markdown-view {
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  padding: 6px 10px;
+  color: #cfd4dc;
+  font-size: 12px;
+  line-height: 1.5;
+  width: 46ch;
+  max-width: 100%;
+  height: 16em;
+  overflow: auto;
+  box-sizing: border-box;
+}
+.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4 {
+  color: #e6e6e6;
+  margin: 0.5em 0 0.25em;
+  line-height: 1.25;
+}
+.markdown-view h1 { font-size: 15px; }
+.markdown-view h2 { font-size: 13px; }
+.markdown-view h3, .markdown-view h4 { font-size: 12px; }
+.markdown-view p { margin: 0.4em 0; }
+.markdown-view ul { margin: 0.4em 0; padding-left: 1.4em; }
+.markdown-view code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: #24262e;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.markdown-view pre {
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin: 0.4em 0;
+  overflow-x: auto;
+}
+.markdown-view pre code { background: none; padding: 0; }
+
+
+/* ---- Textbox ---- */
+/* the textbox's own rules, travelling with the textbox */
+.textbox {
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.4;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  display: block;
+}
+.wireable > .textbox {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.textbox.gui-invalid {
+  border-color: #d9463f;
+  outline: 1px solid #d9463f;
+}
+

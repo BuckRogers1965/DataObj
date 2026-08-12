@@ -18,7 +18,7 @@ or standalone against an already-running pair:
 
     python3 testharness/guitest.py --app http://127.0.0.1:8083 --cdp 9223
 """
-import argparse, json, sys, time
+import argparse, io, json, os, sys, time
 from cdp import attach
 
 APP = "http://127.0.0.1:8083"
@@ -150,6 +150,57 @@ def palette_seeds_drawn(t):
                 "return bad;})()")
 
 
+SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "palette_render.json")
+
+
+def palette_render_shape(t):
+    """WHAT each palette member renders as, not merely that it does: element
+    tag, its classes, its rounded size, and the tag+class of everything
+    inside it. Compared against a stored shape, this is what makes "the page
+    looks exactly as it did" checkable instead of asserted.
+
+    Rounded sizes and no text: the point is structure, so nothing here should
+    move because a value ticked or a fraction of a pixel differed."""
+    return t.js("(()=>{const out={};"
+                "const nm=(n)=>n.tagName.toLowerCase()+"
+                "((typeof n.className==='string'&&n.className.trim())?"
+                "'.'+n.className.trim().split(/\\s+/).join('.'):'');"
+                "for(const k of Object.keys(instances)){"
+                "if(!k.startsWith('/Root/Palette/'))continue;"
+                "const i=instances[k],e=i&&i.el;if(!e)continue;"
+                "const r=e.getBoundingClientRect();"
+                "out[k.slice(14)]={tag:nm(e),w:Math.round(r.width),"
+                "h:Math.round(r.height),"
+                "kids:[...e.querySelectorAll('*')].slice(0,40).map(nm).join(',')};}"
+                "return out;})()")
+
+
+def compare_render_shape(now):
+    """(differences, note). Blessing is explicit - GUITEST_BLESS=1 writes the
+    file - because a snapshot that regenerates itself when it does not match
+    proves nothing at all. A missing file is a failure, never a pass."""
+    if os.environ.get("GUITEST_BLESS"):
+        io.open(SNAPSHOT, "w", encoding="utf-8").write(
+            json.dumps(now, indent=1, sort_keys=True) + "\n")
+        return [], "blessed %d classes into %s" % (len(now), os.path.basename(SNAPSHOT))
+    if not os.path.exists(SNAPSHOT):
+        return ["no snapshot on disk - run once with GUITEST_BLESS=1"], ""
+    was = json.loads(io.open(SNAPSHOT, encoding="utf-8").read())
+    diffs = []
+    for cls in sorted(set(was) | set(now)):
+        if cls not in now:
+            diffs.append("%s: gone" % cls)
+        elif cls not in was:
+            diffs.append("%s: new (bless if intended)" % cls)
+        elif was[cls] != now[cls]:
+            for f in ("tag", "w", "h", "kids"):
+                if was[cls].get(f) != now[cls].get(f):
+                    diffs.append("%s.%s: %r -> %r"
+                                 % (cls, f, was[cls].get(f), now[cls].get(f)))
+    return diffs, ""
+
+
 def palette_seeds_missing(t):
     """What the ENGINE put in the palette that the CLIENT does not have.
     __evts is what arrived on the wire, instances{} is what the client
@@ -196,6 +247,14 @@ def test_boot(t, r):
              "every /Root/Palette member has an element in the page with a real size",
              "did not draw: %s" % (undrawn if undrawn else "none (all %s drew)" % seeds),
              not undrawn)
+
+    # WHAT they drew as. Everything above proves a control rendered; this
+    # proves it rendered the same as it did before whatever we just changed.
+    diffs, note = compare_render_shape(palette_render_shape(t))
+    r.expect("boot: every palette member renders the shape it always did",
+             "every palette member's element, classes, size and contents match the stored shape",
+             note or ("differences: %s" % (diffs if diffs else "none")),
+             not diffs)
 
     # '/Root' belongs in this set: the root became a REAL View (CreateRoot),
     # so anything at top level carries Container='/Root' where it used to
@@ -1107,8 +1166,8 @@ def test_markdown_renders(t, r):
     t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (md, json.dumps(text)))
     time.sleep(0.8)
 
-    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
-               "const el=l[l.length-1].el;"
+    got = t.js("(()=>{const i=instances['%s'];if(!i||!i.el)return false;"
+               "const el=i.el.querySelector('.markdown-view');if(!el)return 'not rendered';"
                "return {h1:(el.querySelector('h1')||{}).textContent,"
                "bold:(el.querySelector('strong')||{}).textContent,"
                "lis:el.querySelectorAll('li').length,"
@@ -1139,8 +1198,8 @@ def test_html_renders_sandboxed(t, r):
     t.js("send({cmd:'set-property',instance:'%s',prop:'Value',value:%s})" % (hv, json.dumps(payload)))
     time.sleep(1.2)  # srcdoc load is asynchronous
 
-    got = t.js("(()=>{const l=selfDisplays['%s.Value']||[];if(!l.length)return false;"
-               "const f=l[l.length-1].el;"
+    got = t.js("(()=>{const i=instances['%s'];if(!i||!i.el)return false;"
+               "const f=i.el.querySelector('iframe');if(!f)return 'not rendered';"
                "if(f.tagName!=='IFRAME')return {tag:f.tagName};"
                "const d=f.contentDocument;if(!d)return 'no doc';"
                "return {tag:f.tagName,sandbox:f.getAttribute('sandbox'),"

@@ -15,11 +15,13 @@ OPT=-Wall -g
 
 all: $(OBJECTS) $(GOAL)
 
+include ../show.mk
+
 $(GOAL): $(OBJECTS)
 	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
-	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
+	rm -f $(OBJECTS) $(GOAL) $(SHOW_CLEAN) > /dev/null 2>&1
 
 # makedepend understands neither -iquote nor gcc's own header dir,
 # so depend uses a plain -I and is told where stddef.h lives

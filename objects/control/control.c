@@ -454,6 +454,43 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
 	return target;
 }
 
+/* What this class looks like on a surface, kept on the class node beside
+   everything else it publishes. Nothing scans a directory for this and
+   nothing keeps a list of which classes have one: a class either carries
+   it or it does not, and whoever renders that surface walks the classes it
+   is already walking. */
+void PublishShow(NodeObj class, int renders, char *js, char *css)
+{
+	NodeObj show, web;
+
+	if (!class)
+		return;
+
+	SetPropStr(class, "Show", "");
+	show = GetPropNode(class, "Show");
+	if (!show)
+		return;
+	SetPropStr(show, "web", "");
+	web = GetPropNode(show, "web");
+	if (!web)
+		return;
+
+	if (js)
+		SetPropStr(web, "js", js);
+	if (css)
+		SetPropStr(web, "css", css);
+
+	/* WHICH property widget type this class is the renderer FOR - stated,
+	   not inferred. Inferring it from the class's own Value type looked
+	   right and was wrong: MoButton publishes its Value as PROP_LED and
+	   Button publishes PROP_NULL, so the LED's type would have been stolen
+	   and every plumbing property would have rendered as a button. A class
+	   that renders no property type (a button is placed, never stamped on
+	   a property) says 0. Surface-independent, so it sits on Show itself. */
+	if (renders)
+		SetPropInt(show, "renders", renders);
+}
+
 /* see the doc comment in object.h - opt-in, ordinary, no different from */
 /* any class publishing its own property                                 */
 void PublishPosition(NodeObj class)
@@ -538,6 +575,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(ClassSelf, "Adopted",        (long)Widget_WasAdopted);
 	SetPropLong(ClassSelf, "InitPos",        (long)InitPosition);
 	SetPropLong(ClassSelf, "PublishPos",     (long)PublishPosition);
+	SetPropLong(ClassSelf, "PublishShow",    (long)PublishShow);
 	SetPropLong(ClassSelf, "MainView",       (long)GetMainView);
 	SetPropLong(ClassSelf, "BuildPalette",   (long)BuildPalette);
 	SetPropLong(ClassSelf, "BuildChrome",    (long)BuildChrome);

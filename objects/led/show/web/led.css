@@ -1,0 +1,17 @@
+/* the LED's own rules, travelling with the LED */
+.node-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  flex: 0 0 auto;
+}
+.node-led.state-0 { background: #666; }
+.node-led.state-1 { background: #e6c66b; }
+.node-led.state-2 { background: #6be69a; box-shadow: 0 0 6px #6be69a; }
+
+/* stretched when it is the wireable cell of a row */
+.wireable > .node-led {
+  flex: 1 1 auto;
+  min-width: 0;
+}

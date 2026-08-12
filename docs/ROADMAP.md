@@ -1365,6 +1365,102 @@ Open questions before doing it:
   also makes two flows harder to compare literally, since absence now carries
   meaning. `flowdiff.py` would need to know the rule.
 
+### Saving is a presentation too — `show/json`
+
+Raised 2026-08-12, and it answers the section above rather than sitting beside
+it. **A saved flow is a rendering of the node graph onto the JSON surface**,
+exactly as the page is a rendering onto the web surface. So it is
+`show/json` beside `show/web`, and the question "which properties get written"
+stops being the serializer's to answer.
+
+**What this takes out of the serializer.** It has no per-control knowledge today
+— no `LED`, no `Slider`, no widget switch in 1646 lines — but it does hold three
+things that are the class describing itself:
+
+- `Widget` and `Label` copied by name on the way out and re-stamped on the way
+  in (serializer.c:349-352, 758, 787-792), including
+  `SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"))` — the property widget
+  TYPE, an engine enum, persisted as a bare number into the file format.
+- **`Alias` as a class it knows by name**: `ImportPlace` branches on
+  `strcmp(className, "Alias") == 0` into a whole deferred second pass
+  (`ImportDeferAlias` / `ImportAliasesPass`, which does `CreateObject(home,
+  "Alias")` and mints `Alias_N`). That is the alias-as-a-species model the
+  engine no longer has — every control points at its data now, and "alias" is
+  the relationship, not a class. The file format did not get the message.
+- the "which props to skip" filter (serializer.c:317).
+
+**Why it is nearly free.** The class already published its own interface — name,
+widget type and default per property, straight off `PublishProp`. So
+`show/json` has a **universal default implementation**: walk the interface, emit
+what differs from the declared default. One function, inherited by every class
+through the parent walk (Object provides it, see the class-chain design), and a
+class writes its own only when it holds something the interface cannot describe
+— ScriptBox's Source, an Image's data. Forty-three classes get it without
+forty-three serializers.
+
+**Why it beats a global defaults rule.** Omission becomes a decision the class
+makes about itself. Mostly "leave out what is unchanged", but a class with a
+field that must always be written can simply always write it. A global rule
+cannot express that exception without growing a list of exceptions, which is the
+shape this project keeps deleting.
+
+**One honest correction, so this is not oversold:** it is not fewer comparisons.
+The same values are still compared against the same defaults; what changes is
+WHERE that knowledge lives. The win is knowledge placement, not CPU, and testing
+it as a performance change would find nothing.
+
+**Three things to settle before writing any of it:**
+
+1. **The inverse.** If a class writes its own JSON, what reads it? Either
+   `show/json` defines both directions, or writing stays per-class while reading
+   stays generic-by-name — which only holds if what is written is always plain
+   properties. An asymmetry here is a bug farm.
+2. **Link ordering does not disappear.** A link's target may not exist yet at
+   load, which is the entire reason for the deferred pass. That is a fact about
+   graphs, not about aliases. The right outcome is: the `Alias`-by-name branch
+   goes, the deferral stays, and the JSON surface expresses links so anything
+   carrying one is restored in the second pass.
+3. **Versioning.** A class that changes its `show/json` must still load
+   yesterday's file. `SetClassVersion` is already on the class node; this is
+   where it starts earning its keep.
+
+**And then reflecting a view over a connection is the same call.** This is the
+half that makes it worth doing. `Bridge_InstanceEvent` builds its JSON by hand -
+`snprintf` plus a row of `JsonEscapeStr` calls for alias, class, classParent,
+parent, container, hidden, reservedIn, reservedOut, gui, interface. That is a
+hand-written encoder for precisely what `show/json` renders. Saving a view to a
+file and reflecting it down a socket are one operation with two sinks; so are a
+REST GET and an MCP resource read. The transport stops being an encoder.
+
+It composes downward, which is what makes it more than tidying. Reflecting a view
+is "render this subtree"; keeping it in step is "render this one property". Not
+two mechanisms - a property IS a node, so a delta is the same rendering at a
+smaller scope, and the event stream becomes renderings instead of fifteen bespoke
+event shapes. It also makes federation fall out rather than be built: reflecting a
+view to ANOTHER framework instance is the same call as saving it, and "the app is
+an empty view" stops being a statement about one process.
+
+**The rule that keeps this safe, stated once: only PUBLISHED properties render.**
+Instances carry `local` (a malloc'd C pointer stored as a long), `Activate`,
+`OnMsg`, `InstanceStart` - raw function pointers in properties. A "serialize
+everything" walker would put those on a wire. Rendering from the published
+interface cannot, because no class publishes them. This is a safety boundary, not
+a nicety, and it is the same filter that makes the default implementation
+possible.
+
+**Where it must NOT overreach: commands are not renderings.** Client-to-engine is
+imperative - create, connect, activate. State reflects; requests do not.
+`set-property` is the tempting edge ("here is a new value for this node"), and
+the temptation is exactly where this idea would start inventing.
+
+Precedent, and the reason to believe the shape: the LED carried its own
+`show/web` on 2026-08-12 and the host ended up with zero knowledge of it — see
+docs/20260812_1545_a_control_brings_its_own_presentation.md. The number that
+would have been duplicated (`PROP_LED`) stayed in C because the Bridge derived
+it from the class's published interface. `show/json` is the same derivation
+against a different surface, and the persisted `Widget: 2` above is exactly the
+duplication it would retire.
+
 ### Filter widget: In/Out readouts stay blank, and `change` looks dead
 
 Observed 2026-08-12 on the Filter panel. Both need tracing rather than

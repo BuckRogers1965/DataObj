@@ -1,0 +1,260 @@
+{
+ "Base64": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 65
+ },
+ "Bin2Hex": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 70
+ },
+ "Button": {
+  "h": 49,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 77
+ },
+ "CharacterMap": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 99
+ },
+ "Checkbox": {
+  "h": 49,
+  "kids": "input.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 56
+ },
+ "ComfyUI": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 71
+ },
+ "Dropdown": {
+  "h": 47,
+  "kids": "select.widget-menu.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 58
+ },
+ "Filter": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 53
+ },
+ "HTML": {
+  "h": 87,
+  "kids": "iframe.html-view.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 132
+ },
+ "Http": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 48
+ },
+ "Image": {
+  "h": 347,
+  "kids": "img.image-view.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 332
+ },
+ "Knob": {
+  "h": 45,
+  "kids": "input.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 82
+ },
+ "LED": {
+  "h": 37,
+  "kids": "span.node-led.state-0,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 31
+ },
+ "Label": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 36
+ },
+ "LogicGate": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 80
+ },
+ "MCPSource": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 88
+ },
+ "Markdown": {
+  "h": 87,
+  "kids": "div.markdown-view.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 132
+ },
+ "MenuButton": {
+  "h": 36,
+  "kids": "div.menu-button-wrap.widget-atom-control,button.menu-button,div.menu-dropdown",
+  "tag": "div.widget-atom",
+  "w": 68
+ },
+ "MoButton": {
+  "h": 49,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 66
+ },
+ "Ollama": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 63
+ },
+ "Out": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 45
+ },
+ "Pulse": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 55
+ },
+ "PulseGenerator": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 108
+ },
+ "Queue": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 60
+ },
+ "Reader": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 63
+ },
+ "RegExp": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 67
+ },
+ "Router": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 61
+ },
+ "ScriptBox": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 78
+ },
+ "Serializer": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 75
+ },
+ "Slider": {
+  "h": 47,
+  "kids": "input.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 86
+ },
+ "StableDiffusion": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 107
+ },
+ "Stack": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 55
+ },
+ "Stats": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 53
+ },
+ "Stopwatch": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 82
+ },
+ "TCPPort": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 70
+ },
+ "TPLink": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 63
+ },
+ "TextOut": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 46
+ },
+ "Textbox": {
+  "h": 87,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 132
+ },
+ "UDPPort": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 71
+ },
+ "VUMeter": {
+  "h": 42,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-bottom",
+  "w": 51
+ },
+ "View": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 51
+ },
+ "WebSocket": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 85
+ },
+ "Writer": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 58
+ }
+}

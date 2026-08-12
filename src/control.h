@@ -66,6 +66,7 @@ void Widget_Destroy(NodeObj instance);
 int     Widget_WasAdopted(void);
 void InitPosition(NodeObj instance);
 void PublishPosition(NodeObj class);
+void PublishShow(NodeObj class, int renders, char *js, char *css);
 NodeObj GetMainView(NodeObj instance);
 void BuildPalette(void);
 void BuildChrome(void);
@@ -128,6 +129,21 @@ static inline void PublishPosition(NodeObj class)
 
 	if (fn)
 		fn(class);
+}
+
+/* HOW THIS CLASS SHOWS ITSELF on a browser, carried by the class itself.
+   The strings come from the control's own show/web/ files, turned into C
+   at build time by objects/show.mk - so the browser half ships inside the
+   .object and a control is still one file to install. A surface is a
+   sub-property rather than a prefix, so rest/xml/macos are the same shape
+   later and none of them is privileged. */
+static inline void PublishShow(NodeObj class, int renders, char *js, char *css)
+{
+	void (*fn)(NodeObj class, int renders, char *js, char *css) =
+		(void (*)(NodeObj class, int renders, char *js, char *css)) ControlEntry("PublishShow");
+
+	if (fn)
+		fn(class, renders, js, css);
 }
 
 static inline NodeObj GetMainView(NodeObj instance)

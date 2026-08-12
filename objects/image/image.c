@@ -8,6 +8,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "control.h"
+#include "show_web.h"
 
 /* Image: a display sink whose Value is an image URL. Whatever arrives on In
    becomes Value, and the projector renders it as an <img> - so wiring a URL
@@ -132,6 +133,9 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetClassParent(ClassSelf, "Control");
 
 	PublishPosition(ClassSelf);
+
+	/* how it shows itself, carried by the class - see show/web/ */
+	PublishShow(ClassSelf, PROP_IMAGE, show_web_js, show_web_css);
 
 	PublishProp(ClassSelf, "Value", PROP_IMAGE, "");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");

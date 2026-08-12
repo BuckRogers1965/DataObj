@@ -245,7 +245,8 @@ svg.view-wires {
 .node-collapse:hover { color: #e6e6e6; }
 
 /* the collapsed face of a composite instance - class name, its own live    */
-/* State LED, and a small dot per bare port (see registerCard) - clicking    */
+/* State readout, and a small dot per bare port (see registerCard) -        */
+/* clicking                                                                 */
 /* it (Operate mode, or whatever a containing View's Mode override resolves  */
 /* to) opens the panel; nothing else is different about it, right down to     */
 /* the port dots being the identical alias+prop the panel's own rows use.    */
@@ -294,7 +295,7 @@ svg.view-wires {
 /* wiring clutter outside Connect mode, exactly like .port-row above */
 body.mode-connect .view-dot { display: block; }
 
-/* a widget primitive standing on its own - a control (or a dot, for LED) */
+/* a widget primitive standing on its own - a control or a readout        */
 /* and a label, nothing else: no panel, no header, no ports                */
 .widget-atom {
   position: absolute;
@@ -338,22 +339,6 @@ body.mode-connect .view-dot { display: block; }
 
 /* the Textbox: the ONE text control, any size of text. Its box is the W/H  */
 /* its instance carries, so no width here; monospace so code lines up       */
-.textbox {
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  color: #e6e6e6;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  line-height: 1.4;
-  overflow-x: hidden;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  cursor: text;
-  display: block;
-}
 .widget-atom input[type=range] {
   width: 70px;
   cursor: auto;
@@ -365,22 +350,6 @@ body.mode-connect .view-dot { display: block; }
 }
 /* the momentary button - visibly HELD while pressed, which is the whole  */
 /* difference between it and the fire-once Button next to it              */
-.mo-button {
-  background: #2c2f38;
-  border: 1px solid #4a4e5a;
-  border-radius: 4px;
-  color: #e6e6e6;
-  font-size: 11px;
-  padding: 4px 12px;
-  cursor: pointer;
-  user-select: none;
-}
-.mo-button:hover { border-color: #6b9fe6; }
-.mo-button.pressed {
-  background: #6b9fe6;
-  border-color: #8bb8e6;
-  color: #14161a;
-}
 
 .widget-atom .activate-btn {
   width: auto;
@@ -405,17 +374,6 @@ body.mode-connect .view-dot { display: block; }
   color: #888;
   font-size: 10px;
 }
-
-.node-led {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #555;
-  flex: 0 0 auto;
-}
-.node-led.state-0 { background: #666; }              /* Stopping */
-.node-led.state-1 { background: #e6c66b; }            /* Starting */
-.node-led.state-2 { background: #6be69a; box-shadow: 0 0 6px #6be69a; } /* Running */
 
 .node-body {
   padding: 6px 8px;
@@ -449,16 +407,6 @@ body.mode-connect .view-dot { display: block; }
 .prop-row input[type=checkbox] {
   margin: 0;
 }
-.prop-row select, select.widget-menu {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  color: #e6e6e6;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
-}
 
 .prop-row input[type=range] {
   flex: 1 1 auto;
@@ -479,6 +427,24 @@ body.mode-connect .view-dot { display: block; }
   font-size: 11px;
 }
 
+/* the pressable look, worn by every button-shaped control */
+.mo-button {
+  background: #2c2f38;
+  border: 1px solid #4a4e5a;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 11px;
+  padding: 4px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.mo-button:hover { border-color: #6b9fe6; }
+.mo-button.pressed {
+  background: #6b9fe6;
+  border-color: #8bb8e6;
+  color: #14161a;
+}
+
 .widget-readout {
   flex: 1 1 auto;
   min-width: 0;
@@ -493,67 +459,11 @@ body.mode-connect .view-dot { display: block; }
 /* the Markdown widget's rendered display - a readable rich-text block in  */
 /* the panel theme. FIXED size, identical to the HTML view: things have a   */
 /* size and it is obeyed - content scrolls inside, it never sizes the box   */
-.markdown-view {
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  border-radius: 3px;
-  padding: 6px 10px;
-  color: #cfd4dc;
-  font-size: 12px;
-  line-height: 1.5;
-  width: 46ch;
-  max-width: 100%;
-  height: 16em;
-  overflow: auto;
-  box-sizing: border-box;
-}
-.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4 {
-  color: #e6e6e6;
-  margin: 0.5em 0 0.25em;
-  line-height: 1.25;
-}
-.markdown-view h1 { font-size: 15px; }
-.markdown-view h2 { font-size: 13px; }
-.markdown-view h3, .markdown-view h4 { font-size: 12px; }
-.markdown-view p { margin: 0.4em 0; }
-.markdown-view ul { margin: 0.4em 0; padding-left: 1.4em; }
-.markdown-view code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  background: #24262e;
-  border-radius: 3px;
-  padding: 1px 4px;
-}
-.markdown-view pre {
-  background: #24262e;
-  border: 1px solid #3a3d47;
-  border-radius: 3px;
-  padding: 6px 8px;
-  margin: 0.4em 0;
-  overflow-x: auto;
-}
-.markdown-view pre code { background: none; padding: 0; }
 
 /* the HTML widget's sandboxed frame - same footprint as the markdown view */
-.html-view {
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  border-radius: 3px;
-  width: 46ch;
-  max-width: 100%;
-  height: 16em;
-}
 
 /* the Image display: fits the whole picture inside the object's declared  */
 /* W/H (set as px by the panel), whatever the picture's real dimensions    */
-.image-view {
-  display: block;
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  border-radius: 3px;
-  object-fit: contain;
-  max-width: 100%;
-}
 
 .port-row {
   display: flex;
@@ -614,17 +524,12 @@ body:not(.mode-operate) .wireable > * {
   min-width: 0;
 }
 .wireable > input,
-.wireable > .widget-readout,
-.wireable > .node-led {
+.wireable > .widget-readout {
   flex: 1 1 auto;
   min-width: 0;
 }
 /* a Textbox keeps the size the object declared - it doesn't stretch to    */
 /* the row, the row (and the card) grows to it                              */
-.wireable > .textbox {
-  flex: 0 1 auto;
-  min-width: 0;
-}
 /* ONE armed look for any wire endpoint - control, row, icon, whatever the  */
 /* click landed on: nothing about an endpoint is special                     */
 .armed {
@@ -780,7 +685,3 @@ body.offline #offline { display: flex; }
 /* a value that fails its GUI_Pattern - client-only, see guiValidate in
    app.js. The engine knows nothing about it; this is the browser saying
    "I did not send that", not the engine refusing it. */
-.textbox.gui-invalid {
-  border-color: #d9463f;
-  outline: 1px solid #d9463f;
-}

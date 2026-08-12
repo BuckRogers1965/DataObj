@@ -9,9 +9,8 @@ connect, disconnect, set-property, activate, subscribe), same as the
 Bridge itself is a veneer over the C API. This file never talks to the
 framework directly - only ever through send()/JSON messages.
 
-Recursion, not raw HTML: every LED, textbox, checkbox, slider, knob and
-activate button rendered on a node card is backed by a REAL registered
-object instance (LED/Textbox/Checkbox/.../Button), wired to the node it
+Recursion, not raw HTML: every control rendered on a node card is backed
+by a REAL registered object instance of that control's class, wired to the node it
 decorates with genuine Connect() calls (connect reaches any property or
 an Activate directly now - the bind-* verbs are retired) - never a bare
 <input> firing set-property straight at the target. A composite object
@@ -23,9 +22,13 @@ State/activate is rendered directly against itself (that's the base
 case - a Textbox's value control can't itself be another Textbox).
 Every other class gets each control wrapped in a fresh widget instance.
 
-Widget numbers below mirror the PropertyType enum in object.h:
-  1 TEXTBOX  2 LED  3 BUTTON  4 CHECKBOX  5 SLIDER
+Widget numbers below mirror the PropertyType enum in object.h, for the
+classes this file still renders itself:
+  1 TEXTBOX  3 BUTTON  4 CHECKBOX  5 SLIDER
   6 VUMETER  7 TEXTOUT  8 KNOB  9 LABEL  10 NULL (a port, not a widget)
+A number missing from that list belongs to a class that brings its own
+presentation - it says so itself and the Bridge passes it on, so nothing
+here needs to hold it.
 
 */
 
@@ -37,24 +40,61 @@ const ROOT_VIEW = '/Root';   /* the canvas IS this view - see placeInContainer *
 
 const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
 
-const PROP_TEXTBOX = 1, PROP_LED = 2, PROP_BUTTON = 3, PROP_CHECKBOX = 4, PROP_SLIDER = 5,
-      PROP_VUMETER = 6, PROP_TEXTOUT = 7, PROP_KNOB = 8, PROP_LABEL = 9, PROP_NULL = 10, PROP_MENU = 11,
-      PROP_ICON = 12,   /* a doorway: renders as the target's icon, opens its one panel */
-      PROP_MARKDOWN = 13,  /* rendered markdown - the Markdown widget's display */
-      PROP_HTML = 14,      /* rendered HTML, sandboxed - the HTML widget's display */
-      PROP_IMAGE = 15;     /* an image loaded from a URL - the Image widget's display */
+/* The only widget numbers left here are the ones the HOST itself acts on:
+   a doorway it opens, a menu row it points a control at, and the default it
+   falls back to for an atom with no Value. Which class RENDERS a given
+   number is not in this file at all - each class says so itself
+   (PublishShow) and the Bridge passes it on as GTWidgetTypes. */
+const PROP_TEXTOUT = 7, PROP_MENU = 11,
+      PROP_ICON = 12;   /* a doorway: renders as the target's icon, opens its one panel */
 
-/* palette classes that ARE widgets - the base case of the recursion */
-/* the control class names a dissection-table cell may be told to render as.
-   NOT how an instance is classified any more - the engine sends the class's
-   own lineage (classParent) and onInstanceCreated asks that. */
-const WIDGET_CLASSES = new Set(['Checkbox', 'Textbox', 'Slider', 'Knob', 'Label', 'LED', 'TextOut', 'VUMeter', 'Button', 'MoButton', 'MenuButton', 'Dropdown', 'Markdown', 'HTML', 'Image']);
 
-/* which widget class backs which property widget-type, split by whether  */
-/* the widget is something the user edits or something that only displays */
-const INPUT_WIDGET_CLASS   = { [PROP_TEXTBOX]: 'Textbox', [PROP_CHECKBOX]: 'Checkbox', [PROP_SLIDER]: 'Slider', [PROP_KNOB]: 'Knob' };
-const DISPLAY_WIDGET_CLASS = { [PROP_LED]: 'LED', [PROP_TEXTOUT]: 'TextOut', [PROP_VUMETER]: 'VUMeter', [PROP_LABEL]: 'Label', [PROP_MARKDOWN]: 'Markdown', [PROP_HTML]: 'HTML', [PROP_IMAGE]: 'Image' };
-const READOUT_WIDGET_CLASSES = new Set(Object.values(DISPLAY_WIDGET_CLASS));
+/* WHAT THE CONTROLS THEMSELVES BROUGHT. widgets.js is assembled by the
+   Bridge out of each class's own Show/web and loaded before this file, so
+   by the time anything renders the registrations are here. The host holds
+   no list of them, learns nothing about any one of them, and asks these
+   two questions instead of knowing the answers.
+
+   The maps above are what has not moved yet. As each control brings its
+   own half, its entry leaves them; when the last one goes, so do they. */
+function widgetModule(name) {
+  return (window.GTWidgets && window.GTWidgets[name]) || null;
+}
+
+/* WHAT A CONTROL IS HANDED. Four things: the value it starts with, how to
+   commit an edit, how to write one of its own properties, and how to watch
+   one. A control can therefore TRANSLATE a gesture into a property write
+   and reflect a property into a look - and nothing else. It cannot decide
+   anything about the session, which is the line that keeps a surface a
+   surface. */
+function controlContext(alias, defaultValue, commit, points) {
+  /* A control names its own properties ("Value", "Items"). Where those
+     actually live is the context's business, which is what lets the SAME
+     control serve an alias: the control is unchanged, it is just pointed
+     somewhere else. Identity when nothing is pointed. */
+  const at = (prop) => (points && points[prop]) || { instance: alias, prop: prop };
+  return {
+    defaultValue: defaultValue,
+    commit: commit,
+    alias: alias,
+    set(prop, value) {
+      const t = at(prop);
+      send({ cmd: 'set-property', instance: cur(t.instance), prop: t.prop, value: value });
+    },
+    watch(prop, apply) {
+      const t = at(prop);
+      const key = t.instance + '.' + t.prop;
+      (liveControls[key] = liveControls[key] || []).push({ apply: apply, widgetClass: 'own' });
+      send({ cmd: 'subscribe', instance: t.instance, port: t.prop });
+    },
+  };
+}
+
+/* the class that renders a property of this widget type - the class said so
+   itself (its own Value is declared as that type), the Bridge passed it on */
+function widgetClassForType(widget) {
+  return (window.GTWidgetTypes && window.GTWidgetTypes[widget]) || null;
+}
 
 let ws = null;
 let classes = {};          // className -> [{Name,Widget,Default}, ...]
@@ -63,7 +103,7 @@ let instances = {};        // alias -> {className, el, ports: {name: dotEl}}
 let selfDisplays = {};     // "alias.propName" -> {el,widgetClass}, for a widget class's own State shown on itself
 let liveControls = {};     // "alias.propName" -> {el,widgetClass}, an editable control synced from its own property-changed events
 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-let portDisplays = {};     // "alias.portName" -> {el,widgetClass}, a readout painted from the port's message-flowed traffic (an out-port LED)
+let portDisplays = {};     // "alias.portName" -> {el,widgetClass}, a readout painted from the port's message-flowed traffic
 let wires = [];            // {fromAlias, fromPort, toAlias, toPort, lineEl}
 let cardBodies = {};       // cardAlias -> {addMemberRow}, a card panel waiting to grow rows from its internals view's members
 let internalsOwner = {};   // internals view alias -> the instance it dissects (learned from the internals event)
@@ -446,131 +486,36 @@ function parseInterface(interfaceNode) {
 /* one shared builder for the raw input element a Value control renders  */
 /* as - used both for a widget instance's own Value (base case) and for  */
 /* the sub-widget instances wrapping some other object's property        */
-function buildValueControl(widgetClass, defaultValue, onCommit) {
-  /* a DISPLAY class renders as its readout wherever it appears - the      */
-  /* stamped Widget decides, whatever surface asked (atom, member row,      */
-  /* dissection table): a Markdown property IS rendered markdown, an LED    */
-  /* property IS a dot. Writing into one is composition's job (wire a       */
-  /* source at it), not a raw text slot's.                                   */
-  if (READOUT_WIDGET_CLASSES.has(widgetClass)) {
-    const ro = makeReadoutEl(widgetClass);
-    if (defaultValue) updateReadout(ro, widgetClass, defaultValue);
-    return ro;
-  }
-  let el;
-  switch (widgetClass) {
-    case 'Checkbox':
-      el = document.createElement('input');
-      el.type = 'checkbox';
-      el.checked = defaultValue === '1';
-      el.onchange = () => onCommit(el.checked ? '1' : '0');
-      break;
-    case 'Slider':
-      el = document.createElement('input');
-      el.type = 'range';
-      el.value = defaultValue || '0';
-      el.oninput = () => onCommit(el.value);
-      break;
-    case 'Knob':
-      el = document.createElement('input');
-      el.type = 'number';
-      el.value = defaultValue || '0';
-      el.onchange = () => onCommit(el.value);
-      break;
-    default: /* Textbox - the ONE text control, whatever size its text is.  */
-             /* NOT a textarea (there is no textarea in this system): an     */
-             /* editable text box. It answers .value like any control, so    */
-             /* every existing read/write path works on it unchanged.         */
-      el = document.createElement('div');
-      el.className = 'textbox';
-      el.contentEditable = 'plaintext-only';
-      Object.defineProperty(el, 'value', {
-        get() { return this.innerText.replace(/\n$/, ''); },
-        set(v) { this.innerText = v || ''; },
-      });
-      el.value = defaultValue || '';
-      el.onchange = () => onCommit(el.value);
-      el.addEventListener('blur', () => onCommit(el.value));
-      /* the default box when nothing declares a size (an options/dissection */
-      /* property); a placed control overrides it with its own W/H. Boxes    */
-      /* never resize by content.                                            */
-      el.style.height = '2lh';
-      el.style.width = '20ch';
-  }
+function buildValueControl(widgetClass, defaultValue, onCommit, alias) {
+  /* Every control builds itself. The host does not know what any of them
+     are, does not keep a list, and has no fallback that quietly renders the
+     wrong thing - a class with no browser half is a bug to see, not a
+     textbox to squint at. */
+  const own = widgetModule(widgetClass);
+  if (own && own.create) return own.create(controlContext(alias, defaultValue, onCommit));
+  return missingControlEl(widgetClass);
+}
+
+/* the loud failure. A missing presentation used to be silence - the lookup
+   missed, the switch fell through, and it rendered as a textbox with no
+   error anywhere. That silence is the thing this whole change exists to
+   end, so it is visible on the page AND in the console. */
+function missingControlEl(widgetClass) {
+  console.error('no browser half registered for control class:', widgetClass);
+  const el = document.createElement('span');
+  el.className = 'widget-readout control-missing';
+  el.textContent = '?' + (widgetClass || '');
   return el;
 }
 
 function makeReadoutEl(widgetClass) {
-  if (widgetClass === 'Markdown') {
-    const el = document.createElement('div');
-    el.className = 'markdown-view';
-    return el;
-  }
-  if (widgetClass === 'HTML') {
-    /* a SANDBOXED frame: display is display, never execution. The         */
-    /* sandbox blocks all script (browser-enforced, not a sanitizer to     */
-    /* maintain); allow-same-origin alone is safe without allow-scripts    */
-    /* and is what lets this page (and the harness) read the rendering.    */
-    const el = document.createElement('iframe');
-    el.className = 'html-view';
-    el.setAttribute('sandbox', 'allow-same-origin');
-    return el;
-  }
-  if (widgetClass === 'Image') {
-    /* a plain <img>: its value IS the URL, loaded straight from wherever   */
-    /* it points (e.g. a ComfyUI /view). No script, no sandbox needed.      */
-    const el = document.createElement('img');
-    el.className = 'image-view';
-    return el;
-  }
-  const el = document.createElement('span');
-  el.className = widgetClass === 'LED' ? 'node-led state-0' : 'widget-readout';
-  return el;
+  const own = widgetModule(widgetClass);
+  if (own && own.create) return own.create({});
+  return missingControlEl(widgetClass);
 }
 
 /* the frame's own base look, injected ahead of the value - the panel      */
 /* theme carried inside the sandbox, since outside styles can't reach in   */
-const HTML_VIEW_BASE = '<style>body{margin:6px 10px;background:#1a1b20;' +
-  'color:#cfd4dc;font:12px/1.5 system-ui,sans-serif}</style>';
-
-/* a small, dependency-free markdown renderer (the framework's own "no      */
-/* external dependencies" discipline): headings, bold/italic, inline code,  */
-/* fenced code blocks, bullet lists, paragraphs. Input is escaped before    */
-/* any markup is applied, so arbitrary flow data can be displayed safely.   */
-function renderMarkdown(md) {
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const inline = (s) => esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  let html = '', inCode = false, inList = false;
-  for (const line of String(md || '').split('\n')) {
-    if (line.trim().startsWith('```')) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += inCode ? '</code></pre>' : '<pre><code>';
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { html += esc(line) + '\n'; continue; }
-    const li = line.match(/^\s*[-*]\s+(.*)/);
-    if (inList && !li) { html += '</ul>'; inList = false; }
-    if (li) {
-      if (!inList) { html += '<ul>'; inList = true; }
-      html += '<li>' + inline(li[1]) + '</li>';
-      continue;
-    }
-    /* a heading is hashes then the text: the space after them is optional  */
-    /* ("#Title" is a heading), leading indentation is tolerated (a pasted   */
-    /* block carries the indent it was copied from), and all six levels      */
-    /* exist. Nothing here requires column zero or a perfectly typed space.  */
-    const h = line.match(/^\s*(#{1,6})\s*(.*)/);
-    if (h) { html += '<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'; continue; }
-    if (line.trim()) html += '<p>' + inline(line) + '</p>';
-  }
-  if (inList) html += '</ul>';
-  if (inCode) html += '</code></pre>';
-  return html;
-}
 
 /* a MenuButton, wherever it appears - the topbar's File/Mode chrome and a  */
 /* dropped-in MenuButton instance are the same object rendered the same     */
@@ -798,7 +743,7 @@ function bindLiveControl(subscribeAlias, subscribeProp, widgetClass, defaultValu
     if (!guiValidate(subscribeAlias, el, raw)) return;
     onCommit(raw);
   };
-  const el = buildValueControl(widgetClass, defaultValue, commit);
+  const el = buildValueControl(widgetClass, defaultValue, commit, subscribeAlias);
   /* a Textbox is a pixel box: it takes the W/H of the instance it IS - its   */
   /* own when it renders its own Value, the Alias member's when it stands in  */
   /* for another object's property. Never the TARGET's: that is the whole     */
@@ -956,6 +901,9 @@ function guiReformat(el) {
 }
 
 function updateLiveControl(entry, value) {
+  /* a control watching one of its own properties - it said what to do */
+  if (entry.apply) { entry.apply(value); return; }
+
   if (entry.widgetClass === 'AtomLabelPos') {
     const pos = ['left', 'right', 'top', 'bottom', 'none'].indexOf(value) >= 0 ? value : 'bottom';
     entry.el.classList.remove('atom-label-left', 'atom-label-right', 'atom-label-top', 'atom-label-bottom', 'atom-label-none');
@@ -965,53 +913,32 @@ function updateLiveControl(entry, value) {
   if (entry.widgetClass === 'MoLabel') { entry.el.textContent = value; return; }
   if (entry.widgetClass === 'AtomW') { if (parseInt(value, 10)) entry.el.style.width = parseInt(value, 10) + 'px'; return; }
   if (entry.widgetClass === 'AtomH') { if (parseInt(value, 10)) entry.el.style.height = parseInt(value, 10) + 'px'; return; }
-  if (READOUT_WIDGET_CLASSES.has(entry.widgetClass)) { updateReadout(entry.el, entry.widgetClass, value); return; }
-  if (entry.widgetClass === 'Checkbox') { entry.el.checked = value === '1'; return; }
-  if (entry.widgetClass === 'MenuItems') {
-    /* rebuild the <option>s, then apply the value we were TOLD - not what the
-       DOM happens to hold. A <select> silently discards a value with no
-       matching option, so if Value arrived before Items the DOM holds '' and
-       the browser shows the first option instead. That is how a dropdown came
-       to display one language while the property said another. */
-    const keep = entry.el.wantedValue || entry.el.value;
-    entry.el.textContent = '';
-    for (const item of (value || '').split(',')) {
-      if (!item) continue;
-      const opt = document.createElement('option');
-      opt.value = item; opt.textContent = item;
-      entry.el.appendChild(opt);
-    }
-    if (keep) entry.el.value = keep;
-    return;
-  }
+  /* the GUI_Format mask is the HOST's, not the control's: it is an
+     annotation on the DATA (see guiValidate), so it is applied before the
+     control is handed the value. This must stay ahead of the generic
+     assignment below, or a masked box would be written raw. */
   if (entry.widgetClass === 'Textbox' && entry.el.guiAlias) {
     const mask = guiAnnotation(entry.el.guiAlias, 'Format');
     entry.el.value = mask ? guiMaskApply(mask, value) : value;
     guiValidate(entry.el.guiAlias, entry.el, value);
     return;
   }
-  if (entry.widgetClass === 'MenuValue') {
-    /* remember it on the element, because assigning it now is a no-op when
-       the options have not arrived yet - and the DOM is then not a place the
-       value can be read back from. MenuItems applies this once the options
-       exist, whichever order the two events turn up in. */
-    entry.el.wantedValue = value;
-    if (value) entry.el.value = value;
-    return;
-  }
+  /* a control that brought its own presentation was handed a .value that
+     knows what to do with what arrives - there is nothing to decide here */
+  if (widgetModule(entry.widgetClass)) { entry.el.value = value; return; }
   entry.el.value = value;
 }
 
 /* --- base case: a widget class's own Value/State/activate, rendered against itself --- */
 
 function makeSelfControl(alias, propName, widget, defaultValue) {
-  const widgetClass = INPUT_WIDGET_CLASS[widget] || 'Textbox';
+  const widgetClass = widgetClassForType(widget) || 'Textbox';
   return bindLiveControl(alias, propName, widgetClass, defaultValue,
     (v) => send({ cmd: 'set-property', instance: cur(alias), prop: propName, value: v }));
 }
 
 function makeSelfDisplay(alias, propName, widget) {
-  const widgetClass = DISPLAY_WIDGET_CLASS[widget] || 'TextOut';
+  const widgetClass = widgetClassForType(widget) || 'TextOut';
   const el = makeReadoutEl(widgetClass);
   send({ cmd: 'subscribe', instance: alias, port: propName });
   /* same list-not-single-slot reasoning as bindLiveControl above - Copy    */
@@ -1020,62 +947,6 @@ function makeSelfDisplay(alias, propName, widget) {
   (selfDisplays[key] = selfDisplays[key] || []).push({ el, widgetClass });
   return el;
 }
-
-/* the MOMENTARY button: pointerdown presses, pointerup/leave releases.
-   Both are ordinary writes to the object's Press port - the engine owns
-   what an edge MEANS (its Out, its auto-repeat); this only reports what
-   the hand did. Released outside the button counts as a release, exactly
-   as the VNOS control behaved. */
-function makeMoButtonEl(alias, momentary) {
-  const btn = document.createElement('button');
-  btn.className = 'mo-button';
-  btn.textContent = 'Press';
-
-  const press = (v) => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: v });
-  let held = false;
-  btn.addEventListener('pointerdown', (ev) => {
-    /* a button just presses - that is what it is for */
-    ev.stopPropagation();
-    held = true;
-    btn.classList.add('pressed');
-    press('1');
-  });
-  const release = () => {
-    if (!held) return;
-    held = false;
-    btn.classList.remove('pressed');
-    press('0');
-  };
-  /* a momentary button reports the release too; a plain Button just sends
-     the 1. That is the whole difference between them. */
-  if (momentary) {
-    btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointerleave', release);
-  } else {
-    btn.addEventListener('pointerup', () => { held = false; btn.classList.remove('pressed'); });
-    btn.addEventListener('pointerleave', () => { held = false; btn.classList.remove('pressed'); });
-  }
-
-  /* the caption is the object's Label - engine state, like any property */
-  (liveControls[alias + '.Label'] = liveControls[alias + '.Label'] || []).push({ el: btn, widgetClass: 'MoLabel' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Label' });
-  return btn;
-}
-
-/* a Button is a MoButton that only sends the 1 - it is not a different
-   kind of thing, and "Activate" is a property name a panel may happen to
-   use, never a caption */
-function makeSelfActivateButton(alias) {
-  return makeMoButtonEl(alias, 0);
-}
-
-/* The hidden helper widgets (makeInputWidget/makeDisplayWidget/            */
-/* makeButtonWidget) that used to wrap a composite object's properties in    */
-/* invisible per-page widget instances are GONE (readmefirst repair #3):     */
-/* a card's rows are the engine's own internals-view members now (see        */
-/* registerCard/addMemberRow), its icon LED is a plain subscribed readout,   */
-/* and its Activate button sends the activate verb straight at the object.   */
-/* Nothing on this side of the bridge creates, names, or owns anything.      */
 
 /* a standalone widget instance: its own natural control (or dot) plus a  */
 /* label, positioned and draggable exactly like any other card - no        */
@@ -1092,27 +963,26 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
   el.style.top = pos.y + 'px';
 
   let control, primaryProp;
-  if (className === 'MenuButton') {
+  /* A control that brought its own presentation builds itself, gestures and
+     all - it is handed its context and nothing here knows what class it is.
+     MenuButton is the one exception and it is not about rendering: it makes
+     SESSION decisions (the file dialog, arming export), which is the host's
+     to own. See makeMenuButtonEl. */
+  if (widgetModule(className)) {
+    /* Bound to its OWN Value like any rendering of a property: the control
+       is created through the same path a panel row uses, so it subscribes,
+       it is updated, and it commits. A control that only displays simply
+       never calls the commit it was handed - which is the whole of the old
+       input/display split, and why it needed no replacement. */
+    const valueProp = props.find((p) => p.Name === 'Value');
+    control = bindLiveControl(alias, 'Value', className, valueProp && valueProp.Default,
+      (v) => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: v }));
+  } else if (className === 'MenuButton') {
     control = makeMenuButtonEl(alias);
-  } else if (className === 'Dropdown') {
-    /* the dropdown primitive: a native select whose options are the       */
-    /* object's own Items property and whose selection is its Value        */
-    const sel = document.createElement('select');
-    sel.className = 'widget-menu';
-    sel.onchange = () => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: sel.value });
-    (liveControls[alias + '.Value'] = liveControls[alias + '.Value'] || []).push({ el: sel, widgetClass: 'MenuValue' });
-    send({ cmd: 'subscribe', instance: alias, port: 'Value' });
-    (liveControls[alias + '.Items'] = liveControls[alias + '.Items'] || []).push({ el: sel, widgetClass: 'MenuItems' });
-    send({ cmd: 'subscribe', instance: alias, port: 'Items' });
-    control = sel;
-  } else if (className === 'MoButton') {
-    control = makeMoButtonEl(alias, 1);
-  } else if (className === 'Button') {
-    control = makeSelfActivateButton(alias);
   } else {
     const valueProp = props.find((p) => p.Name === 'Value');
     const widget = valueProp ? valueProp.Widget : PROP_TEXTOUT;
-    control = INPUT_WIDGET_CLASS[widget]
+    control = widgetClassForType(widget)
       ? makeSelfControl(alias, 'Value', widget, valueProp && valueProp.Default)
       : makeSelfDisplay(alias, 'Value', widget);
   }
@@ -1459,13 +1329,6 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   registerView(alias, props, pos, false, container, reservedIn, reservedOut);
 }
 
-function updateReadout(el, widgetClass, value) {
-  if (widgetClass === 'LED') el.className = 'node-led state-' + value;
-  else if (widgetClass === 'Markdown') el.innerHTML = renderMarkdown(value);
-  else if (widgetClass === 'HTML') el.srcdoc = HTML_VIEW_BASE + (value || '');
-  else if (widgetClass === 'Image') el.src = value || '';
-  else el.textContent = value;
-}
 
 function onPropertyChanged(alias, port, value) {
   /* every property-changed event already carries the current value -      */
@@ -1564,7 +1427,7 @@ function onPropertyChanged(alias, port, value) {
   /* directly, they never simulate a user edit, so hydrating N renderings   */
   /* here can never turn into N set-property echoes back out.               */
   const key = alias + '.' + port;
-  for (const entry of selfDisplays[key] || []) updateReadout(entry.el, entry.widgetClass, value);
+  for (const entry of selfDisplays[key] || []) entry.el.value = value;
   for (const entry of liveControls[key] || []) updateLiveControl(entry, value);
 
   /* the annotation itself changed - re-judge every box it governs, so
@@ -1598,10 +1461,10 @@ function onPropertyChanged(alias, port, value) {
 }
 
 function onMessageFlowed(alias, port, value) {
-  /* an out-port readout (a Pulse's Out LED) paints straight from the       */
+  /* an out-port readout (a Pulse's Out, say) paints straight from the      */
   /* port's own traffic - display only, nothing standing in for the port    */
   const key = alias + '.' + port;
-  for (const entry of portDisplays[key] || []) updateReadout(entry.el, entry.widgetClass, value);
+  for (const entry of portDisplays[key] || []) entry.el.value = value;
 
   log(alias + '.' + port + ' → ' + value, 'event');
 }
@@ -2145,20 +2008,18 @@ function renderAliasControl(alias) {
   /* convention a MenuButton uses with its Items, applied to any menu prop. */
   if (Number(rec.widget) === PROP_MENU) {
     rec.slot.textContent = '';
-    const sel = document.createElement('select');
-    sel.className = 'widget-atom-control widget-menu';
-    sel.onchange = () => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: sel.value });
+    /* the Dropdown control, pointed at someone else's property - the same
+       class the palette holds, told where its Value and Items live. Nothing
+       here builds a select or knows what one looks like. */
+    const menu = widgetModule('Dropdown');
+    const sel = menu.create(controlContext(alias, null, null, {
+      Value: { instance: rec.target, prop: rec.targetProp },
+      Items: { instance: rec.target, prop: rec.targetProp + 'List' },
+    }));
+    sel.classList.add('widget-atom-control');
     rec.slot.appendChild(sel);
     rec.control = sel;
     rec.labelEl.textContent = rec.label || rec.targetProp;
-    /* the current value drives selection, the companion List drives the    */
-    /* options - two subscriptions, both landing on this one <select>       */
-    const valKey = rec.target + '.' + rec.targetProp;
-    (liveControls[valKey] = liveControls[valKey] || []).push({ el: sel, widgetClass: 'MenuValue' });
-    send({ cmd: 'subscribe', instance: rec.target, port: rec.targetProp });
-    const listKey = rec.target + '.' + rec.targetProp + 'List';
-    (liveControls[listKey] = liveControls[listKey] || []).push({ el: sel, widgetClass: 'MenuItems' });
-    send({ cmd: 'subscribe', instance: rec.target, port: rec.targetProp + 'List' });
     /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
     instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
     instances[alias].ports['Value'] = rec.el;
@@ -2169,8 +2030,8 @@ function renderAliasControl(alias) {
   /* widget type maps to a control class; a widget CLASS NAME typed in by   */
   /* hand on the dissection table is honored as-is; anything else (an       */
   /* unpublished property, PROP_NULL plumbing) is a plain textbox            */
-  const widgetClass = INPUT_WIDGET_CLASS[rec.widget] || DISPLAY_WIDGET_CLASS[rec.widget] ||
-                      (WIDGET_CLASSES.has(rec.widget) ? rec.widget : 'Textbox');
+  const widgetClass = widgetClassForType(rec.widget) ||
+                      (widgetModule(rec.widget) ? rec.widget : 'Textbox');
 
   rec.slot.textContent = '';
   /* reads subscribe to the target (events speak the original's name);    */
@@ -2375,6 +2236,10 @@ function onInstanceRenamed(oldAlias, newAlias) {
      constant. guiAlias is the same story for the GUI_ annotations. */
   for (const k of Object.keys(liveControls)) {
     for (const entry of liveControls[k]) {
+      /* a control watching one of its OWN properties holds a handler, not an
+         element - it addresses the engine through cur() already, so there is
+         no stamp on it to follow a rename */
+      if (!entry.el) continue;
       if (entry.el.ctlAlias === oldAlias) entry.el.ctlAlias = newAlias;
       if (entry.el.guiAlias === oldAlias) entry.el.guiAlias = newAlias;
     }
