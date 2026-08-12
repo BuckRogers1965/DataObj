@@ -217,6 +217,17 @@ per-property or per-object opt-in.
    *Done (July 2026): SetProp* fans out to a property's Subscriber
    children unconditionally on every write (FanOutSubscribers, node.c);
    WatchableProp() survives only as a no-op for old call sites.*
+   *Finished (2026-08-11): that fan-out is now QUEUED - FanOutSubscribers
+   envelopes the write onto the scheduler (SndMsgNode) and DispatchMsg
+   delivers from ExecTasks, so no subscriber's handler runs inside the
+   setter's call stack. And the last condition on it is gone: SetProp*
+   no longer compares the new value to the old one, so a write is an
+   event and a repeated value is a repeated event. Between them these
+   retire the reason a Button had to manufacture a falling edge. This
+   is also what the Phase 2 keystone (the "Intercept revival", see
+   Sequencing logic) turned out to mean - Intercept was never revived;
+   OnMsg plus unconditional fan-out replaced it, and queuing finished
+   the job. See "Found 2026-08-11" below.*
 3. **`Connect()` reaches any property — retiring bind-property/
    bind-activate as a separate mechanism.** `ConnectToProperty`/
    `ConnectToActivate` (object.c) and the Bridge's bind-property/
@@ -285,6 +296,15 @@ per-property or per-object opt-in.
    inside a View stays individually wireable with or without this
    curation, because nothing needed an opt-in to be connectable in the
    first place (Phase 2.2).
+   *Done: `objects/view` is an ordinary palette class; Views nest
+   (`Widget_SubPanel`); containment is a `Container` property, not tree
+   reparenting, exactly as described. Icon/open is `ReservedViewOpen`,
+   with `ReservedViewPanelX/Y` carrying the panel's own position.
+   Aliasing a child's property as the View's own In/Out shipped as
+   `LinkPropertyAs` / bind-port, and `testharness/widgettest.py` builds
+   a composed View and drives it from outside as one unit. The root
+   itself became a real View (`CreateRoot`) - no fabricated /Root
+   prefix, no chrome category.*
 5. **Skin every existing object — by composing a View, not
    generating one.** A Reader's control panel is a View instance
    holding a Textbox (wired to Filename), an LED (wired to State), and
@@ -295,6 +315,11 @@ per-property or per-object opt-in.
    Pulse (interval knob, count box, enable LED, out LED), Filter (mode
    textbox), Queue (depth VU meter), TCP (port box, connection LED),
    Out (text output).
+   *Done: every object carries a `WidgetItem` table and builds its panel
+   by composing a View (`Widget_BuildTable`, objects/widget) - 56 modules
+   at the last count. Built once, then it simply exists; opening it is
+   observation. The same table publishes the class Interface
+   (`Widget_Publish`), so one declaration serves both.*
 6. **Every primitive owns its own presentation.** No shared generic
    fallback rendering across widget types — a VU meter must not
    degrade to the same plain text readout a Label uses. Each widget
@@ -303,6 +328,15 @@ per-property or per-object opt-in.
    longer-run version is Phase 6/7's federation idea turned inward — a
    widget class eventually ships (or points to) its own rendering, the
    same way it will eventually ship its own script-defined behavior.
+   *STILL OPEN - and now the main thing holding Phase 2 back. The short
+   term half landed: each class does render as itself. But it landed as
+   per-class code IN the client, which is the two-place problem - a
+   control is defined in its `.c` and again in `web/app.js`, and
+   forgetting the second half renders a textbox with no error anywhere.
+   The longer-run version is written up as "Presentation belongs to the
+   control" below, with delivery decided (each translator builds its own
+   blob at instance start) and the update contract identified as the
+   part that decides whether the ladder comes back.*
 7. **Every object ships its README, and Help renders it.** Each
    object module directory carries a README.md — what the object is,
    its properties, how to wire it — loaded at class
@@ -325,6 +359,11 @@ per-property or per-object opt-in.
    second time, and a class whose README documents its properties has
    tooltips everywhere its controls appear — rows, atoms, aliases —
    with zero extra authoring.
+   *Partly done: every object directory carries a README, `Widget_AddHelp`
+   puts a Help sub-view bottom-left on every panel, and a Markdown
+   control renders it. The TOOLTIP half is not done - per-property doc
+   lines annotating the published Interface entries. Tooltips today show
+   the alias path, not the property's documentation.*
 8. **A Widget base class — subclassing starts where the sameness
    is.** Every widget panel now carries the same growing set of things
    — Enable, the State LED, Activate, position/PanelX/PanelY, and now
@@ -342,6 +381,14 @@ per-property or per-object opt-in.
    class — and dependency-ordered class loading (Phase 8's note, and
    main.c's original two-phase intent) is what lets a subclass load
    after the base it names.
+   *Done: a class names its parent (`SetClassParent`), an unhandled
+   message falls through to it on `rtrn_dropped`, and `Object` ends the
+   chain. `Widget` owns Help and the panel conventions, and `Control` is
+   what a control descends from - the client asks an instance's
+   `classParent` rather than consulting a hardcoded list of the fifteen
+   control class names, so a control written tomorrow renders today.
+   The dependency-ordered LOADING half is still open (Phase 8): a
+   subclass whose base has not loaded yet is not handled.*
 
 ## Phase 3 — The wire: protocol and server
 
@@ -502,20 +549,35 @@ shouldn't have been recreated in the first place.)
    space is create-instance + a `place` in the Canvas View at the drop
    coordinates; dropping it onto an *open* View places it in that View
    instead.
+   *Done: `create-instance` and `clone-instance` both carry
+   class/container/x/y, so birth is atomic - named in its container at
+   its position, never born at root and moved. Dropping onto an open
+   View places it in that View. Exercised by testharness/viewclonetest.py.*
 3. **Wiring**: Connect()/SndMsg, exactly the Reader.Out → Writer.In
    wiring already built, now reaching every property once Phase 2.3
    lands, not just ones with handlers — driven by Connect mode's two-click
    source/destination gesture (Phase 4.6), not a dedicated dot
    drag.
+   *Done: connect/disconnect over the protocol, reaching every property
+   (Phase 2.3), with the two-click source/destination gesture in Connect
+   mode. `list-connections` reads the same records the graph walkers do.
+   Exercised by testharness/connectiontest.py.*
 4. **Opening a settings panel**: a composite object's control panel is
    just its associated View (Phase 2.5) — "open settings" means
    subscribe to and render that View's existing contents, the same code
    path as opening any other View, including one a user hand-built from
    scratch. There is no separate "default skin" mechanism running in
    parallel to maintain.
+   *Done: a panel is its View, opened by `ReservedViewOpen` with
+   `ReservedViewPanelX/Y` for its own position - the same path as opening
+   any hand-built View. No parallel default-skin mechanism was ever
+   written.*
 5. **Widgets render themselves distinctly** (Phase 2.6): LED, slider,
    VU meter, text output, button, checkbox, textbox — each its own
    rendering, never a shared fallback.
+   *Done, with the Phase 2.6 caveat: each class does render as itself,
+   but the rendering is per-class code IN the client rather than shipped
+   by the class. See Phase 2.6.*
 6. **Interaction modes.** Use mode (normal interaction — slider drags
    change its value, a button click presses it, a textbox click focuses
    it for typing) is the default and always the resting state. Every
@@ -566,6 +628,9 @@ shouldn't have been recreated in the first place.)
    is ever exposed as its own action, is a different, more destructive
    operation and should look different in the UI, not share Delete's
    button.
+   *Done: Operate is the resting mode, with the other modes reached the
+   way described. `effectiveMode()` and the `mode-*` body classes drive
+   it, and the Operate panel and the Options panel stay distinct.*
 7. **Dynamic per-control styling: the bridge translates properties
    into CSS.** A control's look is engine state, not stylesheet code:
    an object (or an alias — presentation is the alias's own) declares
@@ -584,6 +649,20 @@ shouldn't have been recreated in the first place.)
    with it, because they were never anywhere but on the objects. The
    hand-maintained per-widget stylesheet shrinks to a base theme;
    custom looks stop being client code entirely.
+
+   *Chunk 1 (the read-only audit) has a concrete answer as of
+   2026-08-12, measured in a live browser: of 22 rendered controls, 14
+   took a declared pixel size and 8 took none. The reason is a single
+   gate - `bindLiveControl` registers the `W`/`H` subscription only when
+   `widgetClass === 'Textbox'`, so a Textbox is a pixel box and nothing
+   else is. Every other control falls back to whatever the browser
+   chooses, which is invisible for as long as a control has a sensible
+   intrinsic size and becomes a hairline the moment one does not (an
+   empty `<button>`). So the visual fact IS property-backed already -
+   the `W`/`H` are on the instances, correct, and unread. Widening that
+   gate is the smallest possible first chunk, and worth doing before the
+   translation moves into the bridge, because it says whether the
+   declared sizes in the widget tables were ever tuned.*
 
    **Broken into small, sequential chunks (July 2026) - aim at this
    over time, not in one sweep, and look for chunks that ride on other
@@ -684,6 +763,19 @@ shouldn't have been recreated in the first place.)
    import (a clone-drop into the target view); does a script-containing
    View round-trip through save/load with its Runner correctly NOT
    re-activating twice.
+   *Status 2026-08-12: THE SUITE EXISTS and it is red.
+   `testharness/scriptedwidgettest.py` covers exactly the four risks
+   named above - builds-and-runs, clone, export/import, save/load - plus
+   an alias case, and `testharness/widgettest.py` covers the composed
+   View driving an outside sink. All eight fail identically across every
+   build variant (debug/release/asan/ubsan/gcov), with 0 crashes, 0
+   leaks and 0 sanitizer findings, so this is a logic failure and a
+   deterministic one. Every observation is the same shape: the script's
+   output never arrives - `OutBox=None`, `Output=`, `sink=`, `Out
+   values: []`. That is one fault, not eight, and it sits at whichever
+   end of a script crosses the reads/writes that changed on 2026-08-11.
+   The suite was the right thing to write; it is now the thing to make
+   green, and it is the honest gate on calling Phase 5.1 finished.*
 
 **Also found during the MCPSource work, not yet fixed - a general
 notification gap:** an instance created or moved server-side (not in
@@ -709,6 +801,12 @@ rather than rushed.
    as a class — its InstanceStart loads and wires the inner flow.
    Composites appear on the palette beside the C classes,
    indistinguishable to the user.
+   *Open. The pieces exist - a View can be a black-box unit (5.1), a
+   flow serializes and reloads (1.3a), and `import-flow` drops one into
+   a container - but nothing registers a flow file AS a class, so a
+   composite cannot appear on the palette beside the C classes. This is
+   the item that turns "a thing you built" into "a thing you can use",
+   and it is the largest single piece of Phase 5 still missing.*
 3. **Nesting and versioning**: composites inside composites; every
    library already carries a UUID, composites get one too.
 4. **Kiosk save: a flow that ships as the whole app.** Arrange the
@@ -836,10 +934,22 @@ objects bound to their connector.
 1. **HTTP client object**: request out, response in — the generic
    web primitive (the client half of the TCP object plus the Phase 3
    HTTP layer, meeting the async-dns module for resolution).
+   *Partly: there is no generic HTTP CLIENT object. What exists is HTTP
+   client behaviour built into the objects that needed it - Ollama,
+   ComfyUI, StableDiffusion, TPLink each speak their own protocol over
+   TCP. That works and is how the capability got proven, but it is the
+   thing this item exists to stop: the fifth wrapper should compose a
+   client, not re-implement one. The async-dns module is written and
+   still unwired, which is the other half of this.*
 2. **Web API wrapper classes**: generated from OpenAPI/REST
    descriptions — each endpoint a palette object with typed input
    properties and a response Out property. Webhook receiver object for
    the inbound direction (a route on the HTTP server → an Out property).
+   *Open, and the distinction is worth keeping sharp: several
+   hand-written wrappers exist (Ollama, ComfyUI, StableDiffusion), but
+   nothing GENERATES a class from a description. Hand-written wrappers
+   are objects; generated ones are the federation idea. No webhook
+   receiver object either.*
 3. **The MCP client View**: a View that, pointed at an MCP server
    (stdio transport first — an Exec object holding a subprocess with
    its stdio as In/Out properties is Reader/Writer-shaped; HTTP transport
@@ -854,6 +964,17 @@ objects bound to their connector.
    dataflow. MCP resources map to reader-like sources, prompts to
    template objects. The translator is bridge.c's shape: syntax
    only, over the same engine calls.
+   *Done, and it is the proof the federation idea works.
+   `objects/mcpsource` points at an MCP server, and each agent it
+   discovers becomes a generated View with controls for the agent's
+   inputs, a Submit, and an output - rendered, paneled and connectable
+   with no client changes, because a class was always published-interface
+   data. Build, Submit round-trip, and clone are confirmed; save/load and
+   export/import are covered by the tests that are currently red (see
+   5.1). The generated views are driven by a script reaching its
+   siblings by path, which is the Phase 5 + Phase 7 convergence arriving
+   here too. Transport is TCP to a local bridge rather than stdio; an
+   Exec object holding a subprocess is still unwritten.*
 4. **The MCP server View** (the symmetric direction): a View that
    SERVES whatever is dropped into it. Its members are known (the
    Container relationship), their interfaces are already published
@@ -871,6 +992,20 @@ objects bound to their connector.
    a View and consuming the other's is federation whole: a wire
    whose middle hop is a tool call - the same cross-instance IPC the
    multi-user architecture uses, wearing a standard protocol.
+   *The STRUCTURE already exists - MCPSource builds it. Pointing it at a
+   server fills a View with the agents it found, each a member with a
+   published interface, controls and a Submit. That is exactly the thing
+   `tools/list` enumerates: 6.3 and 6.4 are not two mechanisms, they are
+   the same View read in opposite directions. Consuming walks a remote
+   list and makes members; serving walks members and makes a list.
+   What is missing is only the answering half - something that responds
+   to tools/list with a member walk and to tools/call with
+   SetOrDeliverProp / ActivateInstance / SndMsg, the same three verbs
+   every other translator already uses. Per the surfaces work below that
+   is a translator object reading `presentation/mcp` and speaking
+   get/set plus verbs, not a subsystem. And because the container
+   boundary is the security model, you serve exactly what you dropped
+   in - which MCPSource's own View demonstrates from the other side.*
 5. **Connector lifecycle**: connectors are ordinary objects with
    Enable lines and State LEDs, so a dead MCP server or API outage
    shows up on the panel like any other instrument, and a timer can
@@ -904,6 +1039,13 @@ interpreter.
    ScriptHost=1 marks a class as a language for runtime discovery; a
    mandatory runaway guard (QuickJS interrupt budget) keeps a script
    from freezing the single-threaded fabric (Lua's guard is still TODO).
+   THREE hosts as of 2026-08-11: Forth on atlast joined them
+   (`objects/forth`), which is what proved the shape is not
+   Lua-and-things-like-Lua - a stack language with no expression syntax
+   binds through the same verb table. Its own conventions are recorded
+   in the reference notes: flag-byte plus upper-case primitive names,
+   C-style string literals, compile once and exec the entry word, and
+   verbs push nothing when they return nothing.
    The ScriptBox shell (`objects/scriptbox`) is the script WIDGET —
    a Language dropdown (discovered hosts), a Source box and an Output
    box (PROP_TEXTAREA, `objects/textarea`), Run=Activate; it contains
@@ -1461,3 +1603,100 @@ render it two different ways at once.** An ISO readout and a Julian readout
 side by side, neither of them owning the value, no argument about which is
 "the" representation, and nothing to keep in sync. Under the old copy-and-
 reconcile model that was two copies drifting; now it is one node seen twice.
+
+### Cadence, and what it demands
+
+The rate is steady, and the shape of the work changes once the core settles:
+the core stops being the thing that grows and the library does. One new control
+a week is fifty-two in a year - date pickers, an address widget, colour
+pickers, spinners, whatever a panel turns out to want.
+
+That cadence is the whole argument for the presentation work above. At one
+control a week, a control that has to be defined in two places is a hundred and
+four edits and fifty-two chances to forget the second one - and forgetting it
+fails silently, rendering a textbox with no error anywhere. The authoring path
+has to be: write the object, write its `presentation/web`, drop it in the scan
+path. Nothing else, nowhere else.
+
+Two of those examples are also composites - a date picker and an address widget
+are several fields behaving as one control - so they lean on Phase 5 rather
+than on new primitives. Worth knowing before the list gets long: a good share
+of the fifty-two will be Views with bound ports rather than new C objects, and
+that path wants to be as cheap as writing a control.
+
+### Containers inside a view
+
+Nesting already exists - a View is a container and Views nest, which is what
+`Widget_SubPanel` builds (TPLink's Settings and Help are sub-views). What is
+missing is that **a container can carry properties that apply to what is inside
+it.**
+
+- **Background colour** is the easy half: an ordinary property on the container
+  that its presentation reads. No engine involvement, nothing new - the same
+  annotation-as-node shape as everything else in this section.
+- **Radio** is the interesting half, because mutual exclusion is behaviour, not
+  decoration, and there are two readings of it:
+  - *Several properties, one rule.* Each checkbox points at its own property
+    and the container enforces "setting one clears the others". Something has
+    to hold that rule, and it is engine-visible - a script reading those
+    properties sees the exclusion too.
+  - *One property, several options.* The group is a single menu property
+    rendered as buttons instead of a dropdown. Nothing new is needed at all:
+    it is the Dropdown's `<prop>List` with a different presentation, and
+    exclusion is a consequence of there being one value rather than a rule
+    anyone enforces.
+
+The second is almost certainly right, and it is worth noticing why: exclusion
+stops being something to implement and becomes something that cannot be
+violated. That is the same move as a control pointing at its data instead of
+holding a copy - the invariant is structural rather than maintained.
+
+Which leaves the real question for containers: **which properties of a
+container apply to its members?** Background colour clearly does. Enable
+probably should - disabling a container disabling what is in it is what anyone
+would expect, and today Enable is per-instance. That wants deciding once, as a
+rule about containment, rather than per-container-type.
+
+### The asymmetry, and using it as a signal
+
+Observed after a long day of both: **once the right change was understood it
+took minutes; every wrong direction started breaking things immediately.** That
+is not luck, and it is usable.
+
+**The right change is small because the mechanism is already general.** Almost
+nothing on 2026-08-11 added capability. `ResolvePort` was already on every
+write path, so pointing a control at its data meant removing the copy, not
+adding plumbing. `LinkPropertyAs` was already written, for aliases.
+`local->last` was still sitting in the Filter's struct with its comment intact,
+waiting for the mode that had been deleted around it. `ScriptBox_Activate`
+already served both its callers. The work kept turning out to be deletion, and
+in a uniform system one deletion is inherited everywhere.
+
+**The wrong change is loud because uniformity has no corners.** Making panel
+controls a different class meant every general walker met the new species at
+once - the renderer, the sizing, the caption logic, the subscribe path. There
+was nowhere for it to hide. In a system built from special cases a wrong turn
+breaks one path and may go unnoticed for a week; here it broke everything
+inside one reload.
+
+That is the design refusing, and it inverts the usual cost profile: **a wrong
+direction is cheap to DETECT and expensive only if you continue.**
+
+**So the asymmetry is a signal, and it is available before the tests run:**
+
+- Minutes, and quiet - you found the layer the fact belongs to.
+- Hours, and spreading breakage - you are adding a case, wherever you think
+  you are and whatever you are calling it.
+
+The concrete tell is writing code so that something will KNOW ABOUT a
+situation: a second species, a new enum value, a wrapper around a function that
+already did the job, another branch in a factory. Every one of those grew the
+breakage. Every removal of the thing that made a case necessary took minutes.
+
+**One caveat, and it is the argument for closing the seams.** This only holds
+where the invariants already hold. The hours that day went to the places where
+one thing was already pretending to be two - two render paths, two panel
+constructors - and in a seam BOTH directions are slow, because you can neither
+fix the general mechanism nor isolate the change. That is the real reason to
+close them: not tidiness, but that a seam is the only place where the system
+stops telling you quickly whether you are right.
