@@ -1634,13 +1634,24 @@ take the sink's error path. `Bridge_Subscribe` already handles a failed Connect
 ("connect failed"), so the silence becomes a reported error with no new
 mechanism anywhere.
 
-**The leaning, 2026-08-12: both ends must exist.** A connection is between two
-properties that are there. The ordering worry that justifies create-on-demand is
-about INSTANCES, not properties - an instance arrives whole, every property its
-`InstanceStart` declares already on it, so there is no real window where a
-property is legitimately missing but about to appear. Load and import already
-defer on missing *instances*; that is the mechanism that handles order, and it
-is untouched by this.
+**RESOLVED the same evening, in the other direction: creation on demand is the
+MECHANISM and must stay.** The leaning recorded here first was "both ends must
+exist" - and it was wrong, because it would break late binding. A property
+exists BECAUSE something referred to it, and that is how an instance is
+annotated (`GUI_Format`), how a default is overridden on one instance, and how
+a script adds state to an object whose class never declared it. A class
+publishes what it ships with; an instance grows the rest. Requiring both ends
+to pre-exist would forbid all three.
+
+Measured, once the logging below was in: **78 properties come into being during
+a single normal boot** - 34 `ReservedViewResizeable`, 23 `LabelPos`, 17
+`LastMember`, and a `W`/`H` pair. Not one of them is a typo. That is the system
+working.
+
+So the problem was never the creation. **It was the silence** - a conjured
+property is indistinguishable from one that was always there, which is what let
+six harness tests subscribe to a property removed two commits earlier and report
+nothing for weeks. The fix is to see it, not to forbid it.
 
 **"A connection is not finished until both sides have been updated."** The
 larger idea behind it: today the record lives only on the source, so "what am I
@@ -1674,22 +1685,22 @@ separate decision; it falls out.
 
 The questions to settle:
 
-- **Does anything legitimately rely on the source being invented?** The cheap
-  way to find out is to delete the five lines and run the harness - it exercises
-  create, clone, save/load, export/import, scripts and the GUI, so anything that
-  depended on a conjured property will say so. Answer by measurement, not by
-  argument.
+- ~~**Does anything legitimately rely on the source being invented?**~~
+  **Answered 2026-08-12: yes, constantly - 78 times per boot, and by design.**
+  Deleting the five lines would break annotation, per-instance override and
+  script-added state.
 - **Is there something to check against?** A class already publishes what it
   has (`PublishProp` / the class interface the bridge sends as `interface`). A
   wire to a name the class never published is a different thing from a wire to
   a name it published but no instance has written yet. That distinction exists
   today and nothing consults it.
-- **Should this be loud without being fatal?** The cheapest version is a WIRE
-  line at `-v 3` saying a property was conjured rather than found, which costs
-  nothing and turns silence into evidence. The next version up is that
-  translators (bridge, script, MCP) refuse and report, while the C API keeps
-  creating — the translator is where a human's typo enters, the C call is where
-  an object builds its own shape.
+- ~~**Should this be loud without being fatal?**~~ **DONE 2026-08-12**
+  (`object.c`, `WIRE`): the line names the instance by path and the property,
+  and says late binding is normal - worth a look only if that name was meant to
+  already exist. Still open above it: whether a TRANSLATOR (bridge, script,
+  MCP) should refuse a name the class never published, since that is where a
+  human's typo enters, while the C API keeps creating, which is where an object
+  and a script legitimately build their own shape.
 - **Does the same question apply to reads?** `get-property` on a name that does
   not exist returns empty, which is indistinguishable from a property holding
   an empty string. Same failure, same silence, probably the same answer.
