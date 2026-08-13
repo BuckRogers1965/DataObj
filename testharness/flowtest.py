@@ -134,6 +134,40 @@ def test_filter_gate(raw, r, home):
              "%s" % seen, seen == ["1", "1"])
 
 
+def test_filter_change(raw, r, home):
+    """Mode=change passes a value only when it DIFFERS from the last one
+    that passed, and both readouts show the traffic: In shows what
+    arrived, Out shows what left. A control on a panel is bound to the
+    object's own property, so "the readout updates" and "the property
+    holds what it is carrying" are the same claim - which is why this
+    tests the properties rather than the pixels."""
+    f = home + "/ChFilter"
+    raw.send({"cmd": "create-instance", "class": "Filter", "as": f, "container": home})
+    raw.send({"cmd": "set-property", "instance": f, "prop": "Mode", "value": "change"})
+    raw.send({"cmd": "subscribe", "instance": f, "port": "Out"})
+    raw.send({"cmd": "activate", "instance": f})
+    time.sleep(0.3)
+    raw.events = []
+
+    # 1 1 0 0 1 -> only the transitions get through
+    for v in ("1", "1", "0", "0", "1"):
+        raw.send({"cmd": "set-property", "instance": f, "prop": "In", "value": v})
+        time.sleep(0.15)
+
+    seen = edges(collect(raw, f, "Out", 1.2))
+    r.expect("filter/change: only a value that differs from the last one passed",
+             "1,1,0,0,1 in leaves 1,0,1",
+             "%s" % seen, seen == ["1", "0", "1"])
+
+    r.expect("filter/change: the In readout shows what arrived",
+             "In holds the last value delivered to it ('1')",
+             "In=%r" % raw.value_of(f, "In"), raw.value_of(f, "In") == "1")
+
+    r.expect("filter/change: the Out readout shows what left",
+             "Out holds the last value it passed ('1')",
+             "Out=%r" % raw.value_of(f, "Out"), raw.value_of(f, "Out") == "1")
+
+
 def test_queue_clock(raw, r, home):
     """The pulse's edges pushed into a Queue as they arrive, popped back
     out FIFO one per tick of a slower clock, in-band EOF and all."""
@@ -265,6 +299,10 @@ def main():
 
     g = group_view(raw, home, "FilterGate")
     guarded(test_filter_gate, raw, r, g)
+    close_group(raw, g)
+
+    g = group_view(raw, home, "FilterChange")
+    guarded(test_filter_change, raw, r, g)
     close_group(raw, g)
 
     g = group_view(raw, home, "QueueClock")

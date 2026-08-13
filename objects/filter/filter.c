@@ -80,6 +80,19 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 
 	DebugPrint ( "Filter  2.", __FILE__, __LINE__, OBJMSGHANDLING);
 
+	/* WHAT ARRIVED IS WHAT In HOLDS. The handler owns its property (see
+	   DeliverToSubscriber's verdict rule), so if this object wants its own
+	   In to show the traffic it says so here - nothing upstream does it on
+	   our behalf. It is stored whether or not it passes: In is what came
+	   in, which is exactly the question a reader of that readout is
+	   asking. */
+	if (message != msg_eof)
+	{
+		char *arrived = GetValueStr(data);
+
+		SetPropStr(instance, "In", arrived ? arrived : "");
+	}
+
 	/* the end of the stream always passes so downstream can finish */
 	if (message == msg_eof)
 	{
@@ -149,18 +162,18 @@ int Filter_OnIn(NodeObj instance, MsgId message, NodeObj data)
 
 	if (pass)
 	{
-		/* SndMsg now queues delivery and takes ownership of what it's  */
-		/* given, freeing it once sent - data here belongs to whatever  */
-		/* queued send delivered it to us, so it must be copied rather  */
-		/* than forwarded, or two independent deliveries would each     */
-		/* try to free the same node                                    */
-
 		DebugPrint ( "Filter  5.", __FILE__, __LINE__, OBJMSGHANDLING);
 
-		NodeObj forward = NewNode(STRING);
-		SetName(forward, "Data");
-		SetValueStr(forward, GetValueStr(data));
-		SndMsg(instance, "Out", msg_send, forward);
+		/* WHAT LEFT IS WHAT Out HOLDS, and one write does both jobs: the
+		   property carries the value a reader (or a panel readout) can
+		   see, and its fan-out is the delivery to everything subscribed.
+		   Sending it as well would put the same value on the wire twice -
+		   the property write and the message are not two mechanisms, they
+		   are the same one. EOF still goes as a message: it has no value
+		   to hold. */
+		char *pass_value = GetValueStr(data);
+
+		SetPropStr(instance, "Out", pass_value ? pass_value : "");
 	}
 
 	DebugPrint ( "Filter  6.", __FILE__, __LINE__, OBJMSGHANDLING);
