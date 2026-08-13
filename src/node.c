@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "data.h"
+#include "DebugPrint.h"
 
 /*
 
@@ -745,6 +746,27 @@ static void FanOutSubscribers(NodeObj owner, NodeObj propnode)
 	}
 	if (!sub)
 		return;
+
+	/* who is about to be told. A SET line in the log with no FANOUT line
+	   after it means the value landed on a node nothing is listening to -
+	   which is the difference between "the write went to the wrong place"
+	   and "the write was right and the subscription is on another node". */
+	{
+		char dbg[400];
+		int  n = 0;
+		NodeObj s;
+
+		for (s = GetNextProp(propnode); s; s = GetNextSibling(s))
+			if (CmpName(s, "Subscriber"))
+				n++;
+
+		snprintf(dbg, sizeof(dbg), "FANOUT '%s'.%s = '%.40s' -> %d subscriber(s)",
+				 GetPropStr(owner, "Name") ? GetPropStr(owner, "Name") : "?",
+				 GetNameStr(propnode) ? GetNameStr(propnode) : "?",
+				 GetValueStr(propnode) ? GetValueStr(propnode) : "",
+				 n);
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+	}
 
 	chunk = NewNode(STRING);
 	SetName(chunk, GetNameStr(propnode));

@@ -613,58 +613,52 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 			Bridge_Error(instance, "create-alias", "unknown container");
 			return;
 		}
-		inst = CreateObject(home, "Alias");
+		/* One engine call makes the whole thing: the instance, the link in  */
+		/* its own "Value" slot, the collapse of any chain to the final       */
+		/* original, the presentation stamp, and Target/TargetProp saying     */
+		/* what it stands for. The bridge does not build aliases any more     */
+		/* than Bridge_CloneCmd copies objects - it resolves a name, calls    */
+		/* the verb, and translates what comes back into the session.         */
+		inst = CreateAlias(home, target, prop);
 	}
 	if (!inst)
 	{
-		Bridge_Error(instance, "create-alias", "Alias class not found");
+		/* the verb refused: no such property on the target, or the Alias    */
+		/* class is not loaded - CreateObject/AliasProperty each log which   */
+		Bridge_Error(instance, "create-alias", "cannot alias that property");
 		return;
 	}
 
-	/* the link lives in the alias's own "Value" slot - its Name/Container */
-	/* /X/Y stay its own, whatever property of the target it stands for    */
-	if (!LinkPropertyAs(inst, "Value", target, prop))
+	/* Read back what the engine recorded rather than working it out again.  */
+	/* Aliasing an alias collapses to the original at the link level, and    */
+	/* events always speak the original's name - so the command that goes    */
+	/* into the flow log has to name that same thing, or a replay, and any   */
+	/* client subscribing "to the alias's target", keys on a name no event   */
+	/* ever carries.                                                          */
 	{
-		DeleteInstance(inst);
-		Bridge_Error(instance, "create-alias", "no such property on the target");
-		return;
-	}
-
-	/* record the FINAL original, not whatever happened to be dragged:    */
-	/* aliasing an alias collapses to the original at the link level, and  */
-	/* events always speak the original's name - so Target/TargetProp     */
-	/* have to name that same thing, or a client subscribing "to the      */
-	/* alias's target" would key its control on a name no event carries    */
-	{
-		NodeObj owner = target;
-		NodeObj node, pub;
-		char *realName;
 		char realNameBuf[ALIASLEN];
+		char *t = GetPropStr(inst, "Target");
 
-		node = ResolvePort(&owner, prop);
-		realName = Bridge_AliasForInstance(local, owner, realNameBuf, sizeof(realNameBuf));
-		if (realName)
-			of = realName;
-		if (node)
-			prop = GetNameStr(node);
+		/* a chrome instance has no path of its own, so the engine leaves    */
+		/* Target empty - well-known short names are the translator's        */
+		if (!(t && t[0]))
+		{
+			NodeObj owner = target;
 
-		/* presentation default, stamped by the ENGINE at birth: the Widget */
-		/* type the final owner's class published for this property. The    */
-		/* client renders the alias's Widget property - it                   */
-		/* never consults the class Interface to deduce a control            */
-		/* (readmefirst repair #2). Unpublished properties stay unstamped    */
-		/* and render as the plain-textbox fallback.                          */
-		pub = InterfacePropForInstance(owner, prop);
-		if (pub)
-			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
+			ResolvePort(&owner, prop);
+			t = Bridge_AliasForInstance(local, owner, realNameBuf, sizeof(realNameBuf));
+			if (t)
+				SetPropStr(inst, "Target", t);
+		}
+
+		t = GetPropStr(inst, "Target");
+		if (t && t[0])
+			of = t;
+		t = GetPropStr(inst, "TargetProp");
+		if (t && t[0])
+			prop = t;
 	}
 
-	SetPropStr(inst, "Target", of);
-	SetPropStr(inst, "TargetProp", prop);
-
-	/* the flow log records the resolved fact: an alias created THROUGH    */
-	/* another alias (a panel member's doorway slot) collapses to the       */
-	/* final original above, and only the original's name is replayable     */
 	SetPropStr(command, "of", of);
 	SetPropStr(command, "prop", prop);
 
@@ -682,14 +676,17 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	/* the command for a fully-determined replay                           */
 	if (!alias || !alias[0] || ResolvePath(alias))
 	{
-		Bridge_FreshAlias(local, container, "Alias", fresh, sizeof(fresh));
+		Bridge_FreshAlias(local, container, GetNameStr(GetParent(inst)), fresh, sizeof(fresh));
 		alias = fresh;
 		SetPropStr(command, "as", alias);
 	}
 
 	RegisterPath(alias, inst);
 	Bridge_SetNameFromAlias(inst, alias);
-	Bridge_InstanceEvent(instance, local, alias, "Alias", GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
+	/* announce what it IS - the control the engine made. There is no alias  */
+	/* class to name any more, so this asks the instance instead of saying    */
+	/* a literal, and the client draws it as the ordinary control it is       */
+	Bridge_InstanceEvent(instance, local, alias, GetNameStr(GetParent(inst)), GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
 
 	{
 		char dbg[600];
@@ -834,32 +831,31 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			if (!name || !name[0] || !IsPortableProp(inst, prop))
 				continue;
 
-			/* and each control is created IN the panel it appears on */
-			member = CreateObject(view, "Alias");
+			/* and each control is created IN the panel it appears on, by   */
+			/* the same engine verb the create-alias command calls - a panel */
+			/* row and a dropped alias are one construction, not two          */
+			member = CreateAlias(view, inst, name);
 			if (!member)
 				continue;
-			if (!LinkPropertyAs(member, "Value", inst, name))
+
+			/* a chrome instance has no path of its own, so the engine       */
+			/* leaves Target empty - short well-known names are ours          */
 			{
-				DeleteInstance(member);
-				continue;
+				char *t = GetPropStr(member, "Target");
+
+				if (!(t && t[0]))
+					SetPropStr(member, "Target", curAlias);
 			}
 
-			SetPropStr(member, "Target", curAlias);
-			SetPropStr(member, "TargetProp", name);
-
-			/* the Interface entry is in hand - stamp the published        */
-			/* presentation on the member so any client renders the row     */
-			/* from the member's own properties, never from the class        */
-			/* How the row draws: the class Interface if it published this one,
-			   else what the property itself says (a Widget sub-property on the
-			   property node - the same stamp, one level down), else a textbox.
-			   A client renders from the member, never from the Interface. */
-			{
-				NodeObj ipro = InterfacePropForInstance(inst, name);
-				int     widget = ipro ? GetPropInt(ipro, "Widget") : GetPropInt(prop, "Widget");
-
-				SetPropInt(member, "Widget", widget ? widget : PROP_TEXTBOX);
-			}
+			/* The engine stamped whatever was declared - the class Interface
+			   if it published this property, else the property's own Widget.
+			   A property nobody described at all still has to draw as
+			   something, and text is the honest answer. That floor is
+			   presentation policy, which is why it is here: the core carries
+			   the number and never picks a control. A client renders the row
+			   from the member's own properties, never from the Interface. */
+			if (!GetPropInt(member, "Widget"))
+				SetPropInt(member, "Widget", PROP_TEXTBOX);
 
 			SetPropStr(member, "Container", viewAlias);
 			{
@@ -950,7 +946,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *of, *container, *x, *y, *cont, *nm, *cn, *tp;
-	NodeObj src, top, map, linknode, entry, clone, cls, ln, ti;
+	NodeObj src, top, map, entry, clone, cls, ti;
 	char path[256], panelPos[16], tpBuf[ALIASLEN];
 
 	of        = GetPropStr(command, "of");
@@ -965,16 +961,15 @@ void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 		return;
 	}
 
-	/* through an alias, clone the thing itself */
-	if (strcmp(GetNameStr(GetParent(src)), "Alias") == 0)
+	/* through an alias, clone the thing itself. Asked of the instance, not
+	   of its class: any control can be an alias now, so "is it an Alias" is
+	   a question with no answer while "does it stand for something" still
+	   has the same one it always had. */
 	{
-		linknode = GetPropNode(src, "Value");	/* the alias's doorway slot */
-		src = linknode ? (NodeObj) GetPropLong(linknode, "LinkInst") : NULL;
-		if (!src)
-		{
-			Bridge_Error(instance, "clone-instance", "alias has no live target");
-			return;
-		}
+		NodeObj stoodFor;
+
+		if (IsAlias(src, &stoodFor, NULL))
+			src = stoodFor;
 	}
 
 	/* A thing cannot be cloned INTO itself or into something it contains -
@@ -1040,10 +1035,8 @@ void Bridge_CloneCmd(NodeObj instance, InstanceData *local, NodeObj command)
 		else
 			snprintf(path, sizeof(path), "/Root/%s", nm ? nm : "");
 
-		if (strcmp(cn, "Alias") == 0)
+		if (IsAlias(clone, &ti, NULL))
 		{
-			ln = GetPropNode(clone, "Value");
-			ti = ln ? (NodeObj) GetPropLong(ln, "LinkInst") : NULL;
 			tp = ti ? Bridge_AliasForInstance(local, ti, tpBuf, sizeof(tpBuf)) : NULL;
 			SetPropStr(clone, "Target", tp ? tp : "");
 		}
@@ -1439,7 +1432,7 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
 	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
 	  {
-		if (!CmpName(cls, "Alias"))
+		if (!IsAlias(inst, NULL, NULL))
 			continue;
 		if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 			continue;
@@ -1940,7 +1933,8 @@ void Bridge_ConnClosed(NodeObj instance, InstanceData *local, long connId)
  * Bridge's own Out - reusing the wiring the Bridge already has to the
  * client, whether that is raw TCP or a WebSocket, for free.
  */
-static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *eventType);
+static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *eventType,
+							  char *alias, char *port);
 
 int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data);
 
@@ -1956,11 +1950,44 @@ int Bridge_TapOnIn(NodeObj instance, MsgId message, NodeObj data)
 	   PAYLOAD and the source appears nowhere in it. Identifying by data
 	   silently dropped every Out-port subscription in the system. */
 	owner = instance;
-	instance = Bridge_FindTap(owner, MsgFromNode(), NULL);
-	if (!instance)
-		return rtrn_propagate;
 
-	return Bridge_TapEmit(owner, instance, message, data);
+	/* EVERY tap on that node, not the first one. One property can be
+	   reached by any number of names - a control standing for it is exactly
+	   that - and each of them subscribed separately, so each is owed the
+	   change under its OWN name. Emitting once told one client and left the
+	   others watching a value that never moved. */
+	{
+		NodeObj from = MsgFromNode();
+		NodeObj taps = GetPropNode(owner, "Taps");
+		NodeObj rec;
+		int     told = 0;
+
+		for (rec = taps ? GetChild(taps) : NULL; rec; rec = GetNextSibling(rec))
+		{
+			if ((NodeObj) GetPropLong(rec, "PropNode") != from)
+				continue;
+			Bridge_TapEmit(owner, rec, message, data);
+			told++;
+		}
+
+		if (!told)
+		{
+			/* a delivery arrived from a node this bridge has no tap for.
+			   Compare this address with the SUBSCRIBE line's: if they differ,
+			   the tap was recorded on one node and the change happened on
+			   another - which is what happens when one side resolved a link
+			   and the other did not. */
+			char dbg[300];
+
+			snprintf(dbg, sizeof(dbg),
+					 "TAP MISS: a change arrived from node %p and no tap is "
+					 "recorded for it - nothing will be announced",
+					 (void *) from);
+			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+		}
+	}
+
+	return rtrn_propagate;
 }
 
 /* the body, given the record. Split out because subscribe's truth-on-demand
@@ -2052,19 +2079,46 @@ int Bridge_TapEmit(NodeObj owner, NodeObj instance, MsgId message, NodeObj data)
    source property node - so a pointer compare says which subscription fired.
    Records are children of the Bridge's own Taps property, so DelNode frees them
    and they can be listed; a tap used to be a bare node owned by nobody. */
-static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode, char *eventType)
+/*
+ * Which tap answers for this node - keyed by WHO ASKED as well as which node.
+ *
+ * A tap used to be identified by the node that changed, which was safe only
+ * while one name ever reached one node. Two controls pointing at the same
+ * property is the ordinary case - that is what an alias IS - and they are two
+ * different subscriptions that must be answered under two different names.
+ * Keyed on the node alone, the second subscriber silently joined the first
+ * one's tap and got told about somebody else's control forever.
+ *
+ * The reason the dedup exists at all still holds: a reconnecting client
+ * re-subscribes to everything it can see, and without a match on the way in
+ * that stacks another identical tap per page load. Same alias and port is the
+ * same subscription; a different one is not. Pass NULL for any of eventType/
+ * alias/port to leave it out of the match.
+ */
+static NodeObj Bridge_FindTap(NodeObj bridgeInstance, NodeObj propNode,
+							  char *eventType, char *alias, char *port)
 {
 	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
 	NodeObj rec;
-	char   *e;
+	char   *e, *a, *p;
 
 	for (rec = taps ? GetChild(taps) : NULL; rec; rec = GetNextSibling(rec))
 	{
 		if ((NodeObj) GetPropLong(rec, "PropNode") != propNode)
 			continue;
+
 		e = GetPropStr(rec, "EventType");
-		if (!eventType || (e && strcmp(e, eventType) == 0))
-			return rec;
+		if (eventType && !(e && strcmp(e, eventType) == 0))
+			continue;
+
+		a = GetPropStr(rec, "Instance");
+		p = GetPropStr(rec, "Port");
+		if (alias && !(a && strcmp(a, alias) == 0))
+			continue;
+		if (port && !(p && strcmp(p, port) == 0))
+			continue;
+
+		return rec;
 	}
 	return NULL;
 }
@@ -2124,6 +2178,24 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 		NodeObj owner = inst;
 
 		valueNode = ResolvePort(&owner, port);
+
+		/* WHICH NODE the tap is going on. Two clients can subscribe by two
+		   different names and land on the SAME node (that is what a link
+		   means), so the address is the only honest identity here - if a
+		   write is not reaching a subscriber, this is the line to compare
+		   against the FANOUT line for the node that was written. */
+		{
+			char dbg[400];
+
+			snprintf(dbg, sizeof(dbg),
+					 "SUBSCRIBE '%s'.%s -> node %p, owned by '%s'%s",
+					 alias ? alias : "?", port,
+					 (void *) valueNode,
+					 GetPropStr(owner, "Name") ? GetPropStr(owner, "Name") : "?",
+					 valueNode ? ((owner != inst) ? "  [crossed a link]" : "")
+							   : "  [NO SUCH PROPERTY - nothing to tap]");
+			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+		}
 	}
 
 	/* One kind of event, because there is one kind of thing. Every
@@ -2139,7 +2211,7 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 	/* every client, N-1 of them leaked. Taps broadcast (Conn 0), so     */
 	/* one tap per port+event already serves every client at once.       */
 	tap = NULL;
-	tap = valueNode ? Bridge_FindTap(instance, valueNode, eventType) : NULL;
+	tap = valueNode ? Bridge_FindTap(instance, valueNode, eventType, alias, port) : NULL;
 
 	if (!tap)
 	{
@@ -3168,8 +3240,10 @@ void _init()
 	AddDependency(temp, CORE_LIBRARY_FILE, "Object", "1", "0");
 	AddDependency(temp, "widget.object", "Widget", "1", "0");
 
-	/* created in code, not from the layout table */
-	AddDependency(temp, "alias.object", "Alias", "1", "0");
+	/* created in code, not from the layout table. No Alias here: the bridge
+	   does not make aliases, it asks the engine to (CreateAlias, object.c),
+	   the same way it asks it to clone - and a translator does not declare
+	   what the verb it calls happens to be made of. */
 	AddDependency(temp, "view.object", "View", "1", "0");
 
 	LibrarySelf = RegisterLibrary(temp);

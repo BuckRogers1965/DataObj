@@ -145,17 +145,18 @@ class Report:
 
     def __init__(self, label="tests", verbose=False):
         self.results = []
+        self.notyet = []      # checks describing work the roadmap has not reached
         self.label = label
         self.verbose = verbose
         self.logdir = os.environ.get("HARNESS_LOGDIR", ".")
 
-    def record(self, name, expected, observed, ok):
+    def record(self, name, expected, observed, ok, where=None):
         """Every measurement goes to a file - passes to passed.log, failures
         to failed.log - while the console stays failures-only. A number that
         was measured and not written down cannot be compared against the next
         run or the next variant: leaktest's threshold could not be settled
         because only the one FAILING variant's counts survived anywhere."""
-        path = os.path.join(self.logdir, "passed.log" if ok else "failed.log")
+        path = os.path.join(self.logdir, where or ("passed.log" if ok else "failed.log"))
         try:
             with open(path, "a") as f:        # append per check, so a suite
                 f.write("%s: %s\n"           # that dies mid-run keeps what
@@ -164,9 +165,51 @@ class Report:
         except OSError:
             pass                              # a harness that cannot log still runs
 
-    def expect(self, name, expected, observed, ok):
-        self.results.append((name, expected, observed, bool(ok)))
-        self.record(name, expected, observed, bool(ok))
+    def expect(self, name, expected, observed, ok, roadmap=None):
+        """`roadmap` says this check describes what the engine SHOULD do and
+        names the work that will make it true. Then a failure is not a fault -
+        it is the gap, measured, and it does not fail the run.
+
+        Two rules keep that from decaying into "red is normal", which is the
+        only way a known-failing test earns its place:
+
+          - it must fail FOR ITS STATED REASON. The expected/observed pair is
+            still written down every run, so a not-yet that starts failing
+            differently reads as a different sentence and is a real change.
+          - a not-yet that PASSES is a failure. The work landed and the
+            declaration is now a lie about the engine; the run stays red until
+            somebody deletes it. Progress is supposed to cost one line.
+
+        Tests are written against the design, not against the code. A check
+        that has to be weakened to go green was measuring the implementation."""
+        ok = bool(ok)
+
+        if roadmap and ok:
+            note = "PASSING NOW - the roadmap work landed; delete roadmap= from this check"
+            self.results.append((name, expected, note, False))
+            self.record(name, expected, note, False)
+            print("TEST     %s" % name)
+            print("  expected: %s" % expected)
+            print("  observed: %s" % observed)
+            print("  result:   FAIL (%s)" % note)
+            print("  roadmap:  %s" % roadmap)
+            print()
+            return
+
+        if roadmap:
+            self.notyet.append((name, expected, observed, roadmap))
+            self.record(name, expected, "%s   [not yet: %s]" % (observed, roadmap),
+                        False, where="roadmap.log")
+            print("TEST     %s" % name)
+            print("  expected: %s" % expected)
+            print("  observed: %s" % observed)
+            print("  result:   NOT YET")
+            print("  roadmap:  %s" % roadmap)
+            print()
+            return
+
+        self.results.append((name, expected, observed, ok))
+        self.record(name, expected, observed, ok)
         if ok and not self.verbose:
             print(".", end="", flush=True)
             return
@@ -180,8 +223,10 @@ class Report:
         failed = [r for r in self.results if not r[3]]
         if any(r[3] for r in self.results) and not self.verbose:
             print()  # end the dot line before the summary
-        print("%s: %d tests, %d passed, %d failed"
-              % (self.label, len(self.results), len(self.results) - len(failed), len(failed)))
+        print("%s: %d tests, %d passed, %d failed%s"
+              % (self.label, len(self.results), len(self.results) - len(failed),
+                 len(failed),
+                 ", %d not yet" % len(self.notyet) if self.notyet else ""))
         return len(failed)
 
 
@@ -349,18 +394,32 @@ def test_atomic_birth(raw, r, home):
 
 
 def test_widget_stamp(raw, r, home, source):
-    """Twin of the GUI's alias rendering: the ENGINE stamps Widget on an
-    alias at birth from what the target's class published.
-    The client never sends or deduces them - so here they must come back
-    without this test ever mentioning them."""
+    """The engine decides what shows a property, from what the target's class
+    published - the client never sends or deduces it, so it must all come back
+    without this test ever mentioning it.
+
+    Two answers, not one. The class of the thing created IS the control that
+    renders that kind of property (an alias of a slider's Value is a Slider),
+    and Widget carries the published type so anything reading the instance
+    knows what it stands for without consulting a class interface."""
     raw.send({"cmd": "create-alias", "of": source, "prop": "Value",
               "container": home, "x": "600", "y": "40"})
     ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
-                        and e.get("class") == "Alias")
+                        and e.get("container") == home)
     name = ev.get("instance") if ev else None
+    r.expect("widget stamp: alias created",
+             "an instance, of whatever class renders a slider's Value",
+             "event=%s instance=%s class=%s"
+             % (bool(ev), name, ev.get("class") if ev else None),
+             bool(name))
     if not name:
-        r.expect("widget stamp: alias created", "an Alias instance", "no event", False)
         return
+
+    r.expect("widget stamp: the alias IS the control that renders the property",
+             "class=Slider - Slider.Value publishes as PROP_SLIDER and Slider "
+             "is what declares Renders for it. No class called Alias exists.",
+             "class=%s" % ev.get("class"),
+             ev.get("class") == "Slider")
 
     w = raw.value_of(name, "Widget")
     r.expect("widget stamp: create-alias stamps the published type",
@@ -368,16 +427,22 @@ def test_widget_stamp(raw, r, home, source):
              "Widget=%s" % w,
              w == "5")
 
+    # An Open doorway is a published property like any other (PROP_ICON,
+    # control.c) and is aliasable like any other - that is what lets an options
+    # panel show a thing's own Open, and what a rename carries along. What
+    # renders it is the View: opening a thing shows its view, so the doorway
+    # and the thing behind it are one object rather than a picture of one.
     raw.send({"cmd": "create-alias", "of": source, "prop": "ReservedViewOpen",
               "container": home, "x": "600", "y": "90"})
     ev2 = raw.wait_event(lambda e: e.get("event") == "instance-created"
-                         and e.get("class") == "Alias"
+                         and e.get("container") == home
                          and e.get("instance") != name)
     name2 = ev2.get("instance") if ev2 else None
     w2 = raw.value_of(name2, "Widget") if name2 else None
     r.expect("widget stamp: an alias of ReservedViewOpen is a doorway",
-             "Widget=12 (PROP_ICON - ReservedViewOpen's published type)",
-             "Widget=%s" % w2,
+             "an instance carrying Widget=12 (PROP_ICON - ReservedViewOpen's "
+             "published type)",
+             "instance=%s Widget=%s" % (name2, w2),
              w2 == "12")
 
 
@@ -581,8 +646,11 @@ def test_load_then_clone_binding(raw, r, home):
     sl = ev.get("instance") if ev else None
     raw.send({"cmd": "create-alias", "of": sl, "prop": "Value",
               "container": home + "/LrView", "x": "20", "y": "80"})
+    # it comes back as a Slider - what renders a slider's Value - so it is
+    # told apart from sl by standing for something, not by its class
     raw.wait_event(lambda e: e.get("event") == "instance-created"
-                   and e.get("class") == "Alias" and e.get("container") == home + "/LrView")
+                   and e.get("container") == home + "/LrView"
+                   and e.get("instance") != sl)
 
     raw.send({"cmd": "save-flow", "file": "lrtwin"})
     raw.wait_event(lambda e: e.get("event") == "flow-saved")
@@ -601,12 +669,17 @@ def test_load_then_clone_binding(raw, r, home):
         return out
 
     def bound_to_own_slider(view, value="55"):
-        """view's Alias must name view's own Slider, and a write through
+        """view's alias must name view's own Slider, and a write through
         it must actually land there - Target is metadata, the link is the
-        binding."""
+        binding.
+
+        Both members are Sliders, because an alias of a slider's Value is
+        what renders a slider's Value. They are told apart by which one
+        stands for the other, which is the only difference there has ever
+        been between them."""
         mem = members(view)
-        sl = next((m for m, c in mem if c == "Slider"), None)
-        al = next((m for m, c in mem if c == "Alias"), None)
+        al = next((m for m, c in mem if raw.value_of(m, "Target", timeout=1.5)), None)
+        sl = next((m for m, c in mem if c == "Slider" and m != al), None)
         if not sl or not al:
             return mem, sl, None, False
         tgt = raw.value_of(al, "Target")

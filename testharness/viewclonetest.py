@@ -61,9 +61,32 @@ def connections(raw):
     return out
 
 
+def is_alias(raw, inst, timeout=1.5):
+    """Does this instance stand for somebody else's property?
+
+    It carries a Target - it is NOT of some class called Alias. Aliasing is a
+    gesture, not a species: the engine makes the control that renders the
+    property being pointed at, so an alias of a slider's Value IS a Slider and
+    an alias of an Interval IS a Knob. What it is drawn as and what it stands
+    for are two different questions, and only the second one is asked here.
+
+    This is the same rule the serializer uses to recognise one in a saved
+    file, which is why a flow written before any of this still loads.
+
+    A Target is a PATH, and the test is written that way for a reason that is
+    not fussiness: subscribing to a property that does not exist CREATES it
+    (Connect grows a missing source property - late binding, working as
+    designed), and a fresh one reads "0". Since bool("0") is true in Python,
+    "did the subscribe return anything" made every member look like an alias -
+    it picked the plain dst slider and then reported its conjured Target of 0.
+    Nothing conjured ever starts with a slash."""
+    t = raw.value_of(inst, "Target", timeout=timeout)
+    return bool(t) and t.startswith("/")
+
+
 def build_view(raw, home, name):
     """A view holding: Src, Dst (a clone of Src) wired Src.Value->Dst.In,
-    and an Alias of Src.Value. The shape the bug report describes - built
+    and an alias of Src.Value. The shape the bug report describes - built
     inside `home`, this suite's own view."""
     raw.send({"cmd": "create-instance", "class": "View", "as": home + "/" + name,
               "container": home, "x": "20", "y": "20"})
@@ -87,18 +110,25 @@ def build_view(raw, home, name):
     raw.send({"cmd": "connect", "from": src, "fromPort": "Value", "to": dst, "toPort": "Value"})
     raw.send({"cmd": "create-alias", "of": src, "prop": "Value",
               "container": view, "x": "20", "y": "140"})
+    # it arrives as whatever draws a slider's Value - a Slider. The only thing
+    # that distinguishes it from src and dst is that it stands for one of them.
     ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
-                        and e.get("class") == "Alias" and e.get("container") == view)
+                        and e.get("container") == view
+                        and e.get("instance") not in (src, dst))
     al = ev.get("instance") if ev else None
     return view, src, dst, al
 
 
 def parts(raw, view):
-    """(sliders in order of creation, alias) of a view."""
+    """(the view's own sliders, its alias).
+
+    The alias is a Slider too, so it is taken out of the slider list rather
+    than counted as one: what these tests mean by "the view's two sliders" is
+    the two that hold a value of their own."""
     mem = members(raw, view)
-    sl = [m for m, c in mem if c == "Slider"]
-    al = next((m for m, c in mem if c == "Alias"), None)
-    return sorted(sl), al
+    al = next((m for m, c in mem if is_alias(raw, m)), None)
+    sl = sorted(m for m, c in mem if c == "Slider" and m != al)
+    return sl, al
 
 
 def test_view_clone_wiring(raw, r, home):
@@ -148,7 +178,7 @@ def test_view_clone_wiring(raw, r, home):
     # --- the alias inside the clone points at the clone's own slider
     tgt = raw.value_of(cal, "Target") if cal else None
     r.expect("view clone: the alias remaps onto the clone's own slider",
-             "the cloned Alias targets a slider INSIDE the clone (%s)" % csl,
+             "the cloned alias targets a slider INSIDE the clone (%s)" % csl,
              "Target=%s" % tgt,
              tgt in csl)
 
@@ -325,7 +355,7 @@ def test_export_import_view_wiring(raw, r, home):
             break
 
     r.expect("import: the members came along",
-             "the imported view holds two Sliders and an Alias",
+             "the imported view holds two Sliders and an alias of one of them",
              "copy=%s sliders=%s alias=%s" % (copy, csl, cal),
              len(csl) == 2 and bool(cal))
 
@@ -348,7 +378,7 @@ def test_export_import_view_wiring(raw, r, home):
     # "the alias has to link to the thing in its view")
     tgt = raw.value_of(cal, "Target") if cal else None
     r.expect("import: the alias links to the thing in ITS view",
-             "the imported Alias targets a slider inside the copy (%s)" % csl,
+             "the imported alias targets a slider inside the copy (%s)" % csl,
              "Target=%s" % tgt,
              tgt in csl)
 

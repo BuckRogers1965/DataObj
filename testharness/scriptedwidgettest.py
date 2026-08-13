@@ -193,10 +193,13 @@ def test_alias(raw, r, home):
     script last wrote, same as aliasing any other computed property."""
     view, inbox, outbox, runner = build_scripted_view(raw, home, "SW_Alias")
 
+    # it arrives as whatever renders OutBox.Value, not as a class called
+    # Alias - so it is identified by being the new thing in this container
     raw.send({"cmd": "create-alias", "of": outbox, "prop": "Value",
               "container": home, "x": "20", "y": "260"})
     ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
-                        and e.get("class") == "Alias" and e.get("container") == home)
+                        and e.get("container") == home
+                        and e.get("instance") not in (outbox, view))
     al = ev.get("instance") if ev else None
 
     run_widget(raw, runner, "aliasme")

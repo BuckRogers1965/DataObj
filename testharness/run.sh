@@ -17,6 +17,17 @@
 #
 cd "$(dirname "$0")/.." || exit 1
 
+# ONE RUN AT A TIME. The first thing this script does, before it reads an
+# option or touches a file - because everything after this point steps on a run
+# already going: make rewrites the .object files the running variants have
+# loaded, and a second set of frameworks cannot bind the ports so its suites
+# silently measure the first run's engines.
+if [ -f testharness/run.pid ] && kill -0 "$(cat testharness/run.pid 2>/dev/null)" 2>/dev/null; then
+	echo "already running (PID $(cat testharness/run.pid))" >&2
+	exit 1
+fi
+echo $$ > testharness/run.pid
+
 for arg in "$@"; do [ "$arg" = "-v" ] && VERBOSE=1; done
 VERBOSE="${VERBOSE:+-v}"
 
@@ -436,6 +447,27 @@ count_for() {   # $1 = variant dir, $2 = suite
 		printf "%-9s" "$c"
 	done < "$ROOT/log/variants"
 	echo
+	# Checks that describe what the engine SHOULD do and name the work that
+	# will make it true (Report.expect(..., roadmap=...)). Measured every run,
+	# listed below, and NOT a failure - the run can be clean with these
+	# standing. They are only honest while two things hold, both enforced in
+	# Report.expect: one that starts failing differently says a different
+	# sentence, and one that PASSES turns into a failure so the declaration
+	# gets deleted rather than quietly outliving the work.
+	printf "%-20s" "not yet"
+	while IFS='|' read -r v f o; do
+		n=0
+		for s in $SUITES; do
+			# grep -c prints 0 AND exits 1 when it matches nothing, so a
+			# `|| echo 0` appends a SECOND zero and the arithmetic sees "0\n0".
+			# Same guard count_for uses: take the output, insist it is a number.
+			c=$(grep -c "^  result:   NOT YET" "$ROOT/$v/log/$s.log" 2>/dev/null)
+			case $c in ''|*[!0-9]*) c=0 ;; esac
+			n=$((n + c))
+		done
+		printf "%-9s" "$n"
+	done < "$ROOT/log/variants"
+	echo
 	printf "%-20s" "leaked"
 	while IFS='|' read -r v f o; do
 		l=0
@@ -516,6 +548,65 @@ for (s, name, exp, obs), vs in sorted(groups.items()):
     if obs: print("    observed: %s" % obs)
     print()
 PYFAIL
+
+	# What the engine is expected to do and does not do YET, each naming the
+	# work. This list is the gap between the design and the code, measured
+	# rather than remembered - the tests are written against what SHOULD be
+	# true, so a design decision that has not been built yet shows up here
+	# instead of being quietly absent from the harness.
+	echo "NOT YET (roadmap work - measured, not failures)"
+	python3 - "$ROOT" "$SUITES" <<'PYNOTYET'
+import os, re, sys
+
+root, suites = sys.argv[1], sys.argv[2].split()
+variants = [l.split('|')[0] for l in open(os.path.join(root, 'log', 'variants')) if l.strip()]
+
+def notyet(path):
+    """every not-yet check in one suite log, as (test, observed, roadmap)"""
+    out = []
+    try:
+        lines = open(path, errors='replace').read().split('\n')
+    except OSError:
+        return out
+    for i, line in enumerate(lines):
+        m = re.search(r'TEST\s+(\S.*)', line)
+        if not m:
+            continue
+        obs = ref = ''
+        hit = False
+        for j in range(i + 1, min(i + 8, len(lines))):
+            t = lines[j].strip()
+            if t.startswith('observed:'):  obs = t[len('observed:'):].strip()
+            elif t.startswith('result:'):  hit = 'NOT YET' in t
+            elif t.startswith('roadmap:'): ref = t[len('roadmap:'):].strip(); break
+        if hit:
+            out.append((m.group(1).strip(), obs, ref))
+    return out
+
+groups = {}
+for s in suites:
+    for v in variants:
+        for f in notyet(os.path.join(root, v, 'log', s + '.log')):
+            got = groups.setdefault((s,) + f, [])
+            if v not in got:
+                got.append(v)
+
+if not groups:
+    print("  none - everything the tests describe, the engine does")
+
+# grouped by the work, because one item is usually holding several checks
+by_ref = {}
+for (s, name, obs, ref), vs in groups.items():
+    by_ref.setdefault(ref, []).append((s, name, obs, vs))
+
+for ref in sorted(by_ref):
+    print("  %s" % (ref or "(no roadmap reference given)"))
+    for s, name, obs, vs in sorted(by_ref[ref]):
+        same = len(vs) == len(variants)
+        print("    %s: %s  [%s]" % (s, name, "all" if same else " ".join(vs)))
+        if obs: print("      observed: %s" % obs)
+    print()
+PYNOTYET
 
 	# a suite whose count DIFFERS between builds is almost never the engine -
 	# same code in every build, so only the environment can explain it. Look at

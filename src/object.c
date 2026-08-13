@@ -579,6 +579,32 @@ FindClass(char * classname){
 	return NULL;
 }
 
+/* The same walk, a different question: which class SHOWS a property of     */
+/* this kind. A class states it (Renders, on the class node) rather than    */
+/* anyone inferring it, so a control that ships tomorrow answers for its    */
+/* own type the moment it loads, with no table to edit anywhere. This is    */
+/* what lets the engine turn "alias that property" into a real control      */
+/* without naming one.                                                      */
+NodeObj FindClassRendering(int widget)
+{
+	NodeObj library = GetChild(RegObjList);
+	NodeObj class;
+
+	if (!widget)
+		return NULL;
+
+	while (library) {
+		class = GetChild(library);
+		while (class) {
+			if (GetPropInt(class, "Renders") == widget)
+				return class;
+			class = GetNextSibling(class);
+		}
+		library = GetNextSibling(library);
+	}
+	return NULL;
+}
+
 NodeObj
 CreateObject(NodeObj container, char * classname){
 
@@ -766,13 +792,19 @@ int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propna
 /* original - a doorway, not a copy that has to be kept in step.           */
 /* Target/TargetProp name the FINAL original (aliasing an alias collapses  */
 /* at the link level, and events always carry the original's name), and    */
-/* Widget is the presentation that owner's class published for the         */
-/* property. Safe to re-apply: a link is a pointer, which a saved flow     */
-/* cannot carry, so a restored alias needs it put back.                    */
+/* Widget is whatever presentation was declared for the property - by the  */
+/* owner's class, or by the property itself. Safe to re-apply: a link is a */
+/* pointer, which a saved flow cannot carry, so a restored alias needs it  */
+/* put back.                                                               */
+/* This is the ONE place an alias is made. Every caller - the bridge's     */
+/* create-alias command, the panel a bridge builds out of a thing's own    */
+/* properties, the import pass restoring a saved one - goes through here,  */
+/* the way every caller that copies a thing goes through CloneInstance.    */
 int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
 {
 	NodeObj owner, node, pub;
 	char path[256];
+	int widget;
 
 	if (!aliasInst || !targetInst || !propname || !propname[0])
 		return 0;
@@ -785,9 +817,18 @@ int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
 	if (node)
 		propname = GetNameStr(node);
 
+	/* How the doorway draws: what the owner's class published for this      */
+	/* property, else what the property itself says - a Widget sub-property   */
+	/* on the property node, the same stamp one level down, which is how a    */
+	/* property nobody published still knows what shows it. Left unstamped    */
+	/* when neither has an answer: the core carries the number, it does not   */
+	/* pick a control, so whoever renders decides what nothing means.         */
 	pub = InterfacePropForInstance(owner, propname);
-	if (pub)
-		SetPropInt(aliasInst, "Widget", GetPropInt(pub, "Widget"));
+	widget = pub ? GetPropInt(pub, "Widget") : 0;
+	if (!widget && node)
+		widget = GetPropInt(node, "Widget");
+	if (widget)
+		SetPropInt(aliasInst, "Widget", widget);
 
 	if (PathOfInstance(owner, path, sizeof(path)))
 		SetPropStr(aliasInst, "Target", path);
@@ -796,15 +837,74 @@ int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
 	return 1;
 }
 
-/* the same, making the Alias instance too - the caller places and names it */
+/*
+ * The same, making the instance too - the caller places and names it.
+ *
+ * THERE IS NO ALIAS OBJECT. What gets made is an ordinary control - the
+ * class that says it renders this kind of property - whose own Value slot
+ * links to the target's. Aliasing is a relationship between two things that
+ * already exist, which is the same category as Connect and Move: mechanism
+ * every app needs whatever it does. Cloning needs no clone object and moving
+ * needs no move object, and for exactly the same reason neither does this.
+ * A class was only ever invented here because this is the one gesture that
+ * makes a NEW visible thing, and "it needs an instance" got read as "it needs
+ * a class" - when the instance it needed was a control.
+ *
+ * Which control: what the owner's class published for the property, else what
+ * the property itself declares, else text. That last step is not a give-up -
+ * it is what makes late binding work. A property a script grew, or one that
+ * nothing has described yet, is still readable and writable as text, so you
+ * can alias it and it becomes something better the moment somebody says what
+ * it is.
+ */
 NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
 {
-	NodeObj inst;
+	NodeObj inst, owner, node, pub, class;
+	char dbg[300];
+	int widget;
 
-	if (!container)
+	if (!container || !targetInst || !propname || !propname[0])
 		return NULL;
 
-	inst = CreateObject(container, "Alias");
+	owner = targetInst;
+	node = ResolvePort(&owner, propname);
+	if (!node)
+	{
+		snprintf(dbg, sizeof(dbg),
+				 "CreateAlias: '%s' has no property '%s' to stand for",
+				 GetPropStr(targetInst, "Name"), propname);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
+
+	pub = InterfacePropForInstance(owner, GetNameStr(node));
+	widget = pub ? GetPropInt(pub, "Widget") : 0;
+
+	/* PROP_NULL is the published way of saying "no particular control" - it
+	   is the absence, not a kind. Asking which class renders no-control is a
+	   category error, and treating it as a type is why X/Y/W/H/Container
+	   (control.c publishes all of them PROP_NULL) had nothing to make and
+	   went missing from every panel. It falls through to the same place a
+	   property nobody described falls through to: text. */
+	if (widget == PROP_NULL)
+		widget = 0;
+	if (!widget)
+		widget = GetPropInt(node, "Widget");
+	if (!widget)
+		widget = PROP_TEXTBOX;
+
+	class = FindClassRendering(widget);
+	if (!class)
+	{
+		snprintf(dbg, sizeof(dbg),
+				 "CreateAlias: nothing loaded says it renders property type %d, "
+				 "so '%s'.%s cannot be shown - the control that draws it is "
+				 "missing", widget, GetPropStr(targetInst, "Name"), propname);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return NULL;
+	}
+
+	inst = CreateObject(container, GetNameStr(class));
 	if (!inst)
 		return NULL;
 
@@ -814,7 +914,46 @@ NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
 		return NULL;
 	}
 
+	snprintf(dbg, sizeof(dbg), "CreateAlias: '%s'.%s -> a %s pointing at it",
+			 GetPropStr(targetInst, "Name"), propname, GetNameStr(class));
+	DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+
 	return inst;
+}
+
+/*
+ * Is this instance an alias - does it stand for somebody else's property?
+ *
+ * It asks the thing itself instead of asking what class it is, which is the
+ * only question that still has an answer: an alias is any control whose Value
+ * is a link, and the control can be a Knob, a Textbox, anything that renders
+ * the property it points at. Aliasing never was a kind of object, so "what
+ * class is it" was always answering a different question than the one being
+ * asked - it just happened to agree while exactly one class did this.
+ *
+ * Fills targetInst/targetProp when asked (either may be NULL).
+ */
+int IsAlias(NodeObj inst, NodeObj * targetInst, char ** targetProp)
+{
+	NodeObj slot, owner;
+
+	if (!inst)
+		return 0;
+
+	slot = GetPropNode(inst, "Value");
+	if (!slot || !GetNodeLink(slot))
+		return 0;
+
+	owner = (NodeObj) GetPropLong(slot, "LinkInst");
+	if (!owner)
+		return 0;
+
+	if (targetInst)
+		*targetInst = owner;
+	if (targetProp)
+		*targetProp = GetNameStr(ResolveNode(slot));
+
+	return 1;
 }
 
 /* same, exposed under the target property's own name */
@@ -1178,16 +1317,19 @@ static NodeObj CloneAliasNode(NodeObj src, char *container, NodeObj map)
 	if (mapped)
 		targetInst = mapped;
 
-	/* Instantiate the Alias the SAME way CloneObject makes a concrete
-	   member - directly through the class's InstanceStart, not through
-	   CreateObject. During a clone the target container is only a path
-	   STRING (nothing here is registered in the path index until the
-	   bridge walks the result afterwards), so CreateObject's now-mandatory
-	   "resolve the container" check cannot pass and silently dropped every
-	   cloned alias. Concrete members never hit that check; the alias must
-	   not either. Container is set as a string below, exactly like them. */
+	/* Instantiate it the SAME way CloneObject makes a concrete member -
+	   directly through the class's InstanceStart, not through CreateObject.
+	   During a clone the target container is only a path STRING (nothing
+	   here is registered in the path index until the caller walks the result
+	   afterwards), so CreateObject's mandatory "resolve the container" check
+	   cannot pass and silently dropped every cloned alias. Concrete members
+	   never hit that check; this must not either. Container is set as a
+	   string below, exactly like them.
+	   The class is the SOURCE's own - an alias is an ordinary control that
+	   points somewhere, so the copy is the same control pointing at the
+	   copy. Nothing has to be looked up. */
 	{
-		NodeObj aclass = FindClass("Alias");
+		NodeObj aclass = GetParent(src);
 		msgobj astart = aclass ? (msgobj) GetPropLong(aclass, "InstanceStart") : NULL;
 		if (!astart)
 			return NULL;
@@ -1250,7 +1392,7 @@ static void CloneGroupPass(char *srcPath, char *clonePath, NodeObj map, int pass
 		classname = GetNameStr(GetParent(inst));
 		nm = GetPropStr(inst, "Name");
 
-		if (strcmp(classname, "Alias") == 0)
+		if (IsAlias(inst, NULL, NULL))
 		{
 			if (pass == 1)
 			{
@@ -1778,6 +1920,23 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 		SetValueStr(chunk, value);
 		verdict = handler(owner, msg_send, chunk);
 		DelNode(chunk);
+
+		/* the missing half of the SET line above: DELIVER says a handler ran,
+		   this says what it decided, and therefore whether the value is now
+		   on the property at all */
+		{
+			char dbg[400];
+
+			snprintf(dbg, sizeof(dbg),
+					 "  '%s'.%s handler said %s%s",
+					 GetPropStr(owner, "Name") ? GetPropStr(owner, "Name") : "?",
+					 propname,
+					 verdict == rtrn_handled   ? "HANDLED (it stored it itself)" :
+					 verdict == rtrn_propagate ? "PROPAGATE" :
+					 verdict == rtrn_dropped   ? "DROPPED (refused it)" : "an unknown code",
+					 verdict == rtrn_propagate ? " - storing it now" : " - NOT storing");
+			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+		}
 
 		if (verdict == rtrn_propagate)
 			SetPropStr(owner, propname, value);

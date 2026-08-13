@@ -161,12 +161,25 @@ NodeObj ResolvePort(NodeObj * instp, char * name);
 /* own "Value" slot so its own Name/Container/X/Y stay its own.           */
 int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propname);
 
-/* Make a doorway onto one property of another instance: an Alias whose    */
+/* Make a doorway onto one property of another instance: a control whose   */
 /* own "Value" slot links to it, carrying Target/TargetProp/Widget so a    */
-/* client can see what it stands for. AliasProperty applies that to an     */
-/* instance that already exists; CreateAlias makes one first.              */
+/* client can see what it stands for. There is no alias class - CreateAlias */
+/* makes the control that says it Renders that kind of property, the way    */
+/* CloneInstance needs no clone class. AliasProperty applies the link to an */
+/* instance that already exists; CreateAlias makes one first.               */
 int     AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname);
 NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname);
+
+/* Does this instance stand for somebody else's property - is it an alias. */
+/* Asks the thing (is its Value a link) rather than what class it is, which */
+/* is the only question with an answer now that any control can be one.    */
+/* targetInst/targetProp are filled when given; either may be NULL.        */
+int IsAlias(NodeObj inst, NodeObj * targetInst, char ** targetProp);
+
+/* which loaded class says it renders this kind of property (Renders, on   */
+/* the class node). The registry walk FindClass does, asking what instead   */
+/* of who - a control declares its own type, nothing is inferred.           */
+NodeObj FindClassRendering(int widget);
 int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname);
 
 /* Clone the wires INSIDE a group being copied: for each of srcInst's    */

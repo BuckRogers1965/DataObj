@@ -359,13 +359,25 @@ static void ImportDeferAlias(NodeObj propbag, char *containerPath, NodeObj defer
 	AppendChild(deferred, c);
 }
 
-/* create a node if it is a concrete instance, or defer it if it is an
-   Alias. Returns the new path for concrete nodes (so children parent
-   onto it), "" for aliases (they hold no children), NULL on failure. */
+/* create a node if it is a concrete instance, or defer it if it stands for
+   somebody else's property. Returns the new path for concrete nodes (so
+   children parent onto it), "" for aliases (they hold no children), NULL on
+   failure.
+
+   What makes it an alias is what it CARRIES - a Target and a TargetProp -
+   not what class it claims. It used to be read off the class name, which
+   said "Alias" back when exactly one class did this and says the name of an
+   ordinary control now. Reading the pair means files written on either side
+   of that change both load with nothing to translate: an old one names a
+   class nobody registers any more, and is recognised by the same two
+   properties as a new one. */
 static char *ImportPlace(char *className, char *nodeName, NodeObj propbag,
 						  char *containerPath, NodeObj deferred, int force)
 {
-	if (className && strcmp(className, "Alias") == 0)
+	char *t  = propbag ? GetPropStr(propbag, "Target") : NULL;
+	char *tp = propbag ? GetPropStr(propbag, "TargetProp") : NULL;
+
+	if (t && t[0] && tp && tp[0])
 	{
 		ImportDeferAlias(propbag, containerPath, deferred);
 		return strdup("");
@@ -710,7 +722,7 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 	{
 		char    of[320], fresh[320], want[320];
 		char   *container, *prop, *w, *lb, *alias, *slash, *saved;
-		NodeObj target, home, inst, owner, node, pub;
+		NodeObj target, home, inst;
 
 		ImportResolveTarget(importRoot, GetPropStr(d, "of_old"), of, sizeof(of));
 		target = of[0] ? ResolvePath(of) : NULL;
@@ -731,34 +743,29 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 			DebugPrint("IMPORT-ALIASES-PASS: container path did not resolve, skip", __FILE__, __LINE__, IMPORT);
 			continue;
 		}
-		inst = CreateObject(home, "Alias");
+		/* the same engine verb create-alias calls: make it, link it,
+		   collapse any chain to the final original, stamp the presentation,
+		   and record what it stands for. Restoring an alias is creating one -
+		   the import pass has nothing of its own to say about how. */
+		inst = CreateAlias(home, target, prop);
 		if (!inst)
 		{
-			DebugPrint("IMPORT-ALIASES-PASS: CreateObject(Alias) failed, skip", __FILE__, __LINE__, IMPORT);
+			DebugPrint("IMPORT-ALIASES-PASS: CreateAlias failed, skip", __FILE__, __LINE__, IMPORT);
 			continue;
 		}
 
-		if (!LinkPropertyAs(inst, "Value", target, prop))
+		/* what the engine actually recorded, for the log below - a saved
+		   alias OF an alias collapses, so the pair written here is the
+		   resolved one, not the pair the file happened to carry */
 		{
-			DeleteInstance(inst);
-			continue;
+			char *t  = GetPropStr(inst, "Target");
+			char *tp = GetPropStr(inst, "TargetProp");
+
+			if (t && t[0])
+				snprintf(of, sizeof(of), "%s", t);
+			if (tp && tp[0])
+				prop = tp;
 		}
-
-		/* record the FINAL original, not whatever happened to be linked -
-		   aliasing an alias collapses to the original at the link level */
-		owner = target;
-		node = ResolvePort(&owner, prop);
-		if (node)
-			prop = GetNameStr(node);
-		if (owner != target && PathOfInstance(owner, of, sizeof(of)))
-			target = owner;
-
-		pub = InterfacePropForInstance(owner, prop);
-		if (pub)
-			SetPropInt(inst, "Widget", GetPropInt(pub, "Widget"));
-
-		SetPropStr(inst, "Target", of);
-		SetPropStr(inst, "TargetProp", prop);
 
 		PlaceInstance(inst, container, GetPropStr(d, "x"), GetPropStr(d, "y"));
 
@@ -775,7 +782,8 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 		}
 		if (!alias)
 		{
-			ImportFreshName(container, "Alias", fresh, sizeof(fresh));
+			/* named after what it IS, like everything else that gets minted */
+			ImportFreshName(container, GetNameStr(GetParent(inst)), fresh, sizeof(fresh));
 			alias = fresh;
 		}
 		RegisterPath(alias, inst);

@@ -45,8 +45,7 @@ const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
    falls back to for an atom with no Value. Which class RENDERS a given
    number is not in this file at all - each class says so itself
    (PublishShow) and the Bridge passes it on as GTWidgetTypes. */
-const PROP_TEXTOUT = 7, PROP_MENU = 11,
-      PROP_ICON = 12;   /* a doorway: renders as the target's icon, opens its one panel */
+const PROP_TEXTOUT = 7;
 
 
 /* WHAT THE CONTROLS THEMSELVES BROUGHT. widgets.js is assembled by the
@@ -88,7 +87,6 @@ let panelDrag = null;      // {alias, el, offsetX, offsetY} - a view PANEL being
 let livePositions = {};    // alias -> {el}, a card whose X/Y are real properties kept in sync like anything else
 let menuButtons = {};      // alias -> {label,items,selected,btn,dropdown}, any MenuButton (topbar chrome or dropped-in)
 let propertyValues = {};   // "alias.propName" -> last known value, from property-changed - what Clone reads to copy a source's configuration
-let aliasAtoms = {};       // alias -> {el, slot, labelEl, target, targetProp, widget, label, control}, a real Alias instance's rendering
 let loadedContainers = {}; // view alias -> 1, containers whose members this client has already fetched (lazy - on first open)
 let panels = {};           // alias -> {el, setOpen, openApplied} - EVERY thing's open panel, view or card alike: icons nest in the hierarchy, panels are all peers at the root
 let views = {};             // alias -> {el, innerEl, mode}, a real View instance's own rendering
@@ -807,159 +805,7 @@ function renderInstanceOf(spec) {
   if (render) render(spec);
 }
 
-function renderAliasControl(alias) {
-  const rec = aliasAtoms[alias];
-  if (!rec || !rec.target || !rec.targetProp) return;
 
-  /* PROP_ICON (what Open publishes): another icon for the same thing -    */
-  /* clicking it opens the ONE panel, whether the target is a view or a    */
-  /* card; twelve icons anywhere are twelve doorways to one window         */
-  if (Number(rec.widget) === PROP_ICON) {
-    rec.slot.textContent = '';
-    const ic = document.createElement('div');
-    ic.className = 'instance-icon';
-    const lb = document.createElement('span');
-    lb.className = 'instance-icon-label';
-    lb.textContent = rec.label || baseName(rec.target);
-    lb.title = rec.target;
-    ic.appendChild(lb);
-    ic.addEventListener('click', () => {
-      const p = panels[rec.target];
-      if (effectiveMode(ic) === 'Operate' && p) p.setOpen(true);
-    });
-    rec.slot.appendChild(ic);
-    rec.control = ic;
-    rec.labelEl.textContent = '';
-    /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-    instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
-    instances[alias].ports['Value'] = rec.el;
-    return;
-  }
-
-  /* The row is labelled with the PROPERTY name alone. The object it belongs
-     to is already the title of the panel the row is sitting in, so prefixing
-     every row with it just repeats a long generated name twenty times. */
-
-  /* PROP_MENU: a dropdown. Its selectable options come from a companion   */
-  /* property on the target named "<prop>List" (e.g. Language -> the        */
-  /* discovered LanguageList) - the same one-property-carries-the-options   */
-  /* convention a MenuButton uses with its Items, applied to any menu prop. */
-  if (Number(rec.widget) === PROP_MENU) {
-    rec.slot.textContent = '';
-    /* the Dropdown control, pointed at someone else's property - the same
-       class the palette holds, told where its Value and Items live. Nothing
-       here builds a select or knows what one looks like. */
-    const menu = widgetModule('Dropdown');
-    const sel = menu.create(controlContext(alias, null, null, {
-      Value: { instance: rec.target, prop: rec.targetProp },
-      Items: { instance: rec.target, prop: rec.targetProp + 'List' },
-    }));
-    sel.classList.add('widget-atom-control');
-    rec.slot.appendChild(sel);
-    rec.control = sel;
-    rec.labelEl.textContent = rec.label || rec.targetProp;
-    /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-    instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
-    instances[alias].ports['Value'] = rec.el;
-    return;
-  }
-
-  /* presentation is the alias's own Widget property: the stamped numeric  */
-  /* widget type maps to a control class; a widget CLASS NAME typed in by   */
-  /* hand on the dissection table is honored as-is; anything else (an       */
-  /* unpublished property, PROP_NULL plumbing) is a plain textbox            */
-  const widgetClass = widgetClassForType(rec.widget) ||
-                      (widgetModule(rec.widget) ? rec.widget : 'Textbox');
-
-  rec.slot.textContent = '';
-  /* reads subscribe to the target (events speak the original's name);    */
-  /* writes go through the alias's own "Value" slot - the doorway - so     */
-  /* the alias's own Name/Container/X/Y are never touched                  */
-  const el = bindLiveControl(rec.target, rec.targetProp, widgetClass, propertyValues[rec.target + '.' + rec.targetProp],
-    (v) => send({ cmd: 'set-property', instance: cur(alias), prop: 'Value', value: v }), alias);
-  el.classList && el.classList.add('widget-atom-control');
-  rec.slot.appendChild(el);
-  rec.control = el;
-
-  rec.labelEl.textContent = rec.label || rec.targetProp;
-
-  /* wiring through the alias is wiring to the original (ResolvePort,       */
-  /* object.c) - the atom arms a wire on its doorway slot                    */
-  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-  instances[alias] = instances[alias] || { className: 'Alias', el: rec.el, ports: {} };
-  instances[alias].ports['Value'] = rec.el;
-}
-
-function registerAliasAtom(alias, pos, container) {
-  const el = document.createElement('div');
-  el.className = 'widget-atom alias-atom';
-  el.style.left = pos.x + 'px';
-  el.style.top = pos.y + 'px';
-
-  const slot = document.createElement('span');
-  slot.className = 'alias-slot';
-  slot.textContent = '…';
-  el.appendChild(slot);
-
-  const labelEl = document.createElement('span');
-  labelEl.className = 'widget-atom-label';
-  labelEl.textContent = baseName(alias);
-  labelEl.title = alias;
-  el.appendChild(labelEl);
-
-  aliasAtoms[alias] = { el, slot, labelEl, target: '', targetProp: '', widget: '', direction: '', label: '', control: null, container: container || '' };
-
-  el.addEventListener('click', () => {
-    const rec = aliasAtoms[alias];
-    if (rec && rec.targetProp) onPortClick(alias, 'Value', el);
-  });
-
-  /* an alias is as alias-able and clone-able as anything else. Alias      */
-  /* makes another alias of the same target (chains collapse to the        */
-  /* original); Clone goes through the alias to the THING and snapshots    */
-  /* it - a new independent instance of the target's class with a copy of  */
-  /* its current data, exactly what cloning the thing itself gives you.    */
-  el.onpointerdown = (ev) => {
-    const cur = aliasOfEl(el, alias);   /* survives renames/moves */
-    const rec = aliasAtoms[cur];
-    if (!rec || ev.target === rec.control) return;
-    const mode = effectiveMode(el);
-    if (mode === 'Alias' && rec.target && rec.targetProp) {
-      /* through the doorway slot - the server resolves and records the  */
-      /* real target and property name                                    */
-      startGestureDrag(ev, 'alias', { of: cur, prop: 'Value' },
-        'alias: ' + baseName(rec.target) + '.' + rec.targetProp);
-      return;
-    }
-    if (mode === 'Clone' && rec.target) {
-      /* the server resolves through the alias and snapshots the thing */
-      startGestureDrag(ev, 'clone', { sourceAlias: cur, className: 'Alias' },
-        'clone: ' + baseName(rec.target));
-      return;
-    }
-    startDrag(ev, el, cur, 'Alias');
-  };
-  attachDeleteGesture(el, alias);
-  attachOptionsGesture(el, alias);
-
-  placeInContainer(el, container || '');
-  /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-  instances[alias] = { className: 'Alias', el, ports: {} };
-  livePositions[alias] = { el };
-  send({ cmd: 'subscribe', instance: alias, port: 'X' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Y' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Container' });
-
-  /* what it stands for + its own presentation - the atom assembles itself  */
-  /* as these arrive (onPropertyChanged's aliasAtoms branch). Widget and     */
-  /* Widget is the engine's stamp (create-alias/internals, bridge.c).        */
-  send({ cmd: 'subscribe', instance: alias, port: 'Target' });
-  send({ cmd: 'subscribe', instance: alias, port: 'TargetProp' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Widget' });
-  send({ cmd: 'subscribe', instance: alias, port: 'Label' });
-
-  log('created ' + alias + ' (Alias)', 'event');
-}
 
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
                            reservedIn, reservedOut, classParent) {
@@ -1003,14 +849,6 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   if (className === 'View') {
     renderInstanceOf({ alias, className, classParent, props, pos, hidden,
                        container, reservedIn, reservedOut });
-    return;
-  }
-
-  /* a real Alias instance: a doorway to one property of another object -   */
-  /* rendered from its own Target/TargetProp/Widget/Label properties as     */
-  /* they arrive, bound to the original's value through the node-level link */
-  if (className === 'Alias') {
-    registerAliasAtom(alias, pos, container);
     return;
   }
 
@@ -1106,21 +944,6 @@ function onPropertyChanged(alias, port, value) {
     } else if (port === 'H' && (!resizeState || resizeState.alias !== alias)) {
       view.panel.style.height = (parseInt(value, 10) || 220) + 'px';
       updateWiresFor(alias);
-    }
-  }
-
-  /* an Alias atom assembles itself from its own properties as they arrive  */
-  /* (Target/TargetProp say what it stands for, Widget is the engine's      */
-  /* engine's stamped presentation, Label its own) - see registerAliasAtom.  */
-  /* An internals-view member additionally becomes a row on its owner's      */
-  /* card panel (maybeBuildCardRow) - same member, second projection.         */
-  const aliasAtom = aliasAtoms[alias];
-  if (aliasAtom) {
-    if (port === 'Target' || port === 'TargetProp' || port === 'Widget' || port === 'Label') {
-      aliasAtom[port.charAt(0).toLowerCase() + port.slice(1)] = value;
-      renderAliasControl(alias);
-    } else if (port === 'Container') {
-      aliasAtom.container = value;
     }
   }
 
@@ -1660,12 +1483,6 @@ function cloneInstance(sourceAlias, className, container, pos) {
   log('cloned ' + sourceAlias, 'event');
 }
 
-/* --- an Alias instance's rendering: its own presentation, the original's --- */
-/* --- value (see registerAliasAtom / the alias branch of                  --- */
-/* --- onPropertyChanged; the mechanism is the node-level link, object.c)  --- */
-
-
-
 /* the ONLY remover: every window - including the one whose Delete click    */
 /* asked - takes a rendering down when, and only when, the engine says the   */
 /* instance is gone. The same "everyone watching reflects it" rule position   */
@@ -1686,7 +1503,6 @@ function onInstanceRemoved(alias) {
     delete loadedContainers[alias];
   }
   delete livePositions[alias];
-  delete aliasAtoms[alias];
   delete cardBodies[alias];
   delete internalsOwner[alias];
 
@@ -1741,7 +1557,6 @@ function onInstanceRenamed(oldAlias, newAlias) {
   moveKey(panels);
   moveKey(livePositions);
   moveKey(menuButtons);
-  moveKey(aliasAtoms);
   moveKey(cardBodies);
   moveKey(internalsAskMode);
   moveKey(loadedContainers);
@@ -1806,9 +1621,6 @@ function onInstanceRenamed(oldAlias, newAlias) {
     const s = views[newAlias].header.querySelector('span');
     if (s) { s.textContent = newBase; s.title = newAlias; }
   }
-  const atom = aliasAtoms[newAlias];
-  if (atom && !atom.label) atom.labelEl.textContent = atom.targetProp;
-
   log(oldAlias + ' → ' + newAlias, 'event');
 }
 

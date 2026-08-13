@@ -2116,3 +2116,224 @@ constructors - and in a seam BOTH directions are slow, because you can neither
 fix the general mechanism nor isolate the change. That is the real reason to
 close them: not tidiness, but that a seam is the only place where the system
 stops telling you quickly whether you are right.
+
+## Found 2026-08-13 — the day aliasing came back into the core
+
+`CreateAlias`/`AliasProperty` had sat in object.c with no callers while three
+places built aliases by hand, and a fourth (`CloneAliasNode`) did it again
+inside the core. Removing the detour deleted a loadable class, a hard
+dependency, five branches on a class name, and a compatibility shim that turned
+out to be unnecessary.
+
+**Done that day** (the story is in
+`docs/20260812_2300_aliasing_is_a_verb.md`, appended):
+
+- `CreateAlias` makes the control that says it `Renders` the target property's
+  type — `FindClassRendering`, the `FindClass` walk asking *what* instead of
+  *who*. There is no Alias class; `objects/alias/` is gone.
+- All four builders call the verb: the Bridge's `create-alias`, the internals
+  panel builder, the serializer's import pass, and `CloneAliasNode` (which now
+  copies the source's own class).
+- `IsAlias(inst, &target, &prop)` replaces every `strcmp(className, "Alias")` —
+  it asks whether the instance's `Value` is a link, which is the question those
+  five branches were always really asking.
+- Saved flows needed no shim: `ImportPlace` recognises an alias by carrying
+  `Target`/`TargetProp`, so files from either side of the change load identically.
+- The Bridge's `alias.object` dependency is gone, and it announces the real
+  class instead of the literal `"Alias"`.
+- `web/app.js` 2102 → 1914 lines: the client's alias rendering deleted, with
+  the suite running identically before and after.
+- The View claims `PROP_ICON` (item 1) and `PROP_NULL` stopped being treated as
+  a type (item 1a).
+- `Bridge_FindTap` is keyed by who asked, and one change reaches every tap on
+  the node (item 3).
+
+What follows is what that turned up and did NOT fix.
+
+### 1. Nothing declared that it renders an icon — FIXED same day: the view IS the icon
+
+`control.c:531` publishes `ReservedViewOpen` as `PROP_ICON`, and no class
+declares `Renders = PROP_ICON`. `CreateAlias` asks the registry which class
+shows a property of that kind, gets nothing, and refuses.
+
+Two consequences, both live:
+
+- `create-alias` of a thing's Open fails outright.
+- **Every options panel silently drops its `ReservedViewOpen` row**, because
+  `Bridge_Internals` makes one alias per property and that one cannot be made.
+  A thing's own doorway is part of its state — "the whole frog on the
+  dissection table" — and it is currently missing from the table.
+
+**The answer: the View claims it.** Opening a thing shows its view, so the
+doorway and the thing behind it are one object rather than a picture of one —
+`objects/view/view.c` now publishes `PublishShow(ClassSelf, PROP_ICON, …)`, the
+same way Slider claims `PROP_SLIDER`. An alias of an Open is a View, which is
+what it always was.
+
+Worth keeping as the record of how it was found, because the search was
+backwards: the question looked like "what should we build to draw an icon",
+and the thing that draws it already existed and was the most obvious object in
+the system. A missing renderer for a published type is a question about which
+EXISTING class owns that meaning, not a request for a new one.
+
+Covered by `rawtest: widget stamp: an alias of ReservedViewOpen is a doorway`,
+and it was half of why `guitest: rename-cascade: the dissection table has its
+members before the rename` failed — the other half was the alias map.
+
+### 1a. `PROP_NULL` is the absence, not a kind — FIXED same day
+
+`X`, `Y`, `W`, `H` and `Container` all publish as `PROP_NULL` (control.c), and
+`CreateAlias` was looking up a class that renders it. Asking which class renders
+*no control* is a category error; those five rows silently vanished from every
+options panel until it fell through to text like any undescribed property.
+
+Same shape as item 1 from the opposite side: there a real type had nobody
+claiming it, here a non-type was being claimed. Both were "the engine asked the
+registry a question the registry could not answer", and both showed up as a
+panel quietly missing rows rather than as an error.
+
+### 2. The client renders an alias as a species — DONE same day
+
+Deleted: `registerAliasAtom`, `renderAliasControl`, the `aliasAtoms` map, the
+`className === 'Alias'` dispatch branch, the `Target`/`TargetProp`/`Widget`/
+`Label` branch in `onPropertyChanged`, the teardown and rename bookkeeping, and
+the two widget constants only that renderer read. 188 lines, and the suite ran
+identically before and after — the definition of dead.
+
+The eleven guitest checks that reached for `aliasAtoms` were rewritten to ask
+the engine instead (`stands_for`, `members_of`): a panel's contents are found by
+containment like anything else on any canvas, and what a control stands for is
+read off the control. All but one pass.
+
+Near-miss worth keeping: `widgetClassForType` looked equally dead — one
+occurrence in `app.js`, its own definition — and is called three times by
+`objects/control/show/web/control.js`. The controls' JS is concatenated into
+`widgets.js` and shares one global scope, so **"unused in this file" is not
+evidence in this codebase.**
+
+**A consequence worth knowing independently of the tests:** a panel row used to
+register its control under the TARGET's key (`box.Source`), because the alias
+atom bound to `Target`.`TargetProp`. Now the row is an ordinary control that
+subscribes to its own `Value`, so it registers under the ROW's key. That is
+correct — resolving locates data, it does not re-address the answer — but
+anything keying on `liveControls['<object>.<prop>']` for panel rows moved with
+it.
+
+### 2a. A doorway must wear the name of what it opens — and open it
+
+Deleting the client's alias rendering does not fix this; deleting it is what
+REMOVES it, so this is behaviour that has to land somewhere else first.
+
+`app.js:817`, inside `renderAliasControl`, is the whole doorway:
+
+```js
+lb.textContent = rec.label || baseName(rec.target);         // the TARGET's name
+ic.addEventListener('click', () => panels[rec.target].setOpen(true));
+```
+
+A View labels itself `baseName(alias)` — its own name — and opens its own
+panel. So a control standing for a thing's `ReservedViewOpen` currently reads
+`Alias_4` and opens an empty panel of its own instead of the thing's.
+
+Two behaviours, and only the first is asserted anywhere
+(`guitest: rename-cascade: the Open icon's own label reads the NEW name`). The
+click-through is unasserted and currently wrong.
+
+The shape of the answer is visible in that line: `rec.label ||` says `Label`
+was always meant to be the source and the alias code was synthesising a
+fallback. So the engine stamps `Label` on the control the way it already stamps
+`Widget`/`Target`/`TargetProp`, and `view.js` draws `Label` when it has one —
+no control learns what an alias is. For the click: the control's `Value` IS a
+link to the target's `ReservedViewOpen`, so writing its own `Value` opens the
+target through the link, and nothing needs to know why.
+
+Filed separately from gap 2 on purpose. It was first written down as a
+subclause of "delete the dead client code", which reads as though it comes out
+in the wash — the exact mistake of assuming a deletion is a fix.
+
+### 3. A node's address is not a unique key, and code assumed it was
+
+`Bridge_FindTap` identified a tap by WHICH NODE CHANGED. That was safe only
+while one name ever reached one node — and links have never guaranteed that.
+The moment aliasing became ordinary, two controls legitimately pointed at one
+property, the second subscriber silently joined the first one's tap, and every
+update went out under somebody else's name. Writes worked the whole time,
+because those travel DOWN through the link; only updates coming back UP through
+a tap were lost.
+
+Fixed (the tap key now includes who asked, and one change is emitted to every
+tap on the node). **The general hazard is not fixed and is not audited**:
+anywhere a node pointer is used as an identity, two names for one node is a
+case that was never considered. That is a sweep waiting to happen, and this is
+the first known instance rather than the only one.
+
+It is also the sharpest argument yet for the both-ends subscriber lists
+(`docs/20260807_1335_wires_that_know_both_ends.md`): a node that knows who
+points at it does not need anyone to key a side table by its address.
+
+### 4. The harness had no opinion about any of this
+
+The tap bug was found by hand, in a browser. Nothing in the harness exercised
+two names on one node, so nothing failed. That test still needs writing, and it
+should be written against the old key so the record shows what it catches.
+
+More generally, this is the day the harness started carrying `roadmap=`
+declarations (`Report.expect(..., roadmap="...")`): a check describes what the
+engine SHOULD do, and when the engine does not do it yet, it is measured and
+listed under NOT YET instead of being absent. Two rules keep that honest and
+are enforced in code — it must fail for its stated reason, and a not-yet that
+PASSES is a failure, so a declaration cannot outlive the work it names.
+
+Tests are written against the design. A check that has to be weakened to go
+green was measuring the implementation.
+
+### 5. The planned compatibility shim was unnecessary — and that is a lesson
+
+`docs/20260812_2300_aliasing_is_a_verb.md` makes a saved-flow translation shim
+step 1, the thing everything else depends on: *class Alias + Widget N → create
+the class that renders N*. It was never needed. A saved instance already
+carries `Target` and `TargetProp` as ordinary properties, so recognising an
+alias by what it CARRIES rather than what class it claims makes files written
+on either side of the change identical to the serializer.
+
+The general form: **a compatibility shim is evidence you are still asking the
+wrong question.** The class name was never load-bearing; only the belief that
+it was made the shim look necessary. Worth checking against the next migration
+that seems to need one.
+
+That document should be corrected rather than deleted — the plan's ORDER was
+right, and the reasoning that produced a step that turned out to be free is
+more useful kept than tidied away.
+
+### 6. Properties are not in the namespace, so a question about one has no address
+
+Asking whether something exists is already solved and already free:
+`ResolvePath` (namespace.c, via object.c) answers it in O(path length) and
+creates nothing. That is what the namespace is FOR.
+
+But only INSTANCES are in it. A property has no path, so "does this thing carry
+a Target?" cannot be asked the cheap way, and the only read the protocol offers
+is `subscribe` — which goes through `Connect`, which grows a missing source
+property rather than failing. Late binding working exactly as designed, in a
+place where nobody meant to refer to anything. So the probe creates what it
+probes for.
+
+Found on 2026-08-13 by a test telling an alias from an ordinary control by
+asking each member of a view whether it carried a `Target`. Every member it
+asked came away carrying one, freshly made, reading `0` — it picked the wrong
+member and then believed the zero it had just invented.
+
+**The gap is the naming, not the reading.** A property is a node; it lives in a
+container and is a container. Everything the addressing work already built —
+`RegisterPath`/`ResolvePath`, the trie, paths that survive renames — stops at
+the instance, and the moment it does not, a property answers the same
+non-destructive question every instance already answers, with no new verb and
+no protocol change.
+
+The same shortfall shows up as the older note in this file about naming at too
+low a level: things with no name throw errors that cannot say what they are
+about. This is the same sentence from the other end — a thing with no name
+cannot be asked about either.
+
+(The test was fixed the local way: a Target is a path, and nothing conjured
+starts with a slash. That is a workaround for the probe, not for the gap.)

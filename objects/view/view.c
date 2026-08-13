@@ -137,9 +137,13 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetClassParent(ClassSelf, "Control");
 
 	/* what containment looks like, carried by the class that IS containment
-	   - see show/web/. A View renders no property type of its own: it is
-	   placed, not stamped on a property. */
-	PublishShow(ClassSelf, 0, show_web_js, show_web_css);
+	   - see show/web/. And a View is what an icon IS: opening a thing shows
+	   its view, so the doorway and the thing behind it are one object, not a
+	   picture of one. That is why View claims PROP_ICON - the type
+	   ReservedViewOpen publishes (control.c) - the same way Slider claims
+	   PROP_SLIDER. Without it the engine has nothing to make when asked to
+	   alias an Open, and a thing's own doorway goes missing from its panel. */
+	PublishShow(ClassSelf, PROP_ICON, show_web_js, show_web_css);
 
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
