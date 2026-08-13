@@ -2981,9 +2981,9 @@ static void Bridge_BuildShow(NodeObj instance)
 			if (css && css[0])
 				fprintf(cf, "\n/* ---- %s ---- */\n%s\n", name ? name : "?", css);
 
-			/* which property type this class renders - the class SAID so
-			   (PublishShow), it is not guessed from anything */
-			t = GetPropInt(show, "renders");
+			/* which property type this class renders - the class SAID so,
+			   on itself, and this only passes it on */
+			t = GetPropInt(cls, "Renders");
 			if (t && name)
 			{
 				esc = JsonEscapeStr(name);

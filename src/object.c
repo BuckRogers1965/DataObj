@@ -1392,7 +1392,30 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 			return 0;
 		}
-		/* genuinely absent - make the source property exist */
+		/* genuinely absent - so it comes into being here, and that is the
+		   MECHANISM, not a mistake: a property exists because something
+		   referred to it. That is how an instance is annotated
+		   (GUI_Format), how a default is overridden per instance, and how
+		   a script adds state to an object the class never declared. A
+		   class publishes what it ships with; an instance grows the rest.
+
+		   It is logged because it is indistinguishable from a typo or a
+		   renamed property, and THAT silence is what let six harness tests
+		   subscribe to a property removed two commits earlier and report
+		   nothing for weeks. Seeing it is the fix; refusing it would break
+		   late binding. */
+		{
+			char dbg[400], fpath[300];
+
+			snprintf(dbg, sizeof(dbg),
+					 "Connect: '%s' grew property '%s' by being wired to it "
+					 "(late binding - normal). Worth a look only if that name "
+					 "was meant to already exist.",
+					 PathOfInstance(fromNode, fpath, sizeof(fpath)) ? fpath
+						: (GetPropStr(fromNode, "Name") ? GetPropStr(fromNode, "Name") : "(unnamed)"),
+					 from);
+			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+		}
 		SetPropInt(fromNode, from, 0);
 		fromPort = GetPropNode(fromNode, from);
 	}

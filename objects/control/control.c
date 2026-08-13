@@ -487,9 +487,14 @@ void PublishShow(NodeObj class, int renders, char *js, char *css)
 	   Button publishes PROP_NULL, so the LED's type would have been stolen
 	   and every plumbing property would have rendered as a button. A class
 	   that renders no property type (a button is placed, never stamped on
-	   a property) says 0. Surface-independent, so it sits on Show itself. */
+	   a property) says 0.
+
+	   It sits on the CLASS, not under Show: "I am the control for this kind
+	   of property" is a fact about the class that every surface uses and
+	   the core needs too - aliasing has to answer "what control shows this
+	   property?" without a browser anywhere in sight. */
 	if (renders)
-		SetPropInt(show, "renders", renders);
+		SetPropInt(class, "Renders", renders);
 }
 
 /* see the doc comment in object.h - opt-in, ordinary, no different from */
