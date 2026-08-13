@@ -215,6 +215,35 @@ function startResize(ev, alias) {
   resizeState = { alias, el: view.panel, startW: rect.width, startH: rect.height, startX: ev.clientX, startY: ev.clientY };
 }
 
+/* Move all "drag and drop into any view" with no view special-cased.       */
+function dropTargetAt(ev, ignoreEl) {
+  let restore = null;
+  if (ignoreEl) {
+    restore = ignoreEl.style.pointerEvents;
+    ignoreEl.style.pointerEvents = 'none';
+  }
+  const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+  if (ignoreEl) ignoreEl.style.pointerEvents = restore || '';
+
+  const inner = hit && hit.closest('.view-inner');
+  if (inner && inner.dataset.viewAlias && (!ignoreEl || !ignoreEl.contains(inner))) {
+    const rect = inner.getBoundingClientRect();
+    return {
+      container: inner.dataset.viewAlias,
+      x: Math.max(0, ev.clientX - rect.left + inner.scrollLeft),
+      y: Math.max(0, ev.clientY - rect.top + inner.scrollTop),
+    };
+  }
+
+  const canvas = $('canvas');
+  const rect = canvas.getBoundingClientRect();
+  return {
+    container: ROOT_VIEW,	/* the canvas is the root view, not "nowhere" */
+    x: Math.max(0, ev.clientX - rect.left),
+    y: Math.max(0, ev.clientY - rect.top),
+  };
+}
+
 /* the class's entry point: render one instance of me */
 register('View', {
   renderInstance: (s) => registerView(s.alias, s.props, s.pos, s.hidden,

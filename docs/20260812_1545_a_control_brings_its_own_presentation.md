@@ -414,3 +414,111 @@ long session: it is a deletion touching `Bridge_CreateAlias`, the
 internals-view builder, the import pass and the client at once. And it is
 smaller than it looks - not "write a core verb" but "delete three private
 copies of one."
+
+---
+
+## Phase 2 (appended 2026-08-13)
+
+The table above assigned seven rows to owners. Three are resolved, and the
+reason the other four are still standing turned out to be more interesting than
+the moves themselves.
+
+### What moved
+
+**The alias row completed by deletion, not relocation.** It was estimated at
+152 lines "owner: nobody"; it came out at 188 — `registerAliasAtom`,
+`renderAliasControl`, the `aliasAtoms` map, the dispatch branch, the
+property-changed branch, the teardown and rename bookkeeping, and two widget
+constants only that renderer read. The suite ran identically before and after,
+which is the definition of dead. (The day it took to establish that is its own
+post: `20260812_2300_aliasing_is_a_verb.md`.)
+
+**The `gui*` family → Control.** Eight functions, no shared state, and six of
+its nine call sites were already in `control.js`. The interesting part is the
+one site that stayed. The host used to DO the re-judge when a `GUI_` property
+arrived; now it reports it:
+
+```js
+if (port.startsWith('GUI_')) guiAnnotationChanged(alias);
+```
+
+The host knows a `GUI_` property arrived. What that MEANS is Control's. Every
+remaining row should end in that shape — the host noticing, the class deciding.
+
+**`dropTargetAt` → View.** It reads `.view-inner` and `dataset.viewAlias`, a DOM
+contract `view.js` creates twelve lines from where the function now sits. It had
+been reaching into View's private structure from outside.
+
+```
+web/app.js       2102 -> 1778   (Phase 1 end -> now)
+control.js        316 ->  431
+view.js           222 ->  251
+```
+
+### The test for whether a cut is right
+
+Ownership says where something belongs; the class dependency graph says whether
+it is allowed to live there, and that second one is mechanical:
+
+```
+Control  ->  Object (core)      ... and nothing else
+View     ->  Control
+Textbox  ->  Control
+Bridge   ->  Object, Widget, View
+```
+
+`DependenciesReady` refuses to start a class whose declared classes are not
+registered. So a call from `led.js` into `control.js` is guaranteed by something
+the engine enforces at load — and `control.js` may call NOTHING in another
+class's js, because Control declares nothing and cannot declare View without a
+cycle.
+
+The host has no declaration of its own and does not need one: the Bridge
+assembles `widgets.js` and serves the client, and the Bridge declares
+`view.object`. **The Bridge is the host's dependency declaration.**
+
+That test earned its keep immediately by killing a row. **The drag cannot move
+to Control** — it has to ask which view is under the cursor, and Control may not
+call View. The split is at exactly that question: being dragged (the grab, the
+ghost, writing X/Y) is Control's; where it landed (containment, the commit) is
+View's. And no call crosses, because the browser dispatches document-level
+pointer events to both files independently — Control sets `dragState`, View's
+`pointerup` reads it, and `View -> Control` is declared.
+
+Worth building as a check rather than an argument: every identifier a class's
+`show/web` calls that is *defined in another class's* `show/web` must be covered
+by that class's `AddDependency`. The Bridge already walks every class and reads
+every `Show/web/js` to build the blob — it is the one place that sees them all
+at once.
+
+### Why the remaining rows stayed
+
+The wire layer (~300) and the drag machinery (~200) both carry module-level
+mutable state (`dragState`, `wires`, `knownConnections`) and document-level
+pointer listeners whose REGISTRATION ORDER matters, since `widgets.js` loads
+before `app.js`. Those want a green run between them rather than a batch.
+
+### And the metric was wrong
+
+Half way through this, the goal got restated and it is not "make `app.js`
+small." It is that `app.js` and the Bridge must be able to serve a REST
+interface with no GUI in it at all.
+
+So the test for every line is **could this run with no DOM?** — and by that
+test `app.js` is two files wearing one name:
+
+- **a protocol client**: `connectSocket`, `send`, `handleEvent`, `nodeProp`,
+  `parseInterface`, `baseName`, `cur`, and the caches of engine facts
+  (`classes`, `instances`, `propertyValues`). Maybe 350 lines, no `document` in
+  any of it. A REST or MCP front end wants exactly this.
+- **a GUI host**: everything with a DOM in it, whose entire vocabulary is the
+  classes' own `show/web`.
+
+The seam is the event handlers. `onPropertyChanged` does two jobs in one
+function: it updates `propertyValues`, which every client needs, and then pushes
+into `liveControls`/`selfDisplays`/`menuButtons`, which is rendering. Those are
+not rows to relocate — they are functions to split.
+
+Both Phase 2 moves survive that harder test for a better reason than the one
+that motivated them: `guiValidate` toggles a CSS class and `dropTargetAt` calls
+`elementFromPoint`. Neither could ever have belonged to a client with no eyes.

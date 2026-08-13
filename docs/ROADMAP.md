@@ -2337,3 +2337,187 @@ cannot be asked about either.
 
 (The test was fixed the local way: a Target is a path, and nothing conjured
 starts with a slash. That is a workaround for the probe, not for the gap.)
+
+## Reframed 2026-08-13 — three windows, one running thing
+
+The goal was restated mid-session and it changes the near-term order. Written
+up in full as `docs/20260813_1500_three_windows_one_dataflow.md`; the operative
+parts:
+
+**`app.js` and the Bridge must be able to serve a REST interface with no GUI in
+it.** So the metric is not "how small is app.js" — it is **can something with
+no eyes do this?** Anything that only works through the browser is a HOLE, not
+a client feature. `alias.object` was one; every gesture still living in the
+client is a capability an agent does not have.
+
+**The claim that the GUI is incidental is currently untested**, because there is
+exactly one window. That is the argument for building the second translator
+early rather than last: it is the instrument, not the reward. It finds holes as
+failures to express something, which is unambiguous.
+
+### The near-term order this implies
+
+1. **Properties get paths** — promoted from item 6 below to the spine. A REST
+   route IS an address and an MCP tool name IS a name. `GET /Root/Filter/Mode`
+   is the namespace answering the question it already answers over a different
+   transport; today `Mode` has no address, and the only read (`subscribe`)
+   creates what it reads. Same sentence as the older note in this file about
+   naming things at too low a level.
+2. **One walk, four sinks.** `IsPortableProp` already exists as the shared rule
+   for "what does this thing carry", but three traversals implement it —
+   `CloneObject`, export/import, and `Bridge_Internals`. They are one walk whose
+   sink differs: clone makes nodes with copied values, export makes text with
+   copied values, a panel makes controls LINKED to the values, the Interface
+   makes names and types with no values. Copy-versus-link is the same axis as
+   clone-versus-alias, one level down.
+   Consequence: the Bridge's panel layout (`y += mh + 14`, the 14px inset, the
+   `PROP_TEXTBOX` floor) is a formatter's concern that leaked into the walk. It
+   dissolves rather than relocating. And `GET /Root/Filter` is `NodeToJson`
+   restricted to one instance — a narrower path, not a new one.
+3. **The REST translator.** Prediction worth recording so being wrong is
+   informative: **it should need no per-class code at all** — no `show/rest`
+   beside `show/web`. `show/web` exists because a browser needs presentation;
+   REST needs none, because the published Interface is already the schema. If it
+   turns out to want a per-class half, the Interface is less complete than we
+   think.
+4. **Cross-translator equivalence tests.** Build the same flow over raw JSON and
+   over REST, compare the node trees. Identical trees are the mechanical proof
+   that translators are syntax-only. A new category: the existing suites prove
+   one translator works, this proves a translator is interchangeable.
+5. **The `app.js` split**, demoted to maintenance. It is two files wearing one
+   name — a protocol client (`connectSocket`, `send`, `handleEvent`,
+   `parseInterface`, the caches of engine facts; ~350 lines, no `document` in
+   any of it) and a GUI host whose whole vocabulary is the classes' `show/web`.
+   The seam runs through the event handlers: `onPropertyChanged` updates
+   `propertyValues` (every client needs it) AND pushes into `liveControls`
+   (rendering). Those split rather than move.
+
+### Phase 2 of the presentation work, as far as it went
+
+Appended to `docs/20260812_1545_a_control_brings_its_own_presentation.md`. Three
+of seven rows resolved: the alias row by DELETION (188 lines, suite identical
+before and after), the `gui*` family to Control, `dropTargetAt` to View.
+`web/app.js` 2102 → 1778.
+
+**The test for whether a cut is right, discovered doing it:** ownership says
+where something belongs (what is true of every instance of that class); the
+class dependency graph says whether it is ALLOWED to live there, and that half
+is mechanical. `DependenciesReady` refuses to start a class whose declared
+classes are absent, so a call from `led.js` into `control.js` is enforced at
+load — while `control.js` may call nothing in another class's js, because
+Control declares only the core and cannot declare View without a cycle. The host
+needs no declaration of its own: the Bridge assembles `widgets.js` and serves
+the client, and the Bridge declares `view.object`. **The Bridge is the host's
+dependency declaration.**
+
+That test immediately killed a row: **the drag cannot move to Control**, because
+it must ask which view is under the cursor. The seam is at that question — being
+dragged is Control's, where it landed is View's — and no call crosses it,
+because the browser dispatches document-level pointer events to both files
+independently.
+
+**Worth building as a check rather than an argument:** every identifier a
+class's `show/web` calls that is defined in ANOTHER class's `show/web` must be
+covered by that class's `AddDependency`. The Bridge already walks every class
+and reads every `Show/web/js` to build the blob — it is the one place that sees
+them all at once. Then "is this the right cut" stops being a judgement call.
+
+### What composition turns out to be
+
+A View with bind-ported properties is indistinguishable from a primitive class
+to a caller: published properties, inputs, outputs, a name. So wiring five
+objects together and binding three ports **publishes a REST resource and an
+agent tool** — no build, no deploy, no schema file, no code. The composite never
+learns it was published. "An application is a set of objects plus their wiring"
+reaches the network boundary.
+
+And the capability that only exists because all three are windows: connect a
+browser and watch what an agent is building in `/Root/mcp`. Instances appear as
+it makes them, wires draw as it connects them, values move as data flows —
+because `instance-created` from an MCP call is the same event as from a palette
+drop, and the canvas cannot tell which happened. Watch it wire something wrong,
+fix the wire by hand, and its next query sees the correction. Two peers standing
+next to one running thing, not agent-with-human-review.
+
+### Data objects that carry a shape — the walk belongs to the kind
+
+Sharpens "Nor does a value have to be a scalar" above (Phase 8), which already
+called for topology nodes — a table, a graph, a linked list, a document — held
+as walkable structure rather than an opaque payload. What was missing was the
+contract that makes them uniform, and it is one thing: **the kind defines its
+own walk.**
+
+**A DataObj answers a fixed set of questions.** What am I; give me as
+string/int/real; set me from one; copy me; free me; serialize me; walk me.
+Scalar, table, list, graph — the same set. Then clone, export, the panel walk
+and the Interface all keep working untouched, because none of them ever asks
+what kind a value is. An `if (type == TABLE)` anywhere outside `data.c` means
+the design leaked.
+
+**Containment costs nothing new.** A node's value slot IS a DataObj. If a
+composite's cell slot is also a DataObj, then a table of graphs and a node tree
+of tables are the same fact stated twice. Messages are free for the same
+reason: a payload is a data node, so sending a whole table is the existing
+`SndMsg` under the existing ownership rule.
+
+**The conversion matrix extends by one rule per kind.** Today it is kind-to-kind
+across five scalars. A composite read as a string has to answer something, and
+read as a real has to answer something; whatever is chosen is declared the same
+way the scalar matrix is, and `DataTest` prints the extended matrix as its
+proof.
+
+**Type and widget become two axes.** `Renders` maps widget→class today. A table
+property wants a grid, a chart or a tree depending on what the view is for, so
+the property declares its type and its widget separately, and
+`FindClassRendering` stays the same walk asking the same question.
+
+**The walk resolves the density question.** Node-shaped storage (a node per row,
+a node per cell) buys one walker, one serializer, and a subscribable cell for
+free; a compact representation is what a million-row table wants. If the walk
+comes from the kind, the storage is nobody else's business and both hand back
+the same iterator. It also makes cycles safe without anyone else's help: a
+cyclic graph knows it is cyclic, so ITS walk carries the visited set, and the
+serializer never needs cycle detection, because that was never the walker's
+problem.
+
+**A kind can offer more than one walk** — a table by row, by column or by a
+selection; a tree pre-order or post-order. The walk is named and the property is
+a node, so which walk a sink uses is another property on it: the panel walks one
+way and the REST translator another, over the same table, with no copy.
+
+**Serializing is the walk with a text sink** — the same one the flow file, the
+bridge and REST already are, nothing per-kind on the writing side. The one thing
+it adds is IDENTITY: a cyclic graph cannot be written as pure nesting, so the
+walk must say "you have seen this one, here is its handle" and the reader must
+bind handles back. That is already solved one level up — export writes internal
+links relative, import is a clone-drop that rebinds them — and the same problem
+arriving twice with the same answer is a good sign the answer is right. The
+payoff is one representation serving every mouth: a table in a flow file, over
+the bridge, as a REST body, as an MCP tool result.
+
+### Changing representation is a functor
+
+A mapping between two representations maps the ARROWS, not just the values. A
+table→tree mapping carries the walk across, so the mapped thing is walkable,
+subscribable and serializable without being materialized: a view, not a copy,
+costing nothing until someone reads it.
+
+- **The scalar matrix is the degenerate case** — five kinds, twenty-five
+  hardcoded arrows in `data.c`. Generalized, the arrows are declared and looked
+  up the way `Renders` is.
+- **They compose, so it is not N².** Declare the natural arrows and get the rest
+  by composition; table→tree→JSON is two declarations, not a third.
+- **A mapping is an object** — an input, an output, properties — so it is a
+  palette class and it wires like anything else, which also means a mapping can
+  be SCRIPTED. A user-defined representation change costs a ScriptBox, not a
+  rebuild.
+
+**The law that keeps it honest, and it is testable:** map across and back is
+identity, and mapping commutes with the walk — walk-then-map equals
+map-then-walk. One harness test written once, run against every declared pair.
+
+This is the shape-to-shape half of the mapping described under Phase 8: with it,
+`presentation/<surface>` carries only what is genuinely presentational, and a
+REST resource, a SQL row, an MCP schema or an RDF triple is a topology the graph
+holds directly instead of flattening into text and hoping the far end parses it
+back the same way.

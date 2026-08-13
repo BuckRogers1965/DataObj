@@ -632,104 +632,6 @@ function wireSlot(alias, propName, controlEl) {
   return wrap;
 }
 
-/* GUI_* properties: client-only annotations. The engine stores them like any
-   other property and never reads them - the prefix IS the rule, so no list of
-   blessed names lives here or in the bridge. They arrive through the ordinary
-   property-changed path and sit in propertyValues like everything else.
-   For now only Textbox honors them.
-
-   GUI_Format is a MASK, not the name of a format - "(###) ###-####" for a
-   phone number, and the same mechanism does a date or a zip+4 without another
-   line of code here. A '#' takes one digit from the value; every other
-   character is punctuation the box supplies for you, so you type 5551234567
-   and read (555) 123-4567.
-
-   The mask is display only: the ENGINE holds the digits. Formatting that
-   changed the stored value would not be formatting, it would be a second
-   version of the data - and two clients with different masks would disagree
-   about what the property is. So the box shows masked text, and what leaves
-   the browser is always the raw digits.
-
-   GUI_Pattern is a regular expression the RAW value must match. A value that
-   fails it gets a red outline and is not sent - the propagation is gated in
-   the browser, which is why this is presentation and not truth: nothing else
-   writing that same property is bound by it. If a rule has to hold for
-   everyone, it belongs on the wire as a Filter, not here. */
-function guiAnnotation(alias, name) {
-  const v = propertyValues[cur(alias) + '.GUI_' + name];
-  return v ? v : null;
-}
-
-/* mask -> text. Punctuation is emitted only while digits remain, so a
-   half-typed number reads "(555) 12" and not "(555) 12)-    ". */
-function guiMaskApply(mask, raw) {
-  const digits = (raw || '').replace(/\D/g, '');
-  let out = '', d = 0;
-  for (const ch of mask) {
-    if (d >= digits.length) break;
-    if (ch === '#') out += digits[d++];
-    else out += ch;
-  }
-  return out;
-}
-
-/* text -> what the engine stores. The mask's punctuation is the browser's,
-   never the value's. */
-function guiMaskStrip(mask, text) {
-  return mask ? (text || '').replace(/\D/g, '') : text;
-}
-
-/* a mask is a rule, not decoration: "(###) ###-####" says ten digits, so a
-   value that does not fill it is not a phone number. The box takes whatever
-   string it is handed - typed, pasted, or written by the engine - and holds
-   it to that shape. Anything short (or long) is outlined and never sent. */
-function guiMaskComplete(mask, raw) {
-  if (!mask) return true;
-  const want = (mask.match(/#/g) || []).length;
-  return (raw || '').replace(/\D/g, '').length === want;
-}
-
-function guiPattern(alias) {
-  const src = guiAnnotation(alias, 'Pattern');
-  if (!src) return null;
-  try { return new RegExp(src); }
-  catch (e) { return null; }		/* a malformed pattern gates nothing */
-}
-
-/* both annotations judge the RAW value, so a mask and a pattern can never
-   contradict each other. Either one failing means no send. */
-function guiOk(alias, rawValue) {
-  const re = guiPattern(alias);
-  return guiMaskComplete(guiAnnotation(alias, 'Format'), rawValue)
-         && (!re || re.test(rawValue));
-}
-
-function guiValidate(alias, el, rawValue) {
-  const ok = guiOk(alias, rawValue);
-  /* once a box has held a good value it is ARMED: from then on it says so
-     immediately when it stops being good. Before that first good value it
-     is just half-typed, which is not an error yet. */
-  if (ok) el.guiArmed = true;
-  el.classList.toggle('gui-invalid', !ok);
-  return ok;
-}
-
-/* re-mask what is in the box as it is typed. The caret goes to the end
-   because the mask fills left to right as digits arrive - editing the
-   middle of a masked value is not something this handles. */
-function guiReformat(el) {
-  const mask = el.guiAlias && guiAnnotation(el.guiAlias, 'Format');
-  if (!mask) return;
-  const shown = guiMaskApply(mask, el.value);
-  if (shown === el.value) return;
-  el.value = shown;
-  const sel = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  range.collapse(false);
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
 
 
 /* --- base case: a widget class's own Value/State/activate, rendered against itself --- */
@@ -956,19 +858,10 @@ function onPropertyChanged(alias, port, value) {
   for (const entry of selfDisplays[key] || []) entry.el.value = value;
   for (const entry of liveControls[key] || []) updateLiveControl(entry, value);
 
-  /* the annotation itself changed - re-judge every box it governs, so
-     editing GUI_Pattern in the options panel outlines the offenders now
-     instead of at the next unrelated write */
-  if (port.startsWith('GUI_')) {
-    for (const k in liveControls)
-      for (const entry of liveControls[k])
-        if (entry.el.guiAlias === alias) {
-          const m = guiAnnotation(alias, 'Format');
-          const raw = guiMaskStrip(m, entry.el.value);
-          entry.el.value = m ? guiMaskApply(m, raw) : raw;
-          guiValidate(alias, entry.el, raw);
-        }
-  }
+  /* an annotation changed - Control re-judges the boxes it governs. What a
+     GUI_ property MEANS is the control's business; the host's business is
+     noticing that one arrived and saying so. */
+  if (port.startsWith('GUI_')) guiAnnotationChanged(alias);
 
   for (const menu of menuButtons[alias] || []) {
     if (port === 'Label') { menu.state.label = value; menu.renderLabel(); }
@@ -1630,34 +1523,6 @@ function onInstanceRenamed(oldAlias, newAlias) {
 /* being dragged) and the cursor's position relative to that view's inner   */
 /* area - Root is just the outermost view, reported as container "" with    */
 /* canvas coordinates. This one function is what makes Clone, Alias, and    */
-/* Move all "drag and drop into any view" with no view special-cased.       */
-function dropTargetAt(ev, ignoreEl) {
-  let restore = null;
-  if (ignoreEl) {
-    restore = ignoreEl.style.pointerEvents;
-    ignoreEl.style.pointerEvents = 'none';
-  }
-  const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-  if (ignoreEl) ignoreEl.style.pointerEvents = restore || '';
-
-  const inner = hit && hit.closest('.view-inner');
-  if (inner && inner.dataset.viewAlias && (!ignoreEl || !ignoreEl.contains(inner))) {
-    const rect = inner.getBoundingClientRect();
-    return {
-      container: inner.dataset.viewAlias,
-      x: Math.max(0, ev.clientX - rect.left + inner.scrollLeft),
-      y: Math.max(0, ev.clientY - rect.top + inner.scrollTop),
-    };
-  }
-
-  const canvas = $('canvas');
-  const rect = canvas.getBoundingClientRect();
-  return {
-    container: ROOT_VIEW,	/* the canvas is the root view, not "nowhere" */
-    x: Math.max(0, ev.clientX - rect.left),
-    y: Math.max(0, ev.clientY - rect.top),
-  };
-}
 
 /* Clone and Alias are pick-then-place, deterministic: the first click     */
 /* picks up a ghost (the source never moves), the ghost follows the         */
