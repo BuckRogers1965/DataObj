@@ -118,8 +118,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)VUMeter_OnEnable);
 
-	SetPropStr(instance, "ReservedIn", "Value");
-	SetPropStr(instance, "ReservedOut", "Value");
 
 	InitPosition(instance);
 

@@ -59,12 +59,6 @@ ALIAS_IS_A_CONTROL = ("client renders an alias as a species (aliasAtoms / "
                       "renderAliasControl / className==='Alias' in app.js) - "
                       "an alias is an ordinary control pointing at data")
 
-DOORWAY_WEARS_ITS_TARGET = ("a doorway must show the name of what it OPENS and "
-                            "open it - the label and the click-through lived in "
-                            "the client's alias rendering; the engine should stamp "
-                            "Label, and the click should write the control's own "
-                            "Value and let the link do the rest")
-
 
 def dropped_in(t, view, desc):
     """The one instance the last gesture put into this (freshly made) view.
@@ -783,16 +777,16 @@ def test_rename_cascades_into_own_options_panel(t, r):
              "%s" % renamed,
              "%s" % state,
              state.get("openTarget") == renamed)
-    # the doorway must read the name of the THING it opens, not of the control
-    # standing in for it. The control is a View now (a view IS the icon), and
-    # the client labels it from its own Name because that is what it does for
-    # every other control - it has no notion yet that this one stands for
-    # something and should wear that thing's name.
-    r.expect("rename-cascade: the Open icon's own label reads the NEW name",
-             "RenameCascadeDone",
+    # the doorway is an ORDINARY control and wears its OWN name, like every
+    # other instance - renaming the view it opens moves it and re-points its
+    # Target and leaves its label alone. If you want the caption to read
+    # something else you rename the control, which is why there is no
+    # labelling rule here for one kind of thing.
+    own_name = renamed_open_member.rsplit("/", 1)[-1]
+    r.expect("rename-cascade: the Open icon keeps its own name through the rename",
+             "the doorway's label is its own name (%s), not the renamed view's" % own_name,
              "%s" % state,
-             state.get("openLabel") == "RenameCascadeDone",
-             roadmap=DOORWAY_WEARS_ITS_TARGET)
+             state.get("openLabel") == own_name)
 
 
 def test_lazy_contents(t, r):

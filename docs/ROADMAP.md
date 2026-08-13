@@ -2219,33 +2219,32 @@ correct — resolving locates data, it does not re-address the answer — but
 anything keying on `liveControls['<object>.<prop>']` for panel rows moved with
 it.
 
-### 2a. A doorway must wear the name of what it opens — and open it
+### 2a. A doorway must OPEN what it points at
 
-Deleting the client's alias rendering does not fix this; deleting it is what
-REMOVES it, so this is behaviour that has to land somewhere else first.
+**The label half of this is struck (2026-08-13, evening).** It said a doorway
+must wear the name of what it opens. It must not: a control wears its OWN name,
+like every other instance, and if you want the caption to read something else
+you rename the control. The deleted client rendering synthesised the target's
+name (`lb.textContent = rec.label || baseName(rec.target)`), and putting that
+back would be a labelling rule for one kind of thing — the species this whole
+piece of work removed. What made the captions unreadable was never the label
+rule, it was the NAMES: every panel row was called `Alias_N`. The bridge now
+names each row for the property it stands for, so the caption says something
+useful with no rule about doorways at all. `guitest: rename-cascade` asserts the
+uniform behaviour instead — the doorway keeps its own name through a rename.
 
-`app.js:817`, inside `renderAliasControl`, is the whole doorway:
+**What remains is the CLICK, and it is still unasserted.** The other line of
+that deleted rendering was:
 
 ```js
-lb.textContent = rec.label || baseName(rec.target);         // the TARGET's name
 ic.addEventListener('click', () => panels[rec.target].setOpen(true));
 ```
 
-A View labels itself `baseName(alias)` — its own name — and opens its own
-panel. So a control standing for a thing's `ReservedViewOpen` currently reads
-`Alias_4` and opens an empty panel of its own instead of the thing's.
-
-Two behaviours, and only the first is asserted anywhere
-(`guitest: rename-cascade: the Open icon's own label reads the NEW name`). The
-click-through is unasserted and currently wrong.
-
-The shape of the answer is visible in that line: `rec.label ||` says `Label`
-was always meant to be the source and the alias code was synthesising a
-fallback. So the engine stamps `Label` on the control the way it already stamps
-`Widget`/`Target`/`TargetProp`, and `view.js` draws `Label` when it has one —
-no control learns what an alias is. For the click: the control's `Value` IS a
-link to the target's `ReservedViewOpen`, so writing its own `Value` opens the
-target through the link, and nothing needs to know why.
+A View opens its own panel, so a control standing for a thing's
+`ReservedViewOpen` opens an empty panel of its own instead of the thing's.
+The control's `Value` IS a link to the target's `ReservedViewOpen`, so writing
+its own `Value` opens the target through the link and nothing has to know why.
+That needs a test before it needs a fix.
 
 Filed separately from gap 2 on purpose. It was first written down as a
 subclause of "delete the dead client code", which reads as though it comes out
@@ -2521,3 +2520,84 @@ This is the shape-to-shape half of the mapping described under Phase 8: with it,
 REST resource, a SQL row, an MCP schema or an RDF triple is a topology the graph
 holds directly instead of flattening into text and hoping the far end parses it
 back the same way.
+
+### Found 2026-08-13 (evening) — one clone path, and a mark on everything
+
+**The clone had two paths and they had drifted.** `CloneGroupPass` asked
+`IsAlias` and sent linked members to `CloneAliasNode` and everything else to
+`CloneObject`. In a compiled widget's panel EVERY member is a control pointing
+at data, so the branch decided nothing - it only picked which of two
+implementations of "copy this instance" ran. And they disagreed:
+`CloneObject` walked every portable property (`IsPortableProp`), while
+`CloneAliasNode` carried a hand-written list of four names - `Widget`, `Label`,
+`X`, `Y`. So a cloned control arrived without its `W`/`H` (default-sized boxes)
+and without its `LabelPos` (captions back on things that hide them), and
+anything added to a control later would have gone missing the same silent way.
+Worse, `CloneAliasNode` required a `TargetProp` string that only the alias
+gesture writes, so a widget's controls - linked by `Widget_Ctl`, which records
+nothing - failed outright: cloning a TCPPort produced its sub-views with every
+control inside them missing, 50 `FAILED` lines in the log, and a clone verb
+that still reported success.
+
+Now: pass 0 clones every member the same way, pass 1 re-makes the links every
+member carried (against the map, so they point at the copies), pass 2 wires.
+`CloneAliasNode` is deleted. Two consequences beyond the bug: `CloneObject`
+skips link slots instead of copying the string a link currently reads (the
+hazard its own comment warned about, now handled), and relinking walks EVERY
+property rather than just `Value`, so a composite whose own property is bound
+to an inner member's comes across bound.
+
+**Test:** `viewclonetest.py: test_clone_compiled_widget` clones a palette
+TCPPort and checks the copy holds every member at every depth, that the
+sub-views brought their controls, AND that each control was ANNOUNCED - the
+engine holding a control a client was never told about is an empty panel in
+every window, and the two fail separately.
+
+**The general lesson, and why the suite stayed green:** the failure was loud
+(50 log lines) and not fatal (the verb reported success), and nothing fails a
+run for what is in the log. `CloneAliasNode` returning NULL should be an
+`ERROR`, and `run.sh` should fail a variant when an `ERROR` line appears in the
+server log. Then the next silent partial-success announces itself in every
+suite at once instead of waiting for someone to clone the right thing in a
+browser.
+
+### Target is a mark on everything, which is no mark at all
+
+`Target`/`TargetProp` are the WRITTEN-DOWN copy of a link - the pointer
+recorded as text because a `.flow` file cannot carry a pointer. The live fact is
+the link itself, which `IsAlias` reads directly.
+
+Commenting out the engine's write (`AliasProperty`) changed nothing observable
+in the browser, because the bridge computes it anyway in both paths that make
+one: `Bridge_CreateAlias` resolves the port and writes the SESSION path, and
+`Bridge_Internals` writes the instance's alias for every panel row. So the fact
+is written twice, in two different naming schemes, with the translator's version
+winning - which is the one that reaches the flow file.
+
+**The harness then failed six checks and settled it: the engine's write is NOT
+redundant.** A `.flow` carries `Target`, and the serializer reads it from the
+FILE to recreate the alias - but the instance it creates gets its `Target` from
+`AliasProperty`, and nothing else. The bridge's writes happen on ITS create
+paths only; import goes through neither. So with the engine silent, an imported
+or loaded alias worked as a link and could no longer say what it pointed at.
+
+Which answers the ownership question properly: **`Target` belongs to the
+engine**, because a serializer has to export and import with no bridge loaded
+at all - a headless host that never links a translator still saves and restores
+flows. The writes to question are the BRIDGE's, which overwrite an engine path
+with a session alias, and the repath job that exists to keep that copy in step.
+
+And every control that points at data IS a target - a widget's panel control
+stands for its widget's property exactly the way a dropped alias stands for
+its target. Marking all of them is marking none of them. The asymmetry today is
+the other way round from how it first looked: `Widget_Ctl` records nothing, so
+those controls are the ones missing the mark, and a clone GAINS one because the
+bridge stamps it on announce.
+
+Direction (not scheduled): the serializer asks the link at save time instead of
+reading a stored duplicate - `IsAlias` already hands back both the target
+instance and the property name. That retires the bridge's repath-the-string job
+(`Bridge_RepathSubtree`, keeping the copy in step through renames) and both
+fallbacks, and leaves one source of truth with a text rendering produced where
+text is needed. Same shape as the walk belonging to the kind: the fact lives in
+one place, and whoever needs it in their own notation derives it.

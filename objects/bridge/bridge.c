@@ -894,7 +894,17 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 			}
 			row++;
 
-			Bridge_FreshAlias(local, viewAlias, "Alias", memberAlias, sizeof(memberAlias));
+			/* named for the property it stands for. A control wears its   */
+			/* own name, so the row's caption and its address both say what */
+			/* it is - .../VPanel_1/Name, not .../Alias_5. Only a name      */
+			/* already taken in this panel falls back to a generated one.   */
+			{
+				int n = snprintf(memberAlias, sizeof(memberAlias), "%s/%s",
+								 viewAlias, name);
+
+				if (n < 0 || n >= (int)sizeof(memberAlias) || ResolvePath(memberAlias))
+					Bridge_FreshAlias(local, viewAlias, name, memberAlias, sizeof(memberAlias));
+			}
 			RegisterPath(memberAlias, member);
 			Bridge_SetNameFromAlias(member, memberAlias);
 		}

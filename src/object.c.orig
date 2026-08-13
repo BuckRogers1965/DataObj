@@ -803,7 +803,6 @@ int LinkPropertyAs(NodeObj owner, char * slot, NodeObj targetInst, char * propna
 int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
 {
 	NodeObj owner, node, pub;
-	char path[256];
 	int widget;
 
 	if (!aliasInst || !targetInst || !propname || !propname[0])
@@ -847,8 +846,11 @@ int AliasProperty(NodeObj aliasInst, NodeObj targetInst, char * propname)
 			LinkPropertyAs(aliasInst, "Items", owner, listprop);
 	}
 
-	if (PathOfInstance(owner, path, sizeof(path)))
-		SetPropStr(aliasInst, "Target", path);
+	/* EXPERIMENT 2026-08-13: Target is the WRITTEN-DOWN copy of the link -
+	   IsAlias reads the live one. Commented out to find out who actually
+	   needs the copy. (The bridge also writes it: bridge.c 651, 847, 1051.)
+	   if (PathOfInstance(owner, path, sizeof(path)))
+		   SetPropStr(aliasInst, "Target", path); */
 	SetPropStr(aliasInst, "TargetProp", propname);
 
 	return 1;

@@ -102,8 +102,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	/* what a bare wire to this control should hit, in each direction - so a
 	   client can wire it without knowing its property names */
-	SetPropStr(instance, "ReservedIn", "Value");
-	SetPropStr(instance, "ReservedOut", "Value");
 
 	/* X/Y/W/H, Container, Name, Deletable: what it takes to be placed. This
 	   is the line that makes it a Control rather than a plain object. */

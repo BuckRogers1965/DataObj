@@ -334,9 +334,10 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
       ? makeSelfControl(alias, 'Value', widget, valueProp && valueProp.Default)
       : makeSelfDisplay(alias, 'Value', widget);
   }
-  /* what this control speaks for is the instance's own answer - the same
-     ReservedIn/ReservedOut a shut view answers with, never a class name */
-  primaryProp = reservedOut || reservedIn;
+  /* what this control speaks for: Value, unless the instance overrode it
+     with ReservedOut/ReservedIn - the same default Connect applies, so a
+     control that only speaks through Value carries neither property */
+  primaryProp = reservedOut || reservedIn || 'Value';
   control.classList.add('widget-atom-control');
   el.appendChild(control);
 

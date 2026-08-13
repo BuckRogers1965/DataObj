@@ -126,8 +126,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Textbox_OnEnable);
 
-	SetPropStr(instance, "ReservedIn", "Value");
-	SetPropStr(instance, "ReservedOut", "Value");
 
 	InitPosition(instance);
 

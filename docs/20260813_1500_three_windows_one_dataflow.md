@@ -197,3 +197,139 @@ actual claim.
 
 The GUI relocation stops being the headline and becomes maintenance, which is
 the right demotion. It was never the point; it was the residue of the point.
+
+## The same evening, in the one window we have
+
+Everything above is about building a second window. What follows is what the
+first one cost us the same night, and it reads as an argument for the rest of
+this post: four bugs, three of them visible only to a pair of eyes, and the one
+question the browser could not settle went to the harness instead.
+
+All four are the tail of the morning's work - deleting the Alias class - and
+every one is the same shape: a rule that had been living inside the species.
+
+The class was gone by lunch and the suite was green across five build variants.
+The evening was spent finding what the deletion had quietly taken with it, and
+every one of them was the same shape: a rule that had been living inside the
+species.
+
+### Alias_1 through Alias_14
+
+Open any object's Options panel and every row was called `Alias_4`. Not the
+property it stands for — the gesture that made it, plus a counter. One literal,
+`Bridge_Internals`:
+
+```c
+Bridge_FreshAlias(local, viewAlias, "Alias", memberAlias, sizeof(memberAlias));
+```
+
+It had never mattered, because the client's alias rendering captioned each row
+from `TargetProp`. Delete the species and the rows fall back to the rule every
+control follows — a control wears its own name — and the panel becomes a column
+of anonymous numbers.
+
+Naming a thing after the gesture that made it is the same error the class was.
+Nothing there is "an alias": it is a Textbox, a Checkbox, an LED, a View, each
+pointing at one property. A cloned slider isn't called `Clone_3`.
+
+So the row is named for the property it stands for. The caption comes from the
+existing rule with no client change, and the row gets an address that says what
+it is — `/Root/V/VPanel_1/W`, not `/…/Alias_5`.
+
+### The label rule that should not come back
+
+There was a roadmap gap saying a doorway must wear the name of what it opens —
+written when the deleted rendering did exactly that. It's wrong, and the correct
+version is duller: a control wears its own name, like everything else, and if
+you want the caption to read something different you rename the control.
+
+What made the panels unreadable was never the label rule. It was the names. Fix
+the names and the labelling rule you were about to write disappears. The gap got
+struck to its remaining half — a doorway must OPEN what it points at, which is
+still unasserted and still worth a test.
+
+### One clone path, because there was only ever one kind of thing
+
+Then: cloning a compiled widget produced its sub-views and no controls at all.
+Fifty `FAILED` lines in the log, and the clone verb reporting success.
+
+`Widget_Ctl` builds a panel control by LINKING its `Value` to the property it
+shows. `IsAlias` — the new, honest test, "is this thing's slot a link" — is
+therefore true for every control in every widget panel. The clone walk sent them
+all down its alias branch, and that branch required a `TargetProp` string only
+the alias gesture writes. Every one of them returned NULL.
+
+The class-name test had hidden this. `strcmp(classname, "Alias")` caught exactly
+the instances of one class; `IsAlias` catches everything that IS one. Making the
+question honest is what exposed that the branch had two implementations behind
+it — and that they had drifted:
+
+```
+CloneObject      walks every portable property (IsPortableProp)
+CloneAliasNode   carried { "Widget", "Label", "X", "Y" }
+```
+
+No `W`, no `H`, no `LabelPos`. So a cloned control arrived default-sized with
+its caption back on, and anything added to a control later would have gone
+missing the same silent way.
+
+The fix wasn't to repair the second copier. In a widget's panel every member is
+a control pointing at data, so the branch decided nothing — it picked which
+implementation ran, and every member picked the same one. There is one kind of
+thing, so there is one path: pass 0 clones every member, pass 1 re-makes the
+links every member carried, pass 2 wires. `CloneAliasNode` is deleted.
+
+Two things came free. `CloneObject` now skips link slots instead of copying the
+string a link currently reads — the hazard its own comment had warned about for
+weeks. And relinking walks every property rather than just `Value`, so a
+composite whose own property is bound to an inner member's comes across bound.
+
+### A dropdown with a value and no options
+
+The MCP agent's Language menu came up blank while the agent cheerfully ran Lua.
+The value was right; the OPTIONS were missing. The deleted rendering had known
+the convention:
+
+```js
+Items: { instance: rec.target, prop: rec.targetProp + 'List' },
+```
+
+`Widget_Ctl` implements the same convention for widget panels. So one of the two
+makers of controls honoured `<prop>List` and the other didn't, and which one you
+got depended on how the control came to exist. It moved into `AliasProperty` —
+the one place an alias is made — as a link rather than a copy, so the options
+stay live, survive a rename, and need nothing re-made on a clone.
+
+### What the harness said, and what it couldn't
+
+The suite stayed green through the widget-clone bug because nothing in it clones
+a compiled widget: the clone tests clone Views full of plain Sliders, which only
+ever exercise the concrete path. A new test clones a palette TCPPort and checks
+the copy holds every member at every depth. It fails on the morning's commit.
+
+The failure had also been loud and not fatal — fifty log lines, a verb reporting
+success, and nothing in the harness that fails a run for what is in the log.
+That is the general repair, and it is now written down: a relink failure is an
+`ERROR`, and a variant fails when an `ERROR` line appears.
+
+Then the harness returned the favour. We had commented out the engine's `Target`
+write to see what needed it; the browser showed no difference, because the
+bridge computes the same string on its own create paths. Six failures later:
+import and load go through neither of those paths, so an imported alias worked
+as a link and could no longer say what it pointed at. Which settles the
+ownership question the right way round — a serializer has to export and import
+with no bridge loaded at all, so `Target` is the engine's, and it is the
+BRIDGE's writes that now need justifying.
+
+One of the six failures was the new test asserting something the design
+deliberately doesn't do: that a clone's members are announced to a client that
+never looked at them. A connection is told about creations in containers it is
+viewing, and nothing else. Asking is the announcement.
+
+### The shape of the day
+
+Every bug tonight was a rule that had been living inside a species: the caption,
+the menu's options, the copier, the recorded target. Deleting the species is
+what made them visible, one at a time, in the order someone happened to look.
+None of them were regressions in the usual sense — they were the bill for having
+had two of something, arriving after the second one was thrown away.

@@ -131,6 +131,84 @@ def parts(raw, view):
     return sl, al
 
 
+def widget_tree(raw, root):
+    """Every member under `root`, keyed by its path RELATIVE to root, at
+    every depth. A compiled widget keeps its controls inside sub-views, so
+    a shallow listing of one looks healthy while the panel is empty."""
+    out = {}
+
+    def walk(path, rel):
+        for inst, cls in members(raw, path):
+            name = inst[len(path) + 1:]
+            key = (rel + "/" + name) if rel else name
+            out[key] = cls
+            walk(inst, key)
+
+    walk(root, "")
+    return out
+
+
+def controls_of(tree):
+    """The members that are not containers - what a panel actually shows."""
+    return sorted(k for k, cls in tree.items() if cls != "View")
+
+
+def test_clone_compiled_widget(raw, r, home):
+    """A COMPILED widget (one whose panel Widget_BuildTable builds) is the
+    shape no other test here clones. Widget_Ctl LINKS each control's Value
+    to the property it shows, so every one of those controls is a member
+    the clone walk handles on its LINK pass - while a View full of plain
+    Sliders, which is what the rest of this suite clones, only ever
+    exercises the concrete pass.
+
+    Both halves are checked because they fail separately: the copy has to
+    HOLD the controls, and their arrival has to be ANNOUNCED, since a
+    client draws what it is told about. The bug this was written for left
+    every sub-view in place and every control inside them missing."""
+    source = "/Root/Palette/TCPPort"
+    src = widget_tree(raw, source)
+    src_ctls = controls_of(src)
+    r.expect("widget clone: the palette holds a TCPPort with controls to copy",
+             "the source widget has sub-views and controls inside them",
+             "%d members, %d of them controls" % (len(src), len(src_ctls)),
+             len(src_ctls) > 0)
+    if not src_ctls:
+        return
+
+    raw.send({"cmd": "clone-instance", "of": source, "container": home,
+              "x": "40", "y": "40"})
+    ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                        and e.get("container") == home
+                        and e.get("class") == "TCPPort", timeout=6)
+    clone = ev.get("instance") if ev else None
+    r.expect("widget clone: the widget cloned at all",
+             "a TCPPort instance appears in %s" % home,
+             "clone=%s" % clone,
+             bool(clone))
+    if not clone:
+        return
+
+    # widget_tree LISTS each container, which is how a client learns what is
+    # inside one: a connection is told about creations in containers it is
+    # viewing and nothing else (bridge.c, connViews - "it only receives events
+    # about what it looked at"), so a browser hears about a widget's controls
+    # when it opens the widget. Asking is the announcement.
+    got = widget_tree(raw, clone)
+    missing = [k for k in src if k not in got]
+    r.expect("widget clone: the copy holds every member the source has",
+             "all %d members of the source, at every depth" % len(src),
+             "%d of %d present, missing: %s" % (len(got), len(src),
+                                                ", ".join(missing[:8]) or "none"),
+             not missing)
+
+    got_ctls = controls_of(got)
+    r.expect("widget clone: the sub-views brought their controls",
+             "%d controls, the same ones the source has" % len(src_ctls),
+             "%d controls: %s" % (len(got_ctls),
+                                  ", ".join(got_ctls[:6]) or "none"),
+             got_ctls == src_ctls)
+
+
 def test_view_clone_wiring(raw, r, home):
     view, src, dst, al = build_view(raw, home, "WireView")
 
@@ -419,7 +497,8 @@ def main():
     home = suite_view(raw, "ViewCloneTests")   # everything this suite builds lives in here
 
     for fn in (test_view_clone_wiring, test_clone_of_clone, test_clone_into_self_refused,
-               test_save_load_view_wiring, test_export_import_view_wiring):
+               test_save_load_view_wiring, test_export_import_view_wiring,
+               test_clone_compiled_widget):
         before = [m for m, _ in container_children(raw, home)]
         guarded(fn, raw, r, home)
         close_new_children(raw, home, before)
