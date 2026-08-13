@@ -646,11 +646,16 @@ CreateObject(NodeObj container, char * classname){
 
 	SetPropStr(inst, "Container", cpath);
 
+	/* TEMPORARILY SILENCED 2026-08-12: one line per object created, which
+	   at boot is every control of every panel. Commented out, NOT removed:
+	   restore it when tracing placement. */
+	/*
 	{
 		char dbg[400];
 		snprintf(dbg, sizeof(dbg), "CreateObject %s -> %s", classname, cpath);
 		DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 	}
+	*/
 
 	return inst;
 }
@@ -1915,9 +1920,13 @@ ActivateInstance(NodeObj instance){
 // Handle registration of objects, classes, and instances,
 static void
 PrintRegInfo(char* message, NodeObj obj){
+	/* TEMPORARILY SILENCED 2026-08-12: one line per instance, and a boot
+	   builds hundreds, which made the log useless for anything else.
+	   Commented out, NOT removed: restore it when tracing registration. */
 	char buffer[255];
 	sprintf((char *)&buffer, message, GetNameStr(obj));
-	DebugPrint ((char *)&buffer, __FILE__, __LINE__, REGISTER);
+	(void) buffer;
+	/* DebugPrint ((char *)&buffer, __FILE__, __LINE__, REGISTER); */
 }
 
 NodeObj RegisterLibrary(NodeObj library){

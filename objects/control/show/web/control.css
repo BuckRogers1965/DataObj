@@ -1,0 +1,47 @@
+/* the atom's furniture: the wrapper, the caption and where it sits */
+.widget-atom {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  cursor: move;
+  user-select: none;
+}
+.widget-atom-label {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.atom-label-bottom { flex-direction: column; }
+.atom-label-top    { flex-direction: column-reverse; }
+.atom-label-right  { flex-direction: row; }
+.atom-label-left   { flex-direction: row-reverse; }
+.atom-label-none > .widget-atom-label { display: none; }
+.widget-atom input[type=number] {
+  width: 70px;
+  background: #1a1b20;
+  border: 1px solid #3a3d47;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  cursor: auto;
+}
+.widget-atom input[type=range] {
+  width: 70px;
+  cursor: auto;
+}
+.widget-atom input[type=checkbox] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.widget-atom .activate-btn {
+  width: auto;
+  padding: 4px 14px;
+}

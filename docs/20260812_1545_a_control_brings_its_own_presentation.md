@@ -278,3 +278,139 @@ Known gap, worth saying plainly: **nothing diffs appearance.** All 43 render at
 the right size, but only 8 classes get real gestures, and no test compares CSS
 or z-order. Step 0's snapshot is what closes the first half of that, and it is
 Step 0 for exactly that reason.
+
+---
+
+## What actually happened (appended 2026-08-12, evening)
+
+The plan above was written before any code moved. This is the result, the work
+left, and the one thing that went sideways.
+
+### Done
+
+**Sixteen classes own their browser half.** Fourteen controls, then View, then
+Control itself. Each carries `show/web/<name>.js` (and `.css` where the rules
+are that control's alone) on its class node, published at `ClassStart`, turned
+into C strings at build time so the browser half ships **inside** the
+`.object`. **1292 lines now live with the classes that own them**, and
+`web/app.js` went from 2693 lines to 2102.
+
+**Two shared pieces, hoisted only after the LED proved the shape:**
+`objects/show.mk` (one make include, one line per control) and
+`PublishShow(class, renders, js, css)` beside `PublishPosition` in control.c.
+Neither was written in advance - the LED did it the long way first, and the
+repetition, not the plan, said what the shared version should look like.
+
+**The shape decision is gone.** No `classParent === 'Control' ? atom : view`
+anywhere. The host walks the chain - class, then parent, then View - and asks
+whoever answers first. A class that renders itself takes over its whole
+branch, which is what makes a different base class possible without touching
+the host.
+
+**Failure is loud.** A class with no registration renders a visible
+`?ClassName` and logs. The silent fallback to a textbox - the original disease,
+the thing that made a missing rung look like a working control - is gone.
+
+### What the tests caught, which is the part worth reading
+
+Three real defects, none of which would have been found by looking:
+
+- **The class-renders-type bug, caught before it shipped.** The Bridge first
+  INFERRED which property type a class renders from that class's own `Value`
+  type. It worked for the LED and was wrong in general: `mobutton` publishes
+  its `Value` as `PROP_LED` and `button` as `PROP_NULL`, so MoButton would
+  have stolen the LED's type and Button would have claimed every plumbing
+  property. Now the class STATES it. The rule this is an instance of: a fact
+  about a class belongs to the class, and inferring it from a neighbouring
+  fact is a coincidence waiting to be found by someone else.
+- **A functional regression the golden snapshot named in one line.** Atoms
+  built from a module never subscribed to their own `Value` - an LED atom
+  would never have lit. It surfaced as `LED.kids` differing by one CSS class,
+  because the old code's update WIPED that class and the new code never got an
+  update to wipe it with. Nobody would have thought to assert that.
+- **A CSS extractor that split a multi-line compound selector**, orphaning its
+  first line and swallowing the next rule. Every atom went 190px wide. The
+  snapshot named all 43 at once; the fix took two minutes instead of an
+  afternoon.
+
+Two test READS also had to change - they asserted through `selfDisplays[...]`,
+a host bookkeeping map, rather than through what is on the page. Which map a
+rendering is filed under is the host's business and changes when a control
+brings its own presentation; what the user sees does not. Assert on the page.
+
+### Phase 2 - what is left, and whose it is
+
+`app.js` is 2102 lines. Roughly 600 of them are genuinely the host's: the
+socket, `send`, event routing, the loader, mode relay, one mount point.
+Everything else has a name on it:
+
+| lines | what | owner |
+|---|---|---|
+| ~300 | the wire layer - `drawWire`, `updateWire`, `completeWire`, `onConnected`, anchors, dots | **View** - it already draws per-view wire layers |
+| 220 | `startDrag` | **Control / View** - a drag is a write to X/Y |
+| ~130 | the `gui*` family - mask, validate, reformat | **Control** - an annotation on the data a control carries |
+| ~120 | `openFlowDialog` / `closeFlowDialog` / `onFlowFile` | **Serializer** - they are its verbs |
+| 89 | `makeMenuButtonEl` | **MenuButton** |
+| 32 | `dropTargetAt` | **View** - where a drop lands is containment |
+| 152 | `registerAliasAtom` / `renderAliasControl` | **nobody - deleted** (below) |
+
+That lands the host near 600 lines: socket, verbs, routing, loader, mount. At
+which point "someone deploys a different base class and gets a different web
+client for their model" stops being an argument and becomes a deployment.
+
+One correction to the plan above, found by doing it: `renders` currently sits
+under `Show` because it was added for the web assembly. If the CORE needs it -
+and the alias work below says it does - then it is not presentation. It is a
+class fact that presentation happens to use, and it belongs on the class.
+
+### How the alias derailed us
+
+Control and View both moved cleanly: cut the functions out, drop them in the
+class's `show/web`, register, done, green. Alias is a control, so its
+rendering was next, and the same move - the same script, the same shape - was
+applied to `registerAliasAtom` and `renderAliasControl`.
+
+It failed. The Alias instance was created, `registerAliasAtom` demonstrably
+ran (its X/Y/Container subscriptions arrived), there were no page errors, and
+`aliasAtoms[...].target` never populated. Nothing in the logs explained it. It
+was reverted, including a CSS rule that had moved out with it - which no test
+covered, so it would have shipped as a silent visual regression.
+
+Then the questions that mattered arrived, and they were not about the move:
+
+> *"I don't understand what alias does in the browser, it is not a visual
+> thing."*
+> *"There is nothing that is an alias control visible."*
+> *"The controls are just controls, they redirect internally."*
+
+All true. The engine already resolves the link on every read and write
+(`ResolvePort` under `Bridge_Subscribe` and `SetOrDeliverProp`), so the browser
+never needs to know a redirect is there. What you see is a slider. The 156
+lines being relocated were a client-side reimplementation of something the
+engine does for free - and:
+
+> *"Aliasing is a core thing, not loaded as an object. You can alias any
+> object."*
+> *"That is not dead code, that is where it lives, that is why it exists."*
+
+`AliasProperty` and `CreateAlias` have sat in `object.c` with no callers since
+before this work started. Not dead - **the seam**. The Bridge went around them
+and did the job itself with `CreateObject(home, "Alias")`, which is where a
+loadable class, a hard dependency, a `Widget` stamp persisted into saved flows,
+a `strcmp(className, "Alias")` in the serializer, and 156 lines of client
+rendering all came from. One detour, five consequences.
+
+**The lesson, and it generalises the signal in ROADMAP.md.** Two relocations of
+the same shape had just worked in minutes. The third failed inexplicably.
+The temptation was to debug the move. The answer was that **the thing being
+moved had no business existing** - and no amount of care with the relocation
+would have found that, because a relocation cannot tell you a thing is
+imaginary. So: when a move that should be mechanical is not, suspect the
+THING, not the move. An hour of failing to relocate something is evidence
+about what it is.
+
+Filed as its own roadmap entry, deliberately not attempted at the end of a
+long session: it is a deletion touching `Bridge_CreateAlias`, the
+internals-view builder, the import pass and the client at once. And it is
+smaller than it looks - not "write a core verb" but "delete three private
+copies of one."

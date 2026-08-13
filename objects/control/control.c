@@ -20,6 +20,7 @@
 #include "DebugPrint.h"
 #define CONTROL_IMPL
 #include "control.h"
+#include "show_web.h"
 
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
@@ -576,6 +577,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(ClassSelf, "InitPos",        (long)InitPosition);
 	SetPropLong(ClassSelf, "PublishPos",     (long)PublishPosition);
 	SetPropLong(ClassSelf, "PublishShow",    (long)PublishShow);
+
+	/* what a control IS on a screen, carried by the class every control
+	   descends from - see show/web/. Renders no property type of its own:
+	   a Control is placed, the classes under it say what they render. */
+	PublishShow(ClassSelf, 0, show_web_js, show_web_css);
 	SetPropLong(ClassSelf, "MainView",       (long)GetMainView);
 	SetPropLong(ClassSelf, "BuildPalette",   (long)BuildPalette);
 	SetPropLong(ClassSelf, "BuildChrome",    (long)BuildChrome);

@@ -74,57 +74,14 @@ body {
 /* the container primitive - a real, resizable panel. The Palette is just  */
 /* one of these (Mode="Clone", Deletable="0", set server-side - object.c),  */
 /* nothing here is palette-specific.                                       */
-.view-panel {
-  position: absolute;
-  background: #24262e;
-  border: 1px solid #3a3d47;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  font-size: 12px;
-  display: flex;
-  flex-direction: column;
-  min-width: 80px;
-  min-height: 60px;
-  z-index: 5;
-}
 
 /* laid out exactly like .node-header - a view's panel and a card's panel  */
 /* are the same kind of thing, down to the minimize symbol in the corner   */
-.view-header {
-  padding: 5px 8px;
-  background: #2c2f38;
-  border-bottom: 1px solid #3a3d47;
-  border-radius: 8px 8px 0 0;
-  cursor: move;
-  font-weight: 600;
-  flex: 0 0 auto;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* position:relative so children (position:absolute, their own X/Y) place  */
 /* themselves relative to THIS view, not the top-level canvas - no          */
 /* coordinate math needed anywhere, just correct DOM nesting                */
-.view-inner {
-  position: relative;
-  flex: 1 1 auto;
-  overflow: auto;
-  min-height: 0;
-}
 
-.view-resize-handle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, #6b9fe6 50%);
-}
 
 #canvas-wrap {
   flex: 1 1 auto;
@@ -210,9 +167,6 @@ svg.view-wires {
 /* the panel are both children of this, only one visible at a time (see      */
 /* registerCard's setExpanded); dragging/deleting/cloning/copying always       */
 /* target this element, regardless of which child is currently showing.      */
-.instance-wrap {
-  position: absolute;
-}
 
 /* every draggable piece of chrome claims its touch gestures (pointer      */
 /* events reach the drag handlers instead of the browser turning a finger  */
@@ -236,13 +190,6 @@ svg.view-wires {
   font-size: 12px;
 }
 
-.node-collapse {
-  cursor: pointer;
-  color: #999;
-  padding: 0 2px;
-  font-weight: 700;
-}
-.node-collapse:hover { color: #e6e6e6; }
 
 /* the collapsed face of a composite instance - class name, its own live    */
 /* State readout, and a small dot per bare port (see registerCard) -        */
@@ -250,111 +197,29 @@ svg.view-wires {
 /* it (Operate mode, or whatever a containing View's Mode override resolves  */
 /* to) opens the panel; nothing else is different about it, right down to     */
 /* the port dots being the identical alias+prop the panel's own rows use.    */
-.instance-icon {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  position: relative;
-  padding: 8px 12px;
-  background: #24262e;
-  border: 1px solid #3a3d47;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  font-size: 11px;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.instance-icon:hover { border-color: #6b9fe6; }
 
-.instance-icon-label {
-  font-weight: 600;
-}
 
 /* A view is NOT a wire target - only these dots are, and they are directed: */
 /* the out dot on the right can only START a wire, the in dot on the left     */
 /* can only FINISH one. They appear only where the view named a stand-in.     */
-.view-dot {
-  display: none;
-  position: absolute;
-  top: 50%;
-  width: 9px;
-  height: 9px;
-  margin-top: -4.5px;
-  border-radius: 50%;
-  background: #6b9fe6;
-  border: 1px solid #24262e;
-  pointer-events: auto;
-  cursor: pointer;
-  z-index: 2;
-}
-.view-dot:hover { background: #e6c66b; }
-.view-dot.in  { left: -5px; }
-.view-dot.out { right: -5px; }
 
 /* wiring clutter outside Connect mode, exactly like .port-row above */
 body.mode-connect .view-dot { display: block; }
 
 /* a widget primitive standing on its own - a control or a readout        */
 /* and a label, nothing else: no panel, no header, no ports                */
-.widget-atom {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 6px;
-  cursor: move;
-  user-select: none;
-}
 
-.widget-atom-label {
-  font-size: 10px;
-  color: #999;
-  white-space: nowrap;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* where the caption sits, driven by the control's LabelPos property (the
    widget layout table declares it). DOM order is [control, label]. */
-.atom-label-bottom { flex-direction: column; }
-.atom-label-top    { flex-direction: column-reverse; }
-.atom-label-right  { flex-direction: row; }
-.atom-label-left   { flex-direction: row-reverse; }
-.atom-label-none > .widget-atom-label { display: none; }
 
 .widget-atom input[type=text],
-.widget-atom input[type=number] {
-  width: 70px;
-  background: #1a1b20;
-  border: 1px solid #3a3d47;
-  color: #e6e6e6;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
-  cursor: auto;
-}
 
 /* the Textbox: the ONE text control, any size of text. Its box is the W/H  */
 /* its instance carries, so no width here; monospace so code lines up       */
-.widget-atom input[type=range] {
-  width: 70px;
-  cursor: auto;
-}
-.widget-atom input[type=checkbox] {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
 /* the momentary button - visibly HELD while pressed, which is the whole  */
 /* difference between it and the fire-once Button next to it              */
 
-.widget-atom .activate-btn {
-  width: auto;
-  padding: 4px 14px;
-}
 
 .node-header {
   padding: 6px 8px;
@@ -443,6 +308,11 @@ body.mode-connect .view-dot { display: block; }
   background: #6b9fe6;
   border-color: #8bb8e6;
   color: #14161a;
+}
+
+.alias-atom .alias-slot {
+  display: inline-flex;
+  min-width: 40px;
 }
 
 .widget-readout {
@@ -609,10 +479,6 @@ body.mode-alias .prop-row {
 /* an Alias atom renders exactly like a widget atom - nothing marks it as   */
 /* special, it IS the thing (a doorway to it); its control slot fills in     */
 /* once Target/TargetProp arrive                                             */
-.alias-atom .alias-slot {
-  display: inline-flex;
-  min-width: 40px;
-}
 
 /* --- the file dialog (Save/Load/Import): a node-box centered over a     */
 /* --- dimmed canvas, listing what the engine says exists in saved/       */

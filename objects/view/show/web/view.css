@@ -1,0 +1,94 @@
+/* What containment LOOKS like - the icon, the panel it opens, its header
+   and collapse, the inner area members are placed in, the resize handle
+   and the stand-in dots. Moved unchanged from the host's stylesheet.
+   Mode rules (body.mode-*) stay with the host: which mode is current is
+   the session's business, not this class's. */
+.view-panel {
+  position: absolute;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
+  min-height: 60px;
+  z-index: 5;
+}
+.view-header {
+  padding: 5px 8px;
+  background: #2c2f38;
+  border-bottom: 1px solid #3a3d47;
+  border-radius: 8px 8px 0 0;
+  cursor: move;
+  font-weight: 600;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.view-inner {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
+}
+.view-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #6b9fe6 50%);
+}
+.instance-wrap {
+  position: absolute;
+}
+.node-collapse {
+  cursor: pointer;
+  color: #999;
+  padding: 0 2px;
+  font-weight: 700;
+}
+.node-collapse:hover { color: #e6e6e6; }
+.instance-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  padding: 8px 12px;
+  background: #24262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.instance-icon:hover { border-color: #6b9fe6; }
+.instance-icon-label {
+  font-weight: 600;
+}
+.view-dot {
+  display: none;
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: #6b9fe6;
+  border: 1px solid #24262e;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+}
+.view-dot:hover { background: #e6c66b; }
+.view-dot.in  { left: -5px; }
+.view-dot.out { right: -5px; }

@@ -244,11 +244,17 @@ long NSSearch(NSObj *Root, char *String)
 		}
 	}
 
+	/* TEMPORARILY SILENCED 2026-08-12: every miss logs, and a miss is the
+	   NORMAL case - every name is looked up before it is registered, so
+	   this fired for every instance at boot and buried the log. Commented
+	   out, NOT removed: restore it when tracing lookups. */
+	/*
 	{
 		char dbg[300];
 		snprintf(dbg, sizeof(dbg), "String not found: '%s'", (String && String[0]) ? String : "(empty)");
 		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
+	*/
 	// Not Found
 	return 0;
 }

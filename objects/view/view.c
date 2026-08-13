@@ -8,6 +8,7 @@
 #include "sched.h"
 #include "DebugPrint.h"
 #include "control.h"
+#include "show_web.h"
 
 /*
 
@@ -134,6 +135,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 
 	SetClassVersion(ClassSelf, "1", "0");
 	SetClassParent(ClassSelf, "Control");
+
+	/* what containment looks like, carried by the class that IS containment
+	   - see show/web/. A View renders no property type of its own: it is
+	   placed, not stamped on a property. */
+	PublishShow(ClassSelf, 0, show_web_js, show_web_css);
 
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");

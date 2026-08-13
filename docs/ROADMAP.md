@@ -1461,6 +1461,81 @@ it from the class's published interface. `show/json` is the same derivation
 against a different surface, and the persisted `Widget: 2` above is exactly the
 duplication it would retire.
 
+### Aliasing is a core verb, not a class — and it is tangled
+
+Found 2026-08-12. **Controls are just controls; some of them redirect
+internally.** "Alias" is a GESTURE that calls one verb into the engine, the
+same way Move writes X/Y and Connect records a subscription. It is not a kind
+of thing, and it should not be a loadable object.
+
+**The tell:** `Alias` is not in the palette. 43 classes seed it; Alias is not
+one of them, because you cannot drop one - you can only make one with a
+gesture. A class that cannot be instantiated like a class is not one.
+
+**The second tell: Clone.** Clone also creates an instance where you drop it,
+and there is no `clone.object`. It answers "what class?" from the thing being
+cloned. Alias should answer it from the property being pointed at, and instead
+answered it with a new species.
+
+**What exists today**
+
+- `bridge.c:3172` - `AddDependency(temp, "alias.object", "Alias", "1", "0")`,
+  a hard dependency: without the module the Bridge refuses to load.
+- Four creators of the species: `bridge.c:616` (the `create-alias` command),
+  `bridge.c:838` (**every internals/options panel member** - this is the big
+  one), `serializer.c:734` (the import pass), and `src/object.c:807`.
+- `src/object.c:767` `AliasProperty()` and `:795` `CreateAlias()` - **this is
+  where aliasing LIVES**. They are not dead code and must not be read as
+  such: they are the core verbs, and they have no callers because the Bridge
+  went around them and did the job itself with `CreateObject(home, "Alias")`.
+  That detour is where the dependency on a loadable class came from.
+
+**What it should be:** the callers stop doing it themselves and call the verb
+that already exists. That makes this SMALLER than it looks - not "write a core
+verb" but "delete three private copies of one". Fixing `CreateAlias` fixes
+every caller at once, which is why they must go through it rather than around
+it. Note the core verb was written against the species too (`object.c:807`
+does `CreateObject(container, "Alias")`), so that one line is where the change
+actually lands: create an ordinary control and link its `Value` with
+`LinkPropertyAs`. The
+class to create is a registry lookup, not a decision: the target's published
+interface gives that property's widget type, and every control class now
+STATES which type it renders (`PublishShow(ClassSelf, PROP_SLIDER, ...)`).
+Look up the type, find the class that claims it, create it, link it. Any
+object, any property, no module to load.
+
+**What that retires**
+
+- `alias.object` and the Bridge's dependency on it.
+- The `Widget` stamp carried on an alias instance and persisted into saved
+  flows - the control already IS that control (see the `show/json` section:
+  this is the same `Widget: 2` duplication from the other end).
+- `strcmp(className, "Alias")` in `ImportPlace` and the deferred pass keyed on
+  a class name. The deferral stays - restoring a link before its target exists
+  is an ordering fact about graphs - but it keys on links, not on a species.
+- ~156 lines of client rendering (`registerAliasAtom`, `renderAliasControl`,
+  the `aliasAtoms` map, the `className === 'Alias'` branch). The browser draws
+  a control; the redirect never reaches it.
+- The options panel stops being a separate construction: a panel row is a
+  control that redirects at the object's property, which is the same sentence
+  as a dropped alias on the canvas. Two code paths become one.
+
+**Why this is filed and not done.** It touches `Bridge_CreateAlias`, the
+internals-view builder, the import pass and the client at once, and the
+evidence that the area is tangled is concrete: on 2026-08-12 an attempt merely
+to RELOCATE the client half into `objects/alias/show/web/` (a move, not a
+redesign, of the kind that worked for Control and View the same evening)
+failed in a way that could not be explained from the logs - the atom was
+created, its X/Y/Container subscriptions arrived, no page errors, and yet
+`aliasAtoms[...].target` never populated. It was reverted. **Do not attempt
+this as a relocation; it is a deletion, and it wants a session of its own with
+the harness green underneath.**
+
+**One wrinkle to settle first:** `renders` currently lives under `Show`
+(added 2026-08-12 for the web assembly). If the core needs it to answer "what
+control shows this kind of property?", it is not presentation - it is a class
+fact that presentation happens to use, and it belongs on the class directly.
+
 ### Filter widget: In/Out readouts stay blank, and `change` looks dead
 
 Observed 2026-08-12 on the Filter panel. Both need tracing rather than
@@ -1671,6 +1746,64 @@ Downstream of that:
    readers and the saved-flow format. Worth doing, worth not doing by halves,
    and NOT worth two live copies of the name during a transition - that is
    precisely the shape that wedged the engine.
+
+### Presentation: what shipped 2026-08-12, and what Phase 2 is
+
+The section below argued for it; this is the outcome. Full account:
+docs/20260812_1545_a_control_brings_its_own_presentation.md.
+
+**Shipped.** Sixteen classes carry their own browser half - fourteen controls,
+then View, then Control itself - as `show/web/<name>.js`/`.css` on the class
+node, published at `ClassStart`, compiled into the `.object` so a control is
+still ONE file to install. 1292 lines moved out of the host; `web/app.js` went
+2693 -> 2102. Two shared pieces were hoisted only AFTER the LED had done it the
+long way: `objects/show.mk` and `PublishShow(class, renders, js, css)`.
+
+**The shape decision is gone.** No atom-or-view branch: the host walks the
+class chain (class, parent, View) and asks whoever answers. A base class that
+renders differently takes over its whole branch with no host edit - which is
+the entire point, and is now mechanism rather than intention.
+
+**Loud failure.** A class with no registration draws a visible `?ClassName`
+and logs. The silent textbox fallback is gone.
+
+**What the net caught** (all three would have shipped otherwise): a class's
+rendered-type INFERRED rather than stated, which would have let MoButton steal
+the LED's type and Button claim every `PROP_NULL` property; atoms built from a
+module never subscribing to their own Value, so an LED would never light; and
+a CSS extractor splitting a multi-line compound selector, which took every
+atom to 190px wide. The golden palette-shape test named each in one line.
+
+**Phase 2, with owners.** ~600 of the remaining 2102 lines are genuinely the
+host's (socket, send, routing, loader, mode relay, mount). The rest:
+
+    ~300  the wire layer                    -> View (already per-view layers)
+     220  startDrag                         -> Control/View (a drag writes X/Y)
+    ~130  the gui* mask/validate family     -> Control (annotation on the data)
+    ~120  the flow dialog                   -> Serializer (its own verbs)
+      89  makeMenuButtonEl                  -> MenuButton
+      32  dropTargetAt                      -> View (a drop is containment)
+     152  the alias rendering               -> nobody: deleted, see below
+
+**One correction found by doing it:** `renders` currently sits under `Show`
+because it was added for the web assembly. The alias work needs it in the
+core, so it is not presentation - it is a class fact presentation happens to
+use, and it belongs on the class directly.
+
+**And the derailment, because it is the useful part.** Control and View both
+relocated in minutes. Alias - also a control - failed the same move
+inexplicably and was reverted. The questions that followed showed why: there
+is nothing visible that IS an alias, controls just redirect internally, and
+aliasing is a core verb that already exists in object.c. The 156 lines were a
+client-side reimplementation of a link the engine resolves for free. See
+"Aliasing is a core verb, not a class" above.
+
+The generalisation, which extends "The asymmetry, and using it as a signal":
+**when a move that should be mechanical is not, suspect the THING, not the
+move.** Two relocations of identical shape had just succeeded; the third
+resisted. Debugging the move could never have produced the answer, because a
+relocation cannot tell you that what you are relocating is imaginary. An hour
+of failing to move something is evidence about what it is.
 
 ### Presentation belongs to the control — and there is more than one surface
 
