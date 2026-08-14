@@ -155,6 +155,18 @@
   "tag": "div.instance-wrap",
   "w": 67
  },
+ "Resolver": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 72
+ },
+ "Rest": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 50
+ },
  "Router": {
   "h": 30,
   "kids": "div.instance-icon,span.instance-icon-label",

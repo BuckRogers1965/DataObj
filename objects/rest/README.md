@@ -19,21 +19,21 @@ no category.
 
     GET /
 
-is the list - one line per member, its name and its class:
+is the list - one entry per member, its name and its class:
 
     {"view":"/Root/mcp","members":[
       {"name":"bob","class":"Checkbox"},
       {"name":"temp","class":"Textbox"}]}
 
-The name is the `Name` property, which is what the member is addressed
-by and what a rename changes - not the birth name its class gave it.
+The name is the `Name` property, which is what the member is addressed by
+and what a rename changes - not the birth name its class gave it.
 
     GET /manifest
 
 is the same members fully described, which is what a client reads once to
-learn how to drive them. Each entry carries:
+learn how to drive them. Each entry has:
 
-- `name`, `path`, `class`
+- `name`, `class`
 - `help` - the member's own README, the file its Help panel already reads
 - `face` - how to drive it
 - `properties` - the class's published interface: every property, the control
@@ -45,7 +45,7 @@ The published view is the root of the URL space. A member is addressed by
 its own name, and nothing in a URL says where the view lives - move
 `ManifestView` and every one of these follows it.
 
-    GET  /                 the list
+    GET  /                 the list - one line per member
     GET  /manifest         the same members, fully described
     GET  /Textbox          the member's value, through its face
     PUT  /Button           write the member's face input - the press
@@ -55,8 +55,36 @@ its own name, and nothing in a URL says where the view lives - move
 Drop a Button and a Textbox into the view, then press the button and read
 the box as two separate requests:
 
-    curl -X PUT -d 1 http://localhost:8084/Button
-    curl http://localhost:8084/Textbox
+    curl -X PUT -d 1 http://localhost:8483/bob
+    curl http://localhost:8483/temp
+
+**Every answer says whether it worked**, in one field, in parsable JSON.
+The caller already knows what it sent; what it cannot know is whether the
+write landed and why not.
+
+    PUT   {"status":"Success"}
+    GET   {"status":"Success","value":"batten down the hatches!"}
+    any   {"status":"Error","error":"no such property: Valu on temp"}
+
+A read adds `value`, the one thing it asked for and did not already have.
+A write adds nothing - it either worked or it says why not.
+
+Reading a **container** lists what is in it instead, because a View has
+no `In`, no `Out` and no `Value` and its contents are what reading it
+means. Judged on whether the face's property is actually there, never on
+what class the member is - so a sub-view lists, and a widget with a real
+output still reads that output.
+
+    curl http://localhost:8483/View_1
+    {"view":"/View_1","members":[{"name":"knob","class":"Knob"}]}
+
+Names are matched exactly: `/View_1`, not `/view_1`.
+
+The HTTP status agrees with the body: **200** it was there, **201** the
+write created it (late binding is legitimate, and this is how a script
+tells a real write from a typo), **404** unknown member or property,
+**400** a body shorter than its own `Content-Length`, refused rather than
+written truncated.
 
 There is no vocabulary here and no per-object code. `SetOrDeliverProp`
 decides for itself whether a name resolves to a port - in which case the
@@ -88,14 +116,7 @@ sub-view therefore needs no special case, and `/Box/Value/W` is legal and
 means what it looks like.
 
 A `GET` never conjures: an unresolved path is a 404 and creates nothing.
-A `PUT` may create, because a property existing only because something
-referred to it is the ordinary late-binding case - so the reply carries
-`"created"`, and a script can tell a real write from a typo without this
-object forbidding the legitimate use.
-
-The body is taken raw and is not URL-decoded. A `PUT` whose body is
-shorter than its own `Content-Length` is refused rather than written
-truncated.
+The body of a `PUT` is taken raw and is not URL-decoded.
 
 ## Controls
 

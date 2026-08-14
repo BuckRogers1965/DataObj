@@ -40,7 +40,7 @@ that declares ReservedIn/ReservedOut names its own stand-ins instead.
 The published view is the ROOT of the URL space. A caller addresses a
 member by its own name and never learns where the view lives:
 
-    GET  /                 the list - name and class, one line each
+    GET  /                 the list - one line per member, name and class
     GET  /manifest         the same members, fully described
     GET  /Textbox          the member's value, through its face
     PUT  /Button           write the member's face input - the press
@@ -167,20 +167,25 @@ static void Rest_SendResponse(NodeObj instance, char *status, char *contentType,
 	long headerLen;
 	NodeObj chunk;
 
+	/* the body ends in a newline, and Content-Length counts it. HTTP does
+	   not ask for one, but this is answered from a shell as often as from
+	   a program, and a body without it leaves the next prompt sitting on
+	   top of the output. */
 	snprintf(header, sizeof(header),
 			 "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %ld\r\n"
 			 "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
-			 status, contentType, bodyLen);
+			 status, contentType, bodyLen + 1);
 	headerLen = strlen(header);
 
-	response = malloc(headerLen + bodyLen + 1);
+	response = malloc(headerLen + bodyLen + 2);
 	if (!response)
 		return;
 
 	memcpy(response, header, headerLen);
 	if (bodyLen)
 		memcpy(response + headerLen, body, bodyLen);
-	response[headerLen + bodyLen] = 0;
+	response[headerLen + bodyLen] = '\n';
+	response[headerLen + bodyLen + 1] = 0;
 
 	chunk = NewNode(STRING);
 	SetName(chunk, "Response");
@@ -195,19 +200,19 @@ static void Rest_SendResponse(NodeObj instance, char *status, char *contentType,
    eyes cannot guess, and neither can we after the fact */
 static void Rest_SendError(NodeObj instance, char *status, char *why, long connId)
 {
-	Sb sb;
 	char dbg[512];
-
-	memset(&sb, 0, sizeof(sb));
-	SbCat(&sb, "{\"error\":");
-	SbCatJson(&sb, why ? why : "");
-	SbCat(&sb, "}");
+	Sb sb;
 
 	snprintf(dbg, sizeof(dbg), "REST %s: %s", status, why ? why : "");
 	DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 
-	Rest_SendResponse(instance, status, "application/json", sb.p ? sb.p : "{}",
-					  sb.len, connId);
+	memset(&sb, 0, sizeof(sb));
+	SbCat(&sb, "{\"status\":\"Error\",\"error\":");
+	SbCatJson(&sb, why ? why : "");
+	SbCat(&sb, "}");
+
+	Rest_SendResponse(instance, status, "application/json",
+					  sb.p ? sb.p : "{}", sb.len, connId);
 	SbFree(&sb);
 }
 
@@ -323,8 +328,8 @@ static char *Rest_MemberName(NodeObj inst)
 	return (name && name[0]) ? name : GetNameStr(inst);
 }
 
-/* one line per member: what to call it and what it is */
-static void Rest_JsonBrief(Sb *sb, NodeObj inst)
+/* one entry per member: what to call it, and what it is */
+static void Rest_Brief(Sb *sb, NodeObj inst)
 {
 	NodeObj class = GetParent(inst);
 
@@ -341,8 +346,6 @@ static void Rest_JsonMember(Sb *sb, NodeObj inst, char *path)
 
 	SbCat(sb, "{");
 	SbCatPair(sb, "name", Rest_MemberName(inst));
-	SbCat(sb, ",");
-	SbCatPair(sb, "path", path);
 	SbCat(sb, ",");
 	SbCatPair(sb, "class", class ? GetNameStr(class) : "");
 	SbCat(sb, ",");
@@ -361,32 +364,49 @@ static void Rest_JsonMember(Sb *sb, NodeObj inst, char *path)
    instance) filtered on Container, because containment is not indexed
    separately yet; an instance with no derivable path was never
    addressable and is not published. */
-static void Rest_Manifest(NodeObj instance, int full, long connId)
+/* the published view a member is addressed relative to */
+static char *Rest_ManifestView(NodeObj instance)
+{
+	char *manifest = GetPropStr(instance, "ManifestView");
+
+	return (manifest && manifest[0]) ? manifest : MANIFEST_DEFAULT;
+}
+
+/* Every member of one container, which is the same walk whether the
+   container is the published view or a View sitting inside it - a
+   sub-view is a sub-namespace, and it is already addressable through one
+   (/View_1/Thing), so reading it lists what is in it.
+
+   `label` is what the caller called this container, and it is the only
+   name that appears in the answer. */
+static void Rest_ListMembers(NodeObj instance, char *container, char *label,
+							 int full, long connId)
 {
 	NodeObj lib, class, inst, view;
-	char *manifest;
+	char *manifest = container;
 	char pbuf[600];
 	char *cont;
 	Sb sb;
 	int first = 1;
 
-	manifest = GetPropStr(instance, "ManifestView");
-	if (!manifest || !manifest[0])
-		manifest = MANIFEST_DEFAULT;
-
 	view = ResolvePath(manifest);
 	if (!view)
 	{
-		char why[400];
+		char dbg[400];
 
-		snprintf(why, sizeof(why), "no such view: %s", manifest);
-		Rest_SendError(instance, "404 Not Found", why, connId);
+		/* the caller cannot fix this and must not be told where to look:
+		   the log carries the configured path, the answer does not */
+		snprintf(dbg, sizeof(dbg), "ManifestView does not resolve: %s", manifest);
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+
+		Rest_SendError(instance, "404 Not Found", "no published view", connId);
 		return;
 	}
 
+	/* the caller's own word for this container, never the engine path */
 	memset(&sb, 0, sizeof(sb));
 	SbCat(&sb, "{\"view\":");
-	SbCatJson(&sb, manifest);
+	SbCatJson(&sb, label);
 	SbCat(&sb, ",\"members\":[");
 
 	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
@@ -407,7 +427,7 @@ static void Rest_Manifest(NodeObj instance, int full, long connId)
 		if (full)
 			Rest_JsonMember(&sb, inst, pbuf);
 		else
-			Rest_JsonBrief(&sb, inst);
+			Rest_Brief(&sb, inst);
 	  }
 
 	SbCat(&sb, "]}");
@@ -511,32 +531,51 @@ static NodeObj Rest_PropOwner(NodeObj inst, char *propPath, char *nameOut, int n
 
 /* ---- reading ---- */
 
-static void Rest_GetProperty(NodeObj instance, NodeObj inst, char *path,
+/* `member` is the name the caller asked by - errors are phrased in it,
+   never in the engine path resolved underneath.
+
+   Every answer says whether it worked, in one field, in parsable JSON.
+   The caller already knows what it sent; what it cannot know is whether
+   the write landed and why not, so that is what comes back. A read adds
+   the value, which is the one thing it asked for and did not have. */
+static void Rest_SendOk(NodeObj instance, char *status, char *value, long connId)
+{
+	Sb sb;
+
+	memset(&sb, 0, sizeof(sb));
+	SbCat(&sb, "{\"status\":\"Success\"");
+
+	if (value)
+	{
+		SbCat(&sb, ",\"value\":");
+		SbCatJson(&sb, value);
+	}
+
+	SbCat(&sb, "}");
+
+	Rest_SendResponse(instance, status, "application/json",
+					  sb.p ? sb.p : "{}", sb.len, connId);
+	SbFree(&sb);
+}
+
+static void Rest_GetProperty(NodeObj instance, NodeObj inst, char *member,
 							 char *propPath, long connId)
 {
 	NodeObj node = Rest_PropNode(inst, propPath);
-	Sb sb;
 	char why[400];
 
 	if (!node)
 	{
-		snprintf(why, sizeof(why), "no such property: %s on %s", propPath, path);
+		snprintf(why, sizeof(why), "no such property: %s on %s", propPath, member);
 		Rest_SendError(instance, "404 Not Found", why, connId);
 		return;
 	}
 
-	memset(&sb, 0, sizeof(sb));
-	SbCat(&sb, "{");
-	SbCatPair(&sb, "path", path);
-	SbCat(&sb, ",");
-	SbCatPair(&sb, "property", propPath);
-	SbCat(&sb, ",");
-	SbCatPair(&sb, "value", GetValueStr(node));
-	SbCat(&sb, "}");
+	{
+		char *value = GetValueStr(node);
 
-	Rest_SendResponse(instance, "200 OK", "application/json",
-					  sb.p ? sb.p : "{}", sb.len, connId);
-	SbFree(&sb);
+		Rest_SendOk(instance, "200 OK", value ? value : "", connId);
+	}
 }
 
 /* ---- writing: this is the button press ---- */
@@ -547,48 +586,45 @@ static void Rest_GetProperty(NodeObj instance, NodeObj inst, char *path,
    is a direct write. So pressing a button and typing into a textbox are
    the same call here, and a widget that grows a new command grows a new
    endpoint with no change to this object. */
-static void Rest_PutProperty(NodeObj instance, NodeObj inst, char *path,
+static void Rest_PutProperty(NodeObj instance, NodeObj inst, char *member,
 							 char *propPath, char *value, long connId)
 {
 	char name[128];
 	NodeObj owner = Rest_PropOwner(inst, propPath, name, sizeof(name));
+	NodeObj written;
 	int existed;
-	Sb sb;
 	char why[400];
 
 	if (!owner || !name[0])
 	{
-		snprintf(why, sizeof(why), "no such property container: %s on %s", propPath, path);
+		snprintf(why, sizeof(why), "no such property container: %s on %s", propPath, member);
 		Rest_SendError(instance, "404 Not Found", why, connId);
 		return;
 	}
 
+	/* a property existing only because something referred to it is the
+	   ordinary late-binding case, so this is allowed - but 201 says it
+	   happened, which is how a script tells a real write from a typo
+	   without this object forbidding the legitimate use. HTTP already has
+	   the word for it. */
 	existed = GetPropNode(owner, name) ? 1 : 0;
 
 	SetOrDeliverProp(owner, name, value ? value : "");
 
-	memset(&sb, 0, sizeof(sb));
-	SbCat(&sb, "{");
-	SbCatPair(&sb, "path", path);
-	SbCat(&sb, ",");
-	SbCatPair(&sb, "property", propPath);
-	SbCat(&sb, ",");
-	SbCatPair(&sb, "value", value ? value : "");
-	SbCat(&sb, ",\"created\":");
-	SbCat(&sb, existed ? "false" : "true");
-	SbCat(&sb, "}");
+	/* report what the property HOLDS, not what we asked it to hold. A
+	   write that reached a port ran that port's handler, and the handler
+	   is entitled to store something else or nothing at all - echoing the
+	   request back would make the reply a guess dressed as a fact. */
+	written = GetPropNode(owner, name);
 
-	Rest_SendResponse(instance, "200 OK", "application/json",
-					  sb.p ? sb.p : "{}", sb.len, connId);
-	SbFree(&sb);
-}
+	if (!written)
+	{
+		snprintf(why, sizeof(why), "write to %s on %s did not land", propPath, member);
+		Rest_SendError(instance, "500 Internal Server Error", why, connId);
+		return;
+	}
 
-/* the published view a member is addressed relative to */
-static char *Rest_ManifestView(NodeObj instance)
-{
-	char *manifest = GetPropStr(instance, "ManifestView");
-
-	return (manifest && manifest[0]) ? manifest : MANIFEST_DEFAULT;
+	Rest_SendOk(instance, existed ? "200 OK" : "201 Created", NULL, connId);
 }
 
 /* One entry point for every member request, because the grammar does not
@@ -621,9 +657,24 @@ static void Rest_Member(NodeObj instance, char *method, char *request,
 				 strcmp(method, "GET") == 0 ? Rest_FaceOut(inst) : Rest_FaceIn(inst));
 
 	if (strcmp(method, "GET") == 0)
-		Rest_GetProperty(instance, inst, full, propPath, connId);
+	{
+		/* nothing to read through the face means this is a container, not
+		   a value - a View has no In, no Out and no Value - so reading it
+		   lists what is in it. Judged on whether the property is there,
+		   never on what class the member is. */
+		if (!Rest_PropNode(inst, propPath))
+		{
+			char here[300];
+
+			snprintf(here, sizeof(here), "/%s", request);
+			Rest_ListMembers(instance, full, here, 0, connId);
+			return;
+		}
+
+		Rest_GetProperty(instance, inst, request, propPath, connId);
+	}
 	else
-		Rest_PutProperty(instance, inst, full, propPath, body, connId);
+		Rest_PutProperty(instance, inst, request, propPath, body, connId);
 }
 
 /* ---- the request ---- */
@@ -714,7 +765,8 @@ int Rest_OnIn(NodeObj instance, MsgId message, NodeObj data)
 			Rest_SendError(instance, "405 Method Not Allowed", method, connId);
 			return rtrn_handled;
 		}
-		Rest_Manifest(instance, strcmp(path, "/manifest") == 0, connId);
+		Rest_ListMembers(instance, Rest_ManifestView(instance), "/",
+						 strcmp(path, "/manifest") == 0, connId);
 		return rtrn_handled;
 	}
 

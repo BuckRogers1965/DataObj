@@ -43,7 +43,8 @@ ROOT=testharness/tests/$STAMP
 INC="-Isrc -Isrc/dyn -Wall -Wextra"
 
 # name|flags|port offset. Ports are base+offset, so variants never collide with
-# each other or with the production instance on 8083.
+# each other. The bases below keep the whole run clear of the desktop
+# instance, which owns more than one port now (8083 web, 8283 REST).
 ALL_VARIANTS="debug|-O0 -g3 -fno-omit-frame-pointer -fno-inline|1
 release|-O3 -march=native -flto=auto|2
 asan|-O1 -g -fno-omit-frame-pointer -fsanitize=address|3
@@ -57,7 +58,25 @@ SUITES=${SUITES:-$ALL_SUITES}
 
 # overridable so a second run can be pointed somewhere else - two runs on the
 # same bases silently measure each other's engines (seen: 2026-08-05)
-WEB_BASE=${WEB_BASE:-8083}; RAW_BASE=${RAW_BASE:-8091}; CDP_BASE=${CDP_BASE:-9223}
+#
+# HIGH AND FAR APART, deliberately. A framework opens more than the web port -
+# it also opens its REST port at web+200 - so the bases have to leave room for
+# every socket a variant opens, not just the one it is named after. Sharing a
+# base with the desktop instance cost a whole run on 2026-08-14, when a
+# framework started before a port change sat on a variant's web port and every
+# suite reported "connection refused" as a crash.
+#
+# EVERY port a run touches, not just these three - the suites derive more
+# from the bases, and so does the framework itself. Check the whole map
+# before moving anything:
+#
+#   web   8501..8505     the GUI/HTTP port, WEB_BASE+offset
+#   raw   8601..8605     the raw bridge, RAW_BASE+offset
+#   echo  8701..8705     flowtest's TCP echo server, raw+100
+#   REST  8901..8905     the framework's own REST port, web+REST_PORT_OFFSET
+#   cdp   9501..9505     chromium, CDP_BASE+offset
+#   panel 13510..13550   tcpporttest, 8400+(raw-8091)*10
+WEB_BASE=${WEB_BASE:-8500}; RAW_BASE=${RAW_BASE:-8600}; CDP_BASE=${CDP_BASE:-9500}
 
 # every step says what it is about to do, with a timestamp - a long silent
 # phase is indistinguishable from a hang

@@ -167,6 +167,16 @@ objects plus wiring, so the disabled flows below stay disabled.
    so each has a path of its own and can build its panel; it is created a level
    up (in main) so that handle on the namespace stays there. Main is passed
    through for the few cross-references that need the root (users, Bridge's Main). */
+/* The REST surface takes its port from -port so that two frameworks on
+   different ports never fight over it. The offset has to clear every OTHER
+   port the harness derives, not just the web ports - run.sh gives each
+   build variant an offset of 1 to 5 from the web base, and the suites
+   derive more sockets from the raw base on top of that (flowtest's echo
+   server is raw+100). An offset of 1 put this on the next variant's web
+   port; an offset of 200 put it on flowtest's echo port. See run.sh's port
+   map before changing this. */
+#define REST_PORT_OFFSET 400
+
 void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 
 	/* Web GUI, HTTP and WebSocket sharing one TCP port - */
@@ -255,7 +265,8 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 	/* like Http is wired, because it is the same shape - bytes in,       */
 	/* bytes out, and the socket is somebody else's business.             */
 	/*                                                                    */
-	/*   TCP (-port + 1, default 0.0.0.0:8084) --> Rest --> TCP.In        */
+	/*   TCP (-port + REST_PORT_OFFSET, default 0.0.0.0:8483)             */
+	/*                                        --> Rest --> TCP.In         */
 	/*                                                                    */
 	/* /Root/mcp is created here empty, and what a user drags into it is  */
 	/* what the manifest publishes - containment IS the publication, so   */
@@ -268,13 +279,28 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 		DebugPrint ( "Creating rest api objects.", __FILE__, __LINE__, PROG_FLOW);
 
 		McpView = Widget_Create(GetRootView(), "View", "mcp");
+
+		/* clear of the menus on the top row, and clear of the palette:
+		   placed once, from the palette's own X/W, so it lands 20px past
+		   it however wide the palette is set to be */
+		{
+			NodeObj palette = GetPaletteView();
+
+			if (McpView && palette)
+			{
+				SetPropInt(McpView, "X", GetPropInt(palette, "X")
+										 + GetPropInt(palette, "W") + 20);
+				SetPropInt(McpView, "Y", GetPropInt(palette, "Y"));
+			}
+		}
+
 		RestTcp = Widget_Create(RestView, "TCP",  "RestTCP");
 		Rest    = Widget_Create(RestView, "Rest", "Rest");
 
 		if (McpView && RestTcp && Rest) {
 
 			SetPropStr(RestTcp, "LocalAddr", GetPropStr(Main, "ip"));
-			SetPropInt(RestTcp, "LocalPort", GetPropInt(Main, "port") + 1);
+			SetPropInt(RestTcp, "LocalPort", GetPropInt(Main, "port") + REST_PORT_OFFSET);
 
 			Connect(RestTcp, "Out", Rest, "In");
 			Connect(Rest, "Out", RestTcp, "In");

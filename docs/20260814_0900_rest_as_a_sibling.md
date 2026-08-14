@@ -399,3 +399,136 @@ feature - and the fix goes downward, never sideways into the translator.
 The thing to resist is making REST *work* by teaching it about the GUI's
 conventions. If it needs to know what a panel is, we have drawn the line in the
 wrong place.
+
+---
+
+# What we actually built
+
+*Added the same day, after the first requests went through.*
+
+## The slice
+
+`objects/rest/` - one file, one Makefile, one README, and no change to any
+existing object. It is wired in `CreateDefaultApp` exactly the way Http is,
+because it is the same shape:
+
+    TCP (-port + 200) --> Rest --> TCP.In
+
+`/Root/mcp` is created empty at boot beside the palette. What you drag into
+it is what is published. Nothing marks an object as exported, because
+containment already says it.
+
+Two operations, and between them a script can puppet anything in that view:
+
+    GET  /                 the list - name and class
+    GET  /manifest         the same members, fully described
+    GET  /Textbox          the member's value, through its face
+    PUT  /Button           write the member's face input - the press
+    GET  /Textbox/Value    one named property
+    PUT  /Textbox/Value    write one named property
+
+The whole write path is `SetOrDeliverProp`. It decides for itself whether a
+name resolves to a port - in which case the port's handler runs, exactly as
+wired traffic would - or a plain data property, which is a direct write. So
+pressing a button and typing into a textbox are one call, and `rest.c`
+contains no knowledge of any widget. A widget that grows a new command grows
+a new endpoint with nothing to change here, and a class written next year is
+drivable the moment it is dragged into the view.
+
+That is the part that felt bigger than the slice. It is not that REST works.
+It is that REST needed no adapter, no schema authored by hand, and no
+vocabulary to keep in step - because the engine already had one verb that
+covers both cases and every widget already publishes its own interface.
+
+## Five things the design got wrong on contact
+
+Every one of these was found by using it, in under an hour, and every one was
+the same kind of mistake: the translator knowing something it had no business
+knowing, or reporting something the caller could not have asked about.
+
+**The URL leaked the engine path.** The first cut answered at
+`/tree/Root/mcp/Port/Listen`. That prefix is where the published view happens
+to live, which is the one thing a caller must never have to know. The view IS
+the root of the URL space: `/Port/Listen`. Move `ManifestView` and every URL
+follows it, because none of them names it. The replies leaked it too - `path`
+fields, and an error that helpfully reported the configured location to
+someone who could not act on it. The log carries that now; the answer does
+not.
+
+**The name in the manifest was the wrong name.** It reported `GetNameStr`,
+the node's birth name from its class - so an instance the user had renamed
+`bob` listed as `Checkbox`. The address is the `Name` property, which is what
+`PathOfInstance` builds paths out of and what a rename changes. Reporting the
+name a caller cannot use is worse than reporting nothing.
+
+**The face has to resolve against what the instance HAS.** The default was
+written for the dataflow shape - feed `In`, collect `Out` - which is right
+for Filter and useless for a Button, whose only data is `Value`. The rule is
+a resolution order over what is actually present: a declared
+`ReservedIn`/`ReservedOut` wins, then `In`/`Out` if they exist, otherwise
+`Value`. No list of class names anywhere, so nothing has to be revisited when
+a class is added.
+
+**Reading a container lists it.** A View has no `In`, no `Out` and no
+`Value`, so a bare GET on one had nothing to return. Its contents are what
+reading it means - and that falls out of the same test, not a class check: if
+the face's property is not there, list the members. A TCPPort's `RxData` is
+there, so it still reads its output. A sub-view was already addressable
+through (`/View_1/knob`), so listing it just completes a grammar that already
+worked.
+
+**The body ends in a newline.** HTTP does not ask for one and `Content-Length`
+counts it. It matters twice: a shell prompt does not land on top of the
+output, and a newline is the frame that line-oriented readers use to turn a
+stream into events. That also settles the streaming question before we get
+there - when a member produces several messages before `msg_eof`, one JSON
+object per line is NDJSON, and the readers that work now keep working.
+
+## The response contract, written down late
+
+The worst of it was not any single wrong field. It was that the response
+contract was never written before the code, so it got discovered one
+correction at a time: the path leak, then a repeated `"property":"Value",
+"value":...`, then an over-correction into raw text that a REST interface has
+no business emitting, then the envelope.
+
+The contract is a paragraph, and it would have cost one exchange:
+
+> Every response is JSON. Every response carries `status`, `Success` or
+> `Error`. An error carries `error` with a reason a caller can act on. A read
+> adds `value` - the one thing the caller asked for and did not already have.
+> A write adds nothing, because the caller knows what it sent; it needs to
+> know whether it landed and why not. The HTTP status agrees with the body.
+> The URL space is the published view, and nothing else appears in it.
+
+The lesson is not about REST. It is that the novel part of a job gets designed
+and the conventional part gets generated, and the conventional part is where
+the known-correct answer was sitting the whole time.
+
+## The port that took down the harness
+
+Adding the REST flow put the framework's socket at `-port + 1`. `run.sh`
+gives each build variant an offset of 1 to 5 from the same base, so every
+variant's REST socket landed on the NEXT variant's web port. First one up
+wins; the rest fail to bind, their raw bridges never compose, and twelve
+suites report "connection refused" as CRASH. A desktop instance running the
+old build made it worse - it sat on 8084 by itself and blocked the debug
+variant with nothing else running at all.
+
+Two fixes, and the second is the real one:
+
+- `REST_PORT_OFFSET 200`, clear of the variant band, with the reason in the
+  comment so nobody sets it back.
+- The harness moved to high bases - web 8501, raw 8601, cdp 9501 - because
+  the old ones shared a base with the desktop instance. **A framework opens
+  more than the port it is named after**, and now that an object can add a
+  socket, a port plan that assumes one port per framework is a trap that will
+  spring again the next time an object listens.
+
+## Still ahead
+
+`POST` - feed the inputs, wait, answer - which needs the pending record
+(`Conn`, output property, deadline) and the completion rules beyond `eof`.
+The `show/rest` face file for the objects that need a trigger. Then cloning
+into views and connecting, which is where a REST client stops driving an app
+and starts building one.
