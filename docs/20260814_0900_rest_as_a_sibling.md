@@ -44,64 +44,329 @@ the same walk with none of them.
 **Replay.** The flow log exists so a reconnecting browser can be brought back to
 the current state. A stateless client has no reconnection to be caught up on.
 
-## The likely shape: two halves
+## The route not taken: splitting the Bridge
 
-The Bridge may need to break in two, along the seam that already exists in
-`app.js`:
+The plan above was to break `bridge.c` in two and let REST inherit the verb
+half. We spent the first hour drawing that line from the function list, as step
+one said to, and the line came out somewhere that made the whole exercise
+pointless.
 
-- **The verb half** - create, connect, disconnect, set, clone, move, delete,
-  activate, internals, save/load, bind-port. Engine-neutral, no notion of who is
-  asking, already language-neutral because the mechanisms live in `object.c` and
-  the bridge only spells them.
-- **The session half** - connections, viewers, aliases, replay, the panel
-  formatter. Everything that exists because a long-lived stateful client is
-  watching.
+`Bridge_Set` - the busiest verb in the protocol - is: resolve a path, then call
+`SetOrDeliverProp`. That is the verb. Everything around it is Name and
+Container re-keying, alias bookkeeping, and a scoped event. `Bridge_Dispatch`'s
+twenty-one commands sit on `CreateObject`, `CloneInstance`, `Connect`,
+`Disconnect`, `LinkPropertyAs`, `ActivateInstance`, `SetOrDeliverProp`,
+`ResolvePath` and `PathOfInstance` - every one of them already public in
+`src/object.h`.
 
-If that split is real, REST is the verb half plus an HTTP mouth, and the web
-bridge is the verb half plus the session half. If it is not real, we will find
-out by trying to draw the line and discovering something in the middle that
-neither half can own.
+**There is no verb half to extract, because the extraction already happened.**
+It happened on purpose, and the reason was written down at the time: mechanisms
+land in `object.c` as language-neutral calls, and Bridge, Script and MCP are
+syntax only. The two-halves plan was a proposal to do work that had been
+finished months earlier. Pull the engine calls out of `bridge.c` and you get a
+file of thin wrappers on one side, and on the other the entire three thousand
+lines still sitting exactly where they were - because those three thousand
+lines *are* the session half. The split is not a refactor. It is an observation
+about a file that is already one half of itself.
+
+Three further reasons the route was wrong, which only became visible once the
+first one was:
+
+**The shape is a stack, not a surgery.** REST is a translator with HTTP under
+it and TCP under that. This is precisely the composition the web flow already
+is - `TCP -> Router -> Http/WebSocket -> Bridge`, assembled by `Connect()` in
+`CreateDefaultApp` with no object aware of its neighbours. A REST object is a
+new element in an existing shape. Nothing about placing it there requires
+opening the bridge at all.
+
+**A request is a transaction, and that is a different animal.** A REST request
+arrives complete - verb, arguments, reply, forget. That is the Script object's
+`Cmd` port with no `Evt`, which is why the thing kept feeling like scripting
+rather than like a second GUI. The Bridge's job is the opposite one: maintain a
+live model of the tree inside somebody else's process and keep it true minute
+by minute. Sharing one file between those two jobs would push session concepts
+into the stateless path, which is the exact failure this whole exercise exists
+to detect.
+
+**The risk is all downside.** Refactoring the bridge means operating on the
+thing that runs the GUI, for the benefit of a thing that does not exist yet.
+Building alongside it costs nothing, and it leaves the sharing question to be
+settled afterwards with evidence instead of prediction. The answer may well be
+that they share nothing but the engine - which is the strongest available form
+of the sibling claim, not a weaker one.
+
+## What the registry already is
+
+The read side turned out to be built. Every class node carries an `Interface`
+property (`PublishProp`, `src/object.c`), and `Widget_Publish` fills it from
+the widget's own layout table: one entry per property, carrying `Name`, the
+control type, the class default, and the declared `W`/`H`. TCPPort publishes
+`In`, `Out` and `StandardPortList` beside those as `PROP_NULL` - real
+properties with no control on the panel. `InterfacePropForInstance` joins an
+instance's property back to its published entry.
+
+So the catalogue a client needs in order to decide what to do next is already
+in the tree, already maintained by every widget as a side effect of declaring
+its own panel, and it draws the only privacy line REST needs: published is the
+object's face, unpublished is engine internals.
+
+## The interface to the client
+
+Two trees, and the client walks both.
+
+    GET /registry                    the kinds - libraries -> classes -> Interface
+    GET /registry/TCPPort            one class's published interface
+    GET /tree/Root                   the things - containment from the root view
+    GET /tree/Root/Palette/TCPPort   one instance
+    PUT /tree/Root/Palette/TCPPort/Send        body: 1
+
+`/registry` changes only when something loads or unloads; `/tree` changes
+constantly. A client bootstraps by reading the registry once, decides what it
+wants, and then lives entirely in the tree.
+
+An instance is the join of its values against its class's published interface:
+
+    { "path": "/Root/Palette/TCPPort", "class": "TCPPort",
+      "container": "/Root/Palette",
+      "properties": {
+        "Send":      { "value": "0",     "widget": "MoButton", "default": "0" },
+        "TxData":    { "value": "hello", "widget": "Textbox",  "default": "" },
+        "Connected": { "value": "1",     "widget": "LED" } },
+      "children": [] }
+
+The `widget` field says how to read and render a property - Textbox is data
+either direction, LED is state to read, Dropdown means a companion
+`<prop>List` holds the choices. It is deliberately *not* how a client decides
+what to drive: inferring "MoButton means press it" is the REST object being
+clever about widgets, and the face below replaces that guess with a statement.
+
+### There is no activate verb
+
+An earlier draft listed `activate` among the verbs. Objects do not work that
+way. TCPPort has `Open`, `Listen`, `Close`, `Send`, `ClearTx`, `ClearRx`;
+Resolver has `Lookup` and `Cancel`; Filter has no command at all, only `Enable`
+and an `In` handler. Each command is an ordinary property with its own handler,
+guarded on a rising 1, and the handler arms whatever task its work needs.
+`TCPPort_Activate` exists only as the creation-time normalizer - make the
+lights agree with the state, act on nothing.
+
+So `PUT /tree/.../TCPPort/Send` with `1` is the press, and `SetOrDeliverProp`
+delivers it to `TCPPort_OnSend` exactly as the panel's MoButton does.
+`tcpport.c` promised this in its own header before REST was thought of: *a
+script can press Open/Listen/Send exactly as the panel's MoButtons do.* REST is
+one more thing that presses them. A widget that grows a new command button
+grows a new endpoint, with no change here.
+
+### The inspector is one parameter
+
+A property is a node, it lives in a container, and it is a container. So the
+URL path is just the node path, all the way down, and
+`/tree/Root/Palette/TCPPort/TxData/W` is legal and means what it looks like.
+The inspector is therefore not a second feature:
+
+    GET /tree/Root/Palette/TCPPort?depth=3       walk down
+    GET /tree/Root/Palette/TCPPort?raw=1         unpublished properties too
+    GET /tree/Root/Palette/TCPPort/connections   the Subscriber records
+
+`raw=1` is the debugging view, and it never emits pointer-valued properties -
+`local`, `Activate`, `OnMsg` are opaque handles and stay opaque. `connections`
+is `Bridge_ListConnections`' walk narrowed to a single instance: every property
+carrying `Subscriber` sub-nodes, each already self-describing as
+`{Instance, Port}`.
+
+One implementation note, because it is the single place the URL grammar meets a
+real limit: `ResolvePath` knows addressable instances only. REST resolves the
+longest prefix the trie recognises and walks the remainder with `GetPropNode`.
+That one rule is what makes instance-versus-property vanish from the grammar.
+
+### Three rules, fixed now
+
+1. **A GET never conjures.** An unresolved path is a 404 and creates nothing.
+   Late binding stays a write-side gesture.
+2. **The URL path is the engine path, verbatim.** No aliases, no session table.
+3. **Published versus raw is the only privacy boundary.** Not a per-property
+   flag - the class has already said what its face is.
+
+## Feeding and waiting: eof is the end of the response body
+
+A `PUT` on a property is fire-and-forget, and two of them - set the input, push
+the button - give a client nothing back. What a caller actually wants is one
+call that feeds the widget and returns what the widget produced. That cannot be
+answered inside the handler the way `http.c` answers a file request. The
+connection has to be held, the output subscribed, the result accumulated, and
+the reply sent later.
+
+The framing for that already exists and is not new: **`msg_eof` is the end of
+the response body.** A Reader sends chunks and then eof, which is exactly a
+body followed by "that is all of it". HTTP wants `Content-Length` known up
+front - the reason `Http_SendResponse` reads a whole file before sending a byte
+- and accumulating until eof is precisely what makes it computable. The two
+framings line up one for one: an eof-terminated stream is `Content-Length`, and
+a message-per-chunk stream with no eof yet is chunked transfer-encoding, which
+is HTTP's own name for the same idea.
+
+So the per-request state is the DNS pattern rather than the Bridge's:
+
+    POST /tree/Root/MyFlow/Filter        body: the input
+      -> feed the input
+      -> remember { Conn, output property, buffer, deadline }
+      -> reply nothing yet; the socket stays open
+      ... later, from the subscription callback ...
+      -> chunk       -> append
+      -> msg_eof     -> build the response, reply to that Conn, forget the record
+
+A `Pending` list keyed by `Conn` and a timeout task - which is what
+`objects/dns` already does with `outstanding`, and part of why it was worth
+building first. The deadline is not optional: something that never eofs would
+otherwise hold a socket forever, and the timeout is the only thing that can
+decide the answer is not coming.
+
+## The face: what a class says about being driven
+
+Rather than have REST work out how to drive a widget, the class states it. Four
+lines:
+
+    in:      TxData
+    trigger: Send
+    out:     RxData
+    done:    quiet 250
+
+    in:      HostName
+    trigger: Lookup
+    out:     Address
+    done:    Found == 1
+
+With that, `POST /tree/Root/MyResolver` carrying a hostname needs no knowledge
+of what a Resolver is: set the inputs, push the button, collect the outputs,
+answer.
+
+`done` is where the early send lives, and the useful cases need no interpreter:
+
+- `eof` - the streaming case, collect everything
+- `first` - single-shot, answer on the first message out
+- `quiet <ms>` - answer once the output stops changing
+- `<Prop> == <value>` - **the early send**: watch a property and answer the
+  moment it matches. Three tokens - property, comparison, value - evaluated
+  against a subscription. When three are not enough, `done` names a property
+  that the object's own contained script sets, so the simple case is data and
+  the hard case is a language host the framework already knows how to hold.
+
+There is a `fail` line beside it, because a request has three outcomes and not
+two: `fail: Error != ""` becomes a 5xx carrying the error text, and the
+deadline becomes a 504.
+
+### Three tiers, and most objects stay in the first
+
+The face is an **override**, not a requirement - the same shape
+`ReservedIn`/`ReservedOut` turned out to have for `Connect`: a default exists,
+and the declaration only exists to disagree with it.
+
+1. **The default.** `in: In`, no trigger, `out: Out`, `done: eof`. Filter,
+   Reader, Writer, Out - anything on the plain dataflow shape. Feed `In`,
+   collect `Out` until eof. No file, nothing to maintain, nothing to keep in
+   step. It lives on `Object` and reaches everything by the ordinary parent
+   walk.
+2. **`ReservedIn`/`ReservedOut` where declared.** A composite View already
+   names the control standing in for it on each side, so the default reads
+   those instead of `In`/`Out`. The dot-connect sugar answers the REST question
+   too, with no second declaration.
+3. **`show/rest/<name>.face`.** Only for what fits neither, which is exactly
+   the objects with a button - TCPPort, Resolver, and Queue, whose
+   `trigger: Clock` and `done: first` is the clearest statement of why the file
+   needs to exist at all: a Queue produces nothing until something clocks it.
+
+### This is MCPSource in reverse
+
+MCPSource reads an external server's tool schemas and generates framework views
+so a user can drive that tool from the canvas. The face and `/registry` are the
+same translation running the other way: framework objects published as a schema
+so an outside caller can drive them. One functor, two directions - which is
+also why the inbound half being already proven (MCPSource's generated agent
+views build, submit, round-trip and clone) is evidence about this half.
+
+Read that way, `GET /registry` is a tool catalogue and `POST /tree/<path>` is a
+tool invocation, and the roadmap's "the framework exposed as an MCP server so
+agents can invoke and build flows" is this same work with a different mouth on
+it. The face is the shared part; HTTP and MCP are two spellings of it. Which is
+worth getting right here rather than re-deriving it later, and it forces two
+things:
+
+**The description already exists.** An agent needs to know what a thing does,
+not only what its arguments are called - and every widget already ships a
+README that its Help row points at (`objects/resolver/README.md`). That is the
+tool description: written, shipped, and already read by the panel. The face
+does not need a `description:` line, it needs to name that file.
+
+**Inputs are plural.** `in: TxData` is a single argument; a tool with three
+needs all three named. Types do not need declaring alongside them - they come
+from the published `Interface` entry, which already carries the widget type and
+the default. MCPSource's own lesson is the reason this stays small: DataObj and
+the MCP protocol are both stringly-typed with automatic conversion, so no
+schema layer is needed between them.
+
+The one syntax question left open is how several inputs are named and how a
+`POST` body maps onto them - a list (`in: Host, Port, Payload`) with a JSON
+object body keyed by property name is the obvious answer, and it is the last
+thing in the face that is not yet decided.
+
+
+### Where the face lives
+
+`PublishShow` (`objects/control/control.c`) does not put `js` and `css` on the
+class node. It creates a `Show` property, then a **`web` sub-property beneath
+it**, and hangs the payload there. That extra level exists for one reason: web
+was never meant to be the only surface. `Show/rest` is one more sub-property
+under the same node, and no mechanism has to be invented for it.
+
+The face is therefore an ordinary editable file - `show/rest/<name>.face` -
+escaped into the module by `show.mk` exactly as the browser half already is,
+and published at ClassStart. A REST face can be added to an existing widget
+without touching its C, and it sits beside the browser half as a peer rather
+than as an afterthought inside the logic.
+
+`GET /registry/TCPPort` then returns the published `Interface` *and* the face,
+so a client is told how to drive the object instead of deducing it - which is
+the whole difference between a translator that knows about widgets and one that
+does not.
+
 
 ## Open questions
 
-These are the ones we cannot answer from the armchair, listed so they can be
-answered on purpose rather than by accident.
+Four of the seven above answered themselves in the course of the reading.
+**(2)** A read is a walk of the node joined to its published interface, and it
+does not conjure. **(3)** Properties are addressable because they are nodes,
+and the URL is the node path. **(5)** An instance as a resource is its values
+joined to its class's `Interface`, with raw as a separate view rather than a
+different endpoint. **(6)** There is no session: REST addresses by engine path,
+which makes the alias machinery a property of the *browser* client
+specifically, exactly as suspected.
 
-1. **Does REST drive the engine, or drive the Bridge?** An object that speaks
-   HTTP and calls the same engine verbs is the cleaner statement of "translators
-   are syntax-only". A client that speaks the existing JSON protocol over HTTP is
-   less code and proves less. The first is the honest test.
+What is left, renumbered:
 
-2. **What is a read?** `GET` must be side-effect free, and today the only way to
-   read a property over the protocol is `subscribe` - which, through late
-   binding, *creates the property it was asked about* if it does not exist. That
-   is correct and deliberate for wiring; it is a disaster for `GET`. So a read
-   verb that does not conjure is likely the first missing primitive, and it may
-   be missing from the JSON protocol too.
+1. **Does REST drive the engine, or the Bridge?** Answered in principle - the
+   engine - but it stays on the list until the first endpoint has proved it
+   needs nothing at all from `bridge.c`.
 
-3. **Do properties have addresses yet?** `GET /Root/Filter/Mode` is the whole
-   argument for the promoted roadmap item. If a property is not addressable, REST
-   has no resources below the instance.
+2. **Are events part of v1?** Still open, still to be decided out loud rather
+   than by omission. Polling a property costs one walk; a client that wants to
+   watch a value change wants SSE or a webhook. v1 is polling unless something
+   forces the issue.
 
-4. **Are events part of v1?** A canvas needs a stream. A REST client may be
-   content to poll, or may want SSE or a webhook. Deciding "no events in v1" is
-   allowed; deciding it silently is not.
+3. **Containment: inline, by link, or on request?** `GET /tree/Root` returning
+   every member of every nested view is a session dump; returning names and
+   making the client descend is a round trip per level. The likely answer is
+   `?depth=` defaulting to 1, which puts the decision in the caller's hands and
+   makes it the translator's business rather than the walk's.
 
-5. **What is an instance as a resource?** The published Interface is already a
-   schema of shape. Units, ranges, read-only-ness, ordering and grouping are just
-   more properties on the property - so the question is what `GET /Root/Filter`
-   returns, and whether it is `NodeToJson` restricted to one instance or
-   something narrower.
+4. **Its own port, or a third target on the Router?** v1 takes its own TCP: no
+   change to the Router, no risk to the running GUI, and it makes the sibling
+   claim literal - if REST needs nothing from the bridge, it can prove it on its
+   own socket. Folding it onto the shared port is a later and separate
+   decision, and the rule that decides it there is a path prefix, not the
+   Router's current header sniff.
 
-6. **Is there a session at all?** If REST is stateless and addresses by engine
-   path, the alias table has no role in it. That would make the bridge's alias
-   machinery a property of the *browser* client, which is a much smaller claim
-   than it currently makes for itself.
-
-7. **What does a REST client do about containment?** A canvas asks for the
-   contents of one view because it is drawing that view. Does REST return an
-   instance's members inline, by link, or only on request - and does that
-   decision belong to the translator or to the walk?
+5. **Authentication.** Deferred. v1 binds where it is told and that is the
+   model, the same as the raw bridge flow.
 
 ## How we will know it worked
 
@@ -117,11 +382,19 @@ feature - and the fix goes downward, never sideways into the translator.
 
 ## Where to start
 
-1. Draw the line between the two halves on paper, from the function list, before
-   moving a single line of code.
-2. Answer question 2 - the read verb - because everything else needs it.
-3. Stand up the smallest thing that can create an instance and read it back.
-4. Write the equivalence test before adding a third verb.
+1. `objects/rest/` on the udp/dns pattern: its own TCP, its own port, and an
+   HTTP request parser that handles a method, a path and a `Content-Length`
+   body arriving across several recvs. `Http_SendResponse`'s header build and
+   its `Conn` tagging are worth copying; the rest of `http.c` is GET-only
+   static file serving and does not fit.
+2. `GET /registry` first. It is pure read, it touches nothing live, and it is
+   the endpoint a client cannot start without.
+3. `GET /tree/<path>`, with the interface join.
+4. One `PUT`, and puppet an existing widget from `curl` - press a TCPPort's
+   Listen and watch the panel's LED change in the browser at the same moment.
+   That is the whole of the phase-one proof: two translators, one live tree.
+5. Only then clone-into-a-view and connect, and the equivalence test before the
+   third verb.
 
 The thing to resist is making REST *work* by teaching it about the GUI's
 conventions. If it needs to know what a panel is, we have drawn the line in the

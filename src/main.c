@@ -249,6 +249,41 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 		} else { DebugPrint ( "Error creating web gui objects.", __FILE__, __LINE__, ERROR); }
 	}
 
+	/* The REST surface, a sibling of the web GUI rather than a layer on  */
+	/* it: its own TCP, its own port, and a translator that answers one   */
+	/* request at a time and keeps nothing between them. Wired exactly    */
+	/* like Http is wired, because it is the same shape - bytes in,       */
+	/* bytes out, and the socket is somebody else's business.             */
+	/*                                                                    */
+	/*   TCP (-port + 1, default 0.0.0.0:8084) --> Rest --> TCP.In        */
+	/*                                                                    */
+	/* /Root/mcp is created here empty, and what a user drags into it is  */
+	/* what the manifest publishes - containment IS the publication, so   */
+	/* there is no exported flag and no category to keep in step.         */
+	{
+		NodeObj RestTcp, Rest, RestView, McpView;
+
+		RestView = Widget_Create(DefaultRootView, "View", "RestAPI");
+
+		DebugPrint ( "Creating rest api objects.", __FILE__, __LINE__, PROG_FLOW);
+
+		McpView = Widget_Create(GetRootView(), "View", "mcp");
+		RestTcp = Widget_Create(RestView, "TCP",  "RestTCP");
+		Rest    = Widget_Create(RestView, "Rest", "Rest");
+
+		if (McpView && RestTcp && Rest) {
+
+			SetPropStr(RestTcp, "LocalAddr", GetPropStr(Main, "ip"));
+			SetPropInt(RestTcp, "LocalPort", GetPropInt(Main, "port") + 1);
+
+			Connect(RestTcp, "Out", Rest, "In");
+			Connect(Rest, "Out", RestTcp, "In");
+
+			ActivateInstance(Rest);
+			ActivateInstance(RestTcp);
+		} else { DebugPrint ( "Error creating rest api objects.", __FILE__, __LINE__, ERROR); }
+	}
+
 	/* fifth flow: the Bridge control protocol, also on top of TCP - the  */
 	/* roadmap's Phase 3.3. A remote client sends JSON commands and gets  */
 	/* JSON events back; every command is a direct CreateObject/Connect/  */
