@@ -122,6 +122,61 @@ into both.
 
 ---
 
+## When the work blocks: hardware and other slow I/O
+
+Cooperative multitasking is a contract where every participant has a veto. One
+`read()` on a slow disk, one `connect()` to a host that is down, one resolver
+call to a nameserver that never answers, and the whole fabric stops - it does
+not degrade, it stops, and the symptom is "the app froze" no matter which
+object did it. A raw I/O object is where that happens, so decide this first:
+
+**If the OS offers a nonblocking form, poll it. If it does not, quarantine it
+behind a worker thread.**
+
+Poll it - `O_NONBLOCK` plus a task that reads what is ready and re-arms. This is
+what `objects/tcp` and `objects/udp` do, and threading them would be strictly
+worse.
+
+Quarantine it - for the calls with no nonblocking form:
+
+- name resolution (`gethostbyname`, `getaddrinfo`)
+- `open()`/`stat()` on a slow or network filesystem - `O_NONBLOCK` does not
+  help, the open itself blocks
+- `tcdrain`, modem-line waits, and most device `ioctl`s: USB, GPIO, instrument
+  drivers - whatever the driver decides to do inside the call
+- `fsync`/`fdatasync`
+- spawning a process and waiting for it
+
+### The worker pattern
+
+`objects/dns` is the worked example - the first object in the tree to run
+anything off the main thread. The shape, and every part of it is load bearing:
+
+- **The worker touches ONLY its own struct.** The hostname, the result, and a
+  state flag. It never sees a `NodeObj`, never allocates a node, never sends a
+  message. The moment a worker touches the node tree, "single-threaded fabric"
+  stops being true and every other guarantee here goes with it.
+- **A sentinel, polled from a task.** The worker sets a state field when it is
+  done; a task in the main loop notices, joins the thread, and only then reads
+  the result. Joining before reading is what makes the handoff safe without a
+  lock.
+- **The answer becomes an ordinary message**, delivered on the main thread to
+  the `{owner, msgID, callback}` handed over at creation - exactly as if the
+  work had never left.
+- **The task arms on demand and stops when nothing is owed.** An object nobody
+  has asked for anything schedules nothing and holds no program open.
+- **The object owns the retraction.** It keeps a list of what it asked for, so
+  `InstanceEnd` can cancel everything not yet started, and a liveness check so
+  the one already running - which cannot be cancelled - answers into nowhere.
+  A subtree delete walks the engine's own structures; a thread's future answer
+  is not in them, so this is the object's job and nobody else's.
+
+None of that reaches your drivers. They send a message and get one back, which
+is why the header being the whole interface is what made the thread possible in
+the first place.
+
+---
+
 ## Files here
 
 - `skeleton.c` - the module. Message function, private struct, one entry node.

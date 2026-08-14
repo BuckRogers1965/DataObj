@@ -331,26 +331,82 @@ void SetClassParent(NodeObj class, char *parentname)
 /* true once every entry's file is Loaded AND the class it named exists at an */
 /* acceptable version. Anything short of that leaves the library unstarted -   */
 /* see ReportUnmet for why that is not best-effort any more.                   */
-static int DependenciesReady(NodeObj library)
-{
-	NodeObj deps, entry, depLib, depClass;
+/* The two indexes bring-up resolves against: file name -> library node, and
+   class name -> class node. Both are the trie namespace.c already provides
+   (the same structure the path index uses), so a lookup costs the length of
+   the key instead of a walk over every library, or every class of every
+   library. That is the difference between "fine for fifty modules" and
+   "fine for ten thousand": FindLibraryByFile and FindClass are linear, and
+   they were being called once per dependency per pass. */
+typedef struct {
+	NSObj *files;		/* "widget.object"  -> NodeObj library */
+	NSObj *classes;		/* "Widget"         -> NodeObj class   */
+} DepIndex;
 
-	deps = GetPropNode(library, "Dependencies");
-	if (!deps)
+/* a library and how many of its dependencies were unmet when the working
+   list was built - the sort key, taken once */
+typedef struct {
+	NodeObj library;
+	int     unmet;
+} DepRank;
+
+static int DepRankCmp(const void *a, const void *b)
+{
+	return ((const DepRank *) a)->unmet - ((const DepRank *) b)->unmet;
+}
+
+/* every class a library registered becomes findable the moment it starts -
+   nothing can depend on a class before its library has run ClassStart */
+static void IndexLibraryClasses(DepIndex *ix, NodeObj library)
+{
+	NodeObj class;
+
+	for (class = GetChild(library); class; class = GetNextSibling(class))
+		if (GetNameStr(class))
+			NSInsert(ix->classes, GetNameStr(class), (long) class);
+}
+
+/* ONE dependency entry. Once satisfied it is stamped Met and never asked
+   about again - so the total work is one resolution per declared
+   dependency, no matter how many times its library is revisited. */
+static int DependencyMet(DepIndex *ix, NodeObj entry)
+{
+	NodeObj depLib, depClass;
+	char   *file, *classname;
+
+	if (GetPropInt(entry, "Met"))
 		return 1;
 
-	for (entry = GetChild(deps); entry; entry = GetNextSibling(entry)) {
-		depLib = FindLibraryByFile(GetPropStr(entry, "File"));
-		if (!depLib || !GetPropInt(depLib, "Loaded"))
-			return 0;
+	file = GetPropStr(entry, "File");
+	depLib = file ? (NodeObj) NSSearch(ix->files, file) : NULL;
+	if (!depLib || !GetPropInt(depLib, "Loaded"))
+		return 0;
 
-		depClass = FindClass(GetPropStr(entry, "Class"));
-		if (!ClassVersionOk(depClass, GetPropStr(entry, "Major"),
-							GetPropStr(entry, "Minor")))
-			return 0;
-	}
+	classname = GetPropStr(entry, "Class");
+	depClass = classname ? (NodeObj) NSSearch(ix->classes, classname) : NULL;
+	if (!ClassVersionOk(depClass, GetPropStr(entry, "Major"),
+						GetPropStr(entry, "Minor")))
+		return 0;
+
+	SetPropInt(entry, "Met", 1);
 	return 1;
 }
+
+/* how many of a library's dependencies are still unmet - and the ones that
+   became met since last time are struck off on the way past */
+static int UnmetCount(DepIndex *ix, NodeObj library)
+{
+	NodeObj deps, entry;
+	int unmet = 0;
+
+	deps = GetPropNode(library, "Dependencies");
+	for (entry = deps ? GetChild(deps) : NULL; entry; entry = GetNextSibling(entry))
+		if (!DependencyMet(ix, entry))
+			unmet++;
+
+	return unmet;
+}
+
 
 /* Name what is actually missing, per entry. Reached when a sweep makes no    */
 /* progress: the library never starts, so a widget whose control module is    */
@@ -406,11 +462,83 @@ static void ReportUnmet(NodeObj library)
  * libraries stay unstarted and ReportUnmet names, per entry, exactly what
  * was wanted and what was found.
  */
+/* One line for what was found, in the order it was loaded, instead of a
+   line per file. RegObjList holds them in reverse (AddChild prepends), so
+   the names are built back to front. A module whose registered class name
+   is just its filename says nothing worth reading; only the ones that
+   differ are named, and that is the whole point of the second line. */
+static void ReportLoadedObjects(void)
+{
+	NodeObj library;
+	char list[3000], renamed[1500], one[200], msg[3200];
+	char *file, *name, *dot, *core = NULL;
+	int  n = 0, r = 0;
+	size_t len;
+
+	list[0] = renamed[0] = '\0';
+
+	for (library = GetChild(RegObjList); library; library = GetNextSibling(library))
+	{
+		file = GetPropStr(library, "File");
+		name = GetNameStr(library);
+		if (!file || !file[0])
+			continue;				/* nothing on disk to name */
+
+		/* the core is not something the scan FOUND - it carries a File only
+		   because dependencies name it, and its classes are registered
+		   before any module is loaded. Counting it here is what makes the
+		   totals read as one short. */
+		if (strcmp(file, CORE_LIBRARY_FILE) == 0)
+		{
+			core = name;
+			continue;
+		}
+
+		/* prepend: the list is newest-first, the load order is the reverse */
+		snprintf(one, sizeof(one), "%s%s", file, list[0] ? ", " : "");
+		len = strlen(one) + strlen(list);
+		if (len < sizeof(list) - 1)
+		{
+			memmove(list + strlen(one), list, strlen(list) + 1);
+			memcpy(list, one, strlen(one));
+		}
+		n++;
+
+		/* file "slider.object" vs class name "Slider" is not news - case is
+		   not a change. A name that is genuinely something else is. */
+		dot = strrchr(file, '.');
+		if (name && name[0] &&
+			(dot ? strncasecmp(file, name, (size_t)(dot - file)) != 0 ||
+				   strlen(name) != (size_t)(dot - file)
+				 : strcasecmp(file, name) != 0))
+		{
+			snprintf(one, sizeof(one), "%s%s -> %s", renamed[0] ? ", " : "", file, name);
+			if (strlen(renamed) + strlen(one) < sizeof(renamed) - 1)
+				strcat(renamed, one);
+			r++;
+		}
+	}
+
+	snprintf(msg, sizeof(msg), "list of objs (%d, in load order): %s%s%s", n, list,
+			 core ? " -- plus the core, " : "", core ? core : "");
+	DebugPrint(msg, __FILE__, __LINE__, PROG_FLOW);
+
+	if (r)
+	{
+		snprintf(msg, sizeof(msg), "objs whose class name is not their filename (%d): %s",
+				 r, renamed);
+		DebugPrint(msg, __FILE__, __LINE__, PROG_FLOW);
+	}
+}
+
 void
 loadClasses(void){
 	NodeObj library;
-	int madeProgress, remaining;
+	int madeProgress, remaining, sweep = 0, started, marked = 0;
 	msgobj ClassStart;
+	char dbg[400], order[3000];
+
+	ReportLoadedObjects();
 
 	remaining = 0;
 	library = GetChild(RegObjList);
@@ -422,30 +550,147 @@ loadClasses(void){
 		library = GetNextSibling(library);
 	}
 
-	while (remaining > 0) {
-		madeProgress = 0;
+	started = 0;
+	order[0] = '\0';
 
-		library = GetChild(RegObjList);
-		while (library) {
-			if (!GetPropInt(library, "Loaded") && DependenciesReady(library)) {
+	if (remaining > 0) {
+		NodeObj *work = malloc((size_t) remaining * sizeof(NodeObj));
+		int  head = 0, queued = 0, cap = remaining, i, j, stalled = 0, thisPass;
+		DepIndex ix;
+
+		if (!work) {
+			DebugPrint("loadClasses: out of memory building the working list",
+					   __FILE__, __LINE__, ERROR);
+			return;
+		}
+
+		/* index every library by the file it came from, and every class of
+		   everything ALREADY started (the core's own) - that is the whole
+		   starting state a dependency can resolve against */
+		ix.files   = NSCreate();
+		ix.classes = NSCreate();
+		for (library = GetChild(RegObjList); library; library = GetNextSibling(library)) {
+			char *file = GetPropStr(library, "File");
+
+			if (file && file[0])
+				NSInsert(ix.files, file, (long) library);
+			if (GetPropInt(library, "Loaded"))
+				IndexLibraryClasses(&ix, library);
+		}
+
+		/* the working list: every unstarted library, FEWEST DEPENDENCIES
+		   FIRST, so the ones that can go immediately are not queued behind
+		   the ones that cannot. The count is taken ONCE per library and
+		   sorted on - computing it inside the comparison is how a sort of
+		   ten thousand becomes a hundred million dependency walks. */
+		{
+			DepRank *rank = malloc((size_t) remaining * sizeof(DepRank));
+
+			if (!rank) {
+				DebugPrint("loadClasses: out of memory ranking the working list",
+						   __FILE__, __LINE__, ERROR);
+				NSRelease(ix.files);
+				NSRelease(ix.classes);
+				free(work);
+				return;
+			}
+
+			for (library = GetChild(RegObjList); library; library = GetNextSibling(library)) {
+				if (GetPropInt(library, "Loaded"))
+					continue;
+				rank[queued].library = library;
+				rank[queued].unmet   = UnmetCount(&ix, library);
+				queued++;
+			}
+
+			qsort(rank, (size_t) queued, sizeof(DepRank), DepRankCmp);
+
+			for (i = 0; i < queued; i++)
+				work[i] = rank[i].library;
+
+			free(rank);
+		}
+
+		/* Take from the front; a library whose dependencies are all met
+		   starts and leaves the list, and one still waiting goes to the
+		   BACK to be revisited after the others have had their turn. Two
+		   full traversals with nothing leaving means nothing can ever
+		   leave - the remainder is a cycle or an unmet requirement, and it
+		   gets dumped rather than retried forever. */
+		thisPass = queued;
+		while (queued > 0) {
+			library = work[head];
+			head = (head + 1) % cap;
+			queued--;
+
+			if (UnmetCount(&ix, library) == 0) {
 				ClassStart = (msgobj) GetPropLong(library, "ClassStart");
 				if (ClassStart) ClassStart(library, 0, NULL);
 				SetPropInt(library, "Loaded", 1);
+				IndexLibraryClasses(&ix, library);	/* now findable by name */
 				remaining--;
-				madeProgress = 1;
+				started++;
+				stalled = 0;
+
+				/* the order, one line, with the passes marked in it: the
+				   pass a library came up in IS the dependency depth it sat
+				   at, so [1] is everything that waited for nothing. */
+				if (marked != sweep) {
+					snprintf(dbg, sizeof(dbg), "%s[%d] ", order[0] ? " | " : "", sweep + 1);
+					marked = sweep;
+				}
+				else
+					snprintf(dbg, sizeof(dbg), ", ");
+
+				if (strlen(order) + strlen(dbg) + strlen(GetNameStr(library))
+					< sizeof(order) - 1) {
+					strcat(order, dbg);
+					strcat(order, GetNameStr(library));
+				}
 			}
-			library = GetNextSibling(library);
+			else {
+				work[(head + queued) % cap] = library;	/* to the back */
+				queued++;
+				stalled++;
+			}
+
+			if (--thisPass <= 0) {			/* one traversal of the list */
+				thisPass = queued;
+				sweep++;
+				marked = sweep - 1;
+			}
+
+			if (queued > 0 && stalled >= 2 * queued) {
+				snprintf(dbg, sizeof(dbg),
+						 "CLASS START stalled: %d librar(ies) went two full passes "
+						 "without one starting - a cycle, or a requirement nothing "
+						 "provides. The ring, and what each one is waiting for:",
+						 queued);
+				DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+
+				for (i = 0, j = head; i < queued; i++, j = (j + 1) % cap) {
+					snprintf(dbg, sizeof(dbg), "  stalled: %s", GetNameStr(work[j]));
+					DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+					ReportUnmet(work[j]);
+				}
+				break;
+			}
 		}
 
-		if (!madeProgress) {
-			library = GetChild(RegObjList);
-			while (library) {
-				if (!GetPropInt(library, "Loaded"))
-					ReportUnmet(library);
-				library = GetNextSibling(library);
-			}
-			break;
-		}
+		NSRelease(ix.files);
+		NSRelease(ix.classes);
+		free(work);
+		madeProgress = started > 0;
+		(void) madeProgress;
+	}
+
+	{
+		char line[3300];
+
+		snprintf(line, sizeof(line),
+				 "classes started: %d in %d sweep(s), %d left unstarted: %s",
+				 started, sweep, remaining, order);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
 	}
 }
 

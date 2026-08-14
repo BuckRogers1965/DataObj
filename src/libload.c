@@ -53,10 +53,10 @@ LoadObject (char *name, int depth)
 				 (int)(BUFFLEN - 30), hereName);
 		DebugPrint ( (char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 		return 0;
-	} else {
-		snprintf((char *)&DebugMsg, BUFFLEN-1, "Loaded %s", name);
-		DebugPrint ((char *)&DebugMsg, __FILE__, __LINE__, PROG_FLOW);
 	}
+	/* a successful load says nothing a reader needs one file at a time -
+	   ReportLoadedObjects (object.c) prints the whole set once, in load
+	   order. Only the failure above is worth a line of its own. */
 
 	/* clear any stale error first - a NULL result alone is not proof the  */
 	/* symbol is missing (a present symbol can legitimately be NULL); the  */
@@ -71,8 +71,7 @@ LoadObject (char *name, int depth)
 		//fputs(error, stderr);
 		DebugPrint ( "Failed to find HandleMessage in Library.", __FILE__, __LINE__, ERROR);
 		return 0;
-	} else
-		DebugPrint ( "Found HandleMessage in Library.", __FILE__, __LINE__, PROG_FLOW);
+	}
 
 	/* stamp the file this library came from - a dependency names a file, and
 	   the library node cannot know its own: it was built in _init(), which

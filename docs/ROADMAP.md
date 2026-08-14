@@ -2601,3 +2601,135 @@ instance and the property name. That retires the bridge's repath-the-string job
 fallbacks, and leaves one source of truth with a text rendering produced where
 text is needed. Same shape as the walk belonging to the kind: the fact lives in
 one place, and whoever needs it in their own notation derives it.
+
+### An object must not act until something asks it to (found 2026-08-13)
+
+A palette UDPPort arms a task the moment it is born and runs a settle pass at
+boot:
+
+```
+UDPPort[]: arming setup in 300ms (born)
+UDPPort[UDPPort]: activate: building panel
+UDPPort[UDPPort]: setup (settle): stopping the object
+UDPPort[UDPPort]: setup (settle): forced lamps to stopped
+```
+
+Nothing asked it to. It is sitting in the palette as a thing you might drag,
+and it is already scheduling work, driving its own lamps, and deciding not to
+open a socket. **It should do nothing until an event reaches it** - an arriving
+message, a property write, an explicit activate.
+
+The standing rule this breaks: a control never acts at creation. Being created
+is not an instruction.
+
+**This is a safety property, not a tidiness one**, and the line is whether the
+write LEAVES the object.
+
+Setting your own lamps at creation is right: an object that is not running
+should say so, and initialising `On=0 Off=1` is a description of itself, kept
+consistent and then corrected as it actually runs and stops, enables and
+disables. That is state, not action.
+
+Arming a task is action. So is opening a socket, and so is commanding an axis -
+and it is the same lifecycle for all three. The settle pass above decided to
+STOP; with `AutoStart=1` in a saved flow the identical path decides to OPEN.
+Which way it goes is a property value, not a guarantee, so "it happened to be
+safe" is the only thing standing between existing and moving. If that instance
+were a robot arm, being loaded into a palette would have commanded it.
+
+Nothing that acts on the world may act because it was constructed. Construction
+establishes what a thing IS - including what its lamps say about it; only a
+message says to DO. An object that cannot tell the difference cannot be trusted
+with anything physical, and this framework is aimed squarely at things that are
+physical.
+
+The cost is also structural: a palette full of objects that each arm a task at
+boot is a program that cannot go quiet, and quiescence is how this framework
+decides it is finished.
+
+Sightings of the same shape in the same boot, worth checking when this is
+picked up rather than fixed piecemeal:
+
+```
+reader.c 160  Error  Reader has no Filename to read.
+writer.c 188  Error  Writer has no Filename to write.
+```
+
+Both are palette instances complaining about configuration nobody has given
+them yet, because they were activated rather than left alone. An object with
+nothing to do should be silent, not apologetic.
+
+The check that makes this visible rather than a matter of reading logs: at
+boot, with a palette and no flow, the task list should quiesce - nothing armed,
+nothing rescheduling. That is a test the harness can make (count the tasks
+after settle), and it is the same measurement the leak suite already knows how
+to take.
+
+### IPv6 in the resolver (found 2026-08-13)
+
+The DNS engine (`objects/dns/dns.c`) resolves with `gethostbyname()`, which is
+what makes it behave exactly like the host it runs on - intranet short names,
+the search domains in `/etc/resolv.conf`, `/etc/hosts`, whatever the local
+server serves. That is the wanted behaviour and stays.
+
+What it cannot do is IPv6: `gethostbyname` asks for A records, so a host that
+exists only as AAAA does not resolve, and the answer is always a dotted quad.
+The engine stores a `struct sockaddr_in`, so this is not only a call to swap -
+the address the entry carries has to widen too (`sockaddr_storage`), and
+`DnsGetIPAddr`'s `inet_ntoa` becomes `inet_ntop`.
+
+`getaddrinfo` is the replacement, and it also answers the "which family" and
+"which server" questions the current path cannot: it returns a list, so a
+caller can be told every address a name has rather than the first A record.
+
+Nothing above the engine changes. `dns.h` passes addresses as text, and the
+Resolver widget shows text, so a longer string in the same property is the
+whole visible difference.
+
+### Deleting a subtree: close the sources, don't detect the strays
+
+Found while building the DNS object (2026-08-13), which is the first thing in
+the tree with a worker thread and therefore the first that can be answered
+after the asker is gone.
+
+The general problem is not DNS's: a message can be in flight when either end
+dies. Today two special cases handle two paths - `ScrubRegistrySubscriptions`
+strips Subscriber records pointing at a dead instance, and `CancelPendingSends`
+blanks queued envelopes it sent. Neither covers messages queued FOR it, and
+neither is reached by anything an object generates on its own.
+
+**The protocol, in this order, for the whole subtree at once:**
+
+1. **Walk the subtree once** to get the set being deleted.
+2. **Sweep the message list against the SET** - one pass over the queue testing
+   membership, not one pass per instance. Everything already queued for
+   anything in the set dies here.
+3. **Cut the subscriptions** - nothing can route a NEW message to them.
+4. **Each instance releases its private handles** in `InstanceEnd` - the engines
+   stop, cancel their own queued work, and generate nothing further.
+
+After those four, nothing can produce a message aimed at the set, and nothing
+already produced survives.
+
+**No tombstones, no countdowns, no generation stamps.** Those are what you need
+when the exposure can only be DETECTED; this closes it instead. The property
+that makes it exact is the single thread: the teardown runs to completion in one
+turn, so nothing slips in between step 3 and step 4. In a threaded fabric this
+would have to become a grace period (RCU's answer) or a generational handle
+(what game engines do with reused slots) - worth knowing as the reason the
+single-threaded rule earns its keep.
+
+**What the protocol cannot reach**, and where it therefore delegates: work
+living outside the engine's own structures - a worker thread that will produce
+a message later. No walk finds it, because the engine does not hold it. Step 4
+is where that is handled, by the private handle that started it and is the only
+thing that knows it exists. In the DNS object that is the pending list (queued
+lookups, retracted at teardown) and the live-instance ring (the one lookup
+already running, which cannot be cancelled but whose answer lands nowhere).
+
+**Why the residue stays small: engines hand out nothing.** `udp.h`, `tcp.h` and
+`dns.h` expose a handle you cannot inspect and a set of message ids. No nodes,
+no structs, no pointers into the engine cross that line, so there is no external
+reference that can go stale - the same conclusion the language hosts reached
+from the other direction with their opaque handles. Three subsystems, one
+answer, and it is what keeps deletion a walk rather than a search.
