@@ -382,7 +382,7 @@ static char *Rest_ManifestView(NodeObj instance)
 static void Rest_ListMembers(NodeObj instance, char *container, char *label,
 							 int full, long connId)
 {
-	NodeObj lib, class, inst, view;
+	NodeObj inst, view;
 	char *manifest = container;
 	char pbuf[600];
 	char *cont;
@@ -409,9 +409,7 @@ static void Rest_ListMembers(NodeObj instance, char *container, char *label,
 	SbCatJson(&sb, label);
 	SbCat(&sb, ",\"members\":[");
 
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-	 for (class = GetChild(lib); class; class = GetNextSibling(class))
-	  for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
 	  {
 		if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 			continue;

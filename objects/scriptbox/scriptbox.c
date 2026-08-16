@@ -66,13 +66,12 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
    language .object in and it appears in the dropdown.                      */
 static void ScriptBox_DiscoverHosts(char *out, int outlen)
 {
-	NodeObj lib, cls;
+	NodeObj cls;
 	int used = 0, first = 1;
 	char *nm;
 
 	out[0] = '\0';
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	for (cls = FirstClass(); cls; cls = NextClass(cls))
 		{
 			char *par = GetPropStr(cls, "Parent");
 

@@ -273,16 +273,15 @@ static void UDPPort_NormalizeHost(NodeObj instance)
    -> classes, so a class by name is one walk */
 static NodeObj UDPPort_NamedClass(char *classname)
 {
-	NodeObj lib, cls;
+	NodeObj cls;
 	char *name;
 
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-		{
-			name = GetNameStr(cls);
-			if (name && strcmp(name, classname) == 0)
-				return cls;
-		}
+	for (cls = FirstClass(); cls; cls = NextClass(cls))
+	{
+		name = GetNameStr(cls);
+		if (name && strcmp(name, classname) == 0)
+			return cls;
+	}
 
 	return NULL;
 }

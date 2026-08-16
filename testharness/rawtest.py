@@ -393,6 +393,85 @@ def test_atomic_birth(raw, r, home):
     return name
 
 
+def test_minted_names(raw, r, home):
+    """WHAT THE ENGINE CALLS THINGS IS THE PUBLIC CONTRACT.
+
+    This framework addresses by path. ResolvePath keys on names, flow files
+    store them, scripts reach their siblings by them, and the REST surface
+    turns them into URLs. A change to how a name is minted is a breaking
+    change in exactly the sense renaming an endpoint is: saved flows loaded
+    afterwards, scripts holding a path, and any client that bookmarked one
+    all break - silently, and later.
+
+    Nothing else in this suite ever states what anything should be CALLED.
+    Every other check reads names out of the events it was just handed and
+    uses them, so it passes under any naming scheme at all, including a
+    wrong one. That is how an aliased control's name changed twice without
+    a single test moving.
+
+    These assertions are brittle ON PURPOSE. If one fails, either the
+    change was a mistake or the contract moved and this file records the
+    new one - but it is never allowed to happen quietly."""
+
+    # 1. a name the caller GAVE is the name it gets, untouched
+    raw.send({"cmd": "create-instance", "class": "Slider", "as": home + "/bob_1",
+              "container": home, "x": "40", "y": "40"})
+    made = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                          and e.get("instance") == home + "/bob_1")
+    r.expect("names: an explicitly named instance keeps the name it was given",
+             "created at %s/bob_1, exactly as asked" % home,
+             "event=%s" % bool(made),
+             bool(made))
+    if not made:
+        return
+
+    # 2. an alias is named for WHAT IT STANDS FOR - the instance it aliases
+    #    and the property. Its class name says only what draws it.
+    raw.send({"cmd": "create-alias", "of": home + "/bob_1", "prop": "Value",
+              "container": home, "x": "160", "y": "40"})
+    ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                        and e.get("container") == home
+                        and e.get("instance") != home + "/bob_1")
+    got = ev.get("instance") if ev else None
+    r.expect("names: an alias is named <instance>_<property>",
+             "aliasing bob_1's Value makes %s/bob_1_Value_1 - the name says "
+             "which thing the doorway opens onto, and MintFreshName always "
+             "takes the lowest free _k, so the FIRST one is _1" % home,
+             "got=%s" % got,
+             got == home + "/bob_1_Value_1")
+
+    # 3. a second alias of the same property is minted distinct, not a
+    #    collision and not an overwrite
+    raw.send({"cmd": "create-alias", "of": home + "/bob_1", "prop": "Value",
+              "container": home, "x": "280", "y": "40"})
+    ev2 = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                         and e.get("container") == home
+                         and e.get("instance") not in (home + "/bob_1", got))
+    got2 = ev2.get("instance") if ev2 else None
+    r.expect("names: a second alias of the same property is minted distinct",
+             "%s/bob_1_Value_2 - the next free _k, never a collision with the "
+             "first and never an overwrite" % home,
+             "first=%s second=%s" % (got, got2),
+             got2 == home + "/bob_1_Value_2")
+
+    # 4. the mint rule for a clone, stated in MintFreshName: the base with
+    #    any trailing _N stripped, then the lowest free _k in the container.
+    #    So bob_1 cloned beside itself is bob_2.
+    raw.events = []
+    raw.send({"cmd": "clone-instance", "of": home + "/bob_1",
+              "container": home, "x": "40", "y": "160"})
+    evc = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                         and e.get("container") == home
+                         and e.get("class") == "Slider"
+                         and e.get("instance") not in (home + "/bob_1", got, got2))
+    clone = evc.get("instance") if evc else None
+    r.expect("names: a clone takes the lowest free suffix on its source's base",
+             "cloning bob_1 beside itself makes %s/bob_2 - trailing _N stripped, "
+             "lowest free _k in the container" % home,
+             "clone=%s" % clone,
+             clone == home + "/bob_2")
+
+
 def test_widget_stamp(raw, r, home, source):
     """The engine decides what shows a property, from what the target's class
     published - the client never sends or deduces it, so it must all come back
@@ -668,6 +747,38 @@ def test_load_then_clone_binding(raw, r, home):
             out.append((e.get("instance"), e.get("class")))
         return out
 
+    def settled(view, want=1, timeout=20.0):
+        """Wait until a container actually HOLDS something before asking
+        questions about it.
+
+        load-flow is staggered on purpose (DESTROY-CONTENTS-ASYNC, then a
+        rebuild spread over ticks), and flow-loaded is the serializer's
+        completion callback - but the engine has been observed answering
+        'unknown container' for a path AFTER that event, with listings
+        landing between one instance's Container write and its Name write.
+        Under asan every step is slower, so the half-rebuilt window is wide
+        enough to fall into; on -O3 it closes before anyone looks, which is
+        why this only ever failed in one build.
+
+        A condition, not a clock: fast builds do not pay for it, slow ones
+        get as long as they need, and IT SAYS SO WHEN IT HAD TO WAIT - if
+        that line starts appearing, flow-loaded is arriving early and every
+        real client has the same problem, which is a bug to fix in the
+        engine rather than something for this to keep absorbing."""
+        t0 = time.time()
+        while True:
+            mem = members(view)
+            if len(mem) >= want:
+                waited = time.time() - t0
+                if waited > 0.5:
+                    print("      note: %s took %.1fs to settle after load "
+                          "(flow-loaded arrived before it was ready)"
+                          % (view, waited))
+                return mem
+            if time.time() - t0 > timeout:
+                return mem
+            time.sleep(0.25)
+
     def bound_to_own_slider(view, value="55"):
         """view's alias must name view's own Slider, and a write through
         it must actually land there - Target is metadata, the link is the
@@ -678,7 +789,16 @@ def test_load_then_clone_binding(raw, r, home):
         stands for the other, which is the only difference there has ever
         been between them."""
         mem = members(view)
-        al = next((m for m, c in mem if raw.value_of(m, "Target", timeout=1.5)), None)
+        # WHICH ONE IS THE ALIAS: the one whose Target names something, i.e.
+        # a path. Not merely "has a Target value" - value_of subscribes, and
+        # subscribe CONJURES the property it asks about (late binding, by
+        # design), so asking a plain Slider for its Target creates one and
+        # reads it back as "0" - which is truthy in Python. That made this
+        # pick whichever member was announced first, and it only ever passed
+        # because the alias happened to come first. Announcement order is not
+        # something a test may depend on.
+        al = next((m for m, c in mem
+                   if (raw.value_of(m, "Target", timeout=1.5) or "").startswith("/")), None)
         sl = next((m for m, c in mem if c == "Slider" and m != al), None)
         if not sl or not al:
             return mem, sl, None, False
@@ -701,6 +821,7 @@ def test_load_then_clone_binding(raw, r, home):
     raw.reconnect()
 
     copy = home + "/LrView"
+    settled(copy, want=2)          # its own Slider and its Alias
     mem, sl, tgt, live = bound_to_own_slider(copy)
     r.expect("load: the loaded copy's alias binds to the loaded copy's slider",
              "the restored Alias targets the restored Slider and a write "
@@ -730,6 +851,8 @@ def test_load_then_clone_binding(raw, r, home):
     v4 = ev.get("instance") if ev else None
     # the clone was taken from the view checked above, so it already holds
     # that value - a repeat write is not a change and fans out to nobody
+    if v4:
+        settled(v4, want=2)        # the clone's own Slider and Alias
     mem, sl, tgt, live = bound_to_own_slider(v4, "77") if v4 else ([], None, None, False)
     r.expect("clone after load: the clone's alias drives the clone's own slider",
              "the cloned Alias targets the cloned Slider and the write lands there",
@@ -962,6 +1085,7 @@ def main():
     # atomic-birth/widget-stamp/internals/clone-panel all operate on the ONE
     # instance born in the first - one dependency chain, one group view
     birth = group_view(raw, home, "AtomicBirth")
+    guarded(test_minted_names, raw, r, birth)
     source = guarded(test_atomic_birth, raw, r, birth)
     if source:
         guarded(test_widget_stamp, raw, r, birth, source)

@@ -12,7 +12,9 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "node.h"
 #include "object.h"
@@ -234,12 +236,45 @@ NodeObj GetMainView(NodeObj instance)
 	return instance;
 }
 
+/* THE PALETTE HAS ITS OWN ORDER, alphabetical, stated here rather than
+   inherited from whatever order the registry walk happens to yield. It
+   used to come out alphabetical by accident - the walk followed library
+   order and the directory scan handed libraries over filename-ordered -
+   which meant changing the shape of the registry silently rearranged the
+   palette, and a control landing in a different slot drew on top of its
+   neighbours. Sorting here is what makes that never happen again. */
+static int PaletteNameCmp(const void *a, const void *b)
+{
+	char *na = GetNameStr(*(NodeObj *) a);
+	char *nb = GetNameStr(*(NodeObj *) b);
+
+	return strcasecmp(na ? na : "", nb ? nb : "");
+}
+
+#define PALETTE_MAX 512
+
+/* append a name to one of BuildPalette's outcome lists */
+static void PaletteNote(char *buf, int size, int *len, char *name)
+{
+	int room = size - *len;
+
+	if (room > 1)
+		*len += snprintf(buf + *len, room, "%s%s", *len ? "," : "", name ? name : "?");
+}
+
 void BuildPalette(void){
 
-	NodeObj library, class, inst;
+	NodeObj class, inst;
 	int slot, pass;
 	char alias[128];
 	char dbg[300];
+	char found[1200];			/* every class the registry walk returned */
+	int  flen = 0, n = 0;
+	/* WHERE EVERY CLASS WENT. One bucket per outcome, each a list, so a
+	   palette that is missing things says which things and which decision
+	   dropped them - rather than a count that only says "fewer". */
+	char bPlaced[1200], bNoStart[600], bExcluded[600], bNoView[600], bNoMake[600];
+	int  lPlaced = 0, lNoStart = 0, lExcluded = 0, lNoView = 0, lNoMake = 0;
 
 	/* no forced Mode, no Deletable protection: the palette is just a     */
 	/* View like Root or any panel, and everything in it deletes like     */
@@ -279,14 +314,36 @@ void BuildPalette(void){
 	/* two passes so the simple things come first: a bare control has no
 	   panel of its own, a widget does (Widget_Publish stamps it). Sorting
 	   here beats sorting by eye every time the palette is opened. */
+	/* WHAT THE WALK FOUND, in the order it found it. The palette is the
+	   first thing that enumerates every class, so this is where a walk
+	   that reaches only part of the registry shows up - and it shows up
+	   as a list you can read against what loaded, not as a missing icon. */
+	found[0] = bPlaced[0] = bNoStart[0] = bExcluded[0] = bNoView[0] = bNoMake[0] = '\0';
+
 	for (pass = 0; pass < 2; pass++)
 	{
-		library = GetChild(GetRegObjList());
-		while (library)
+		NodeObj order[PALETTE_MAX];
+		int count = 0, i;
+
 		{
-			class = GetChild(library);
+			class = FirstClass();
 			while (class)
 			{
+				if (pass == 0)
+				{
+					int room = (int) sizeof(found) - flen;
+
+					n++;
+					if (room > 1)
+						flen += snprintf(found + flen, room, "%s%s",
+										 flen ? "," : "", GetNameStr(class));
+
+					if (!GetPropLong(class, "InstanceStart"))
+						PaletteNote(bNoStart, sizeof(bNoStart), &lNoStart, GetNameStr(class));
+					else if (IsPaletteExcluded(GetNameStr(class)))
+						PaletteNote(bExcluded, sizeof(bExcluded), &lExcluded, GetNameStr(class));
+				}
+
 				/* no InstanceStart means the class is not instantiable at
 				   all - Object/Presentation/Control/Widget are places in the
 				   tree, not things to drop on a canvas. Asked, not listed. */
@@ -294,47 +351,127 @@ void BuildPalette(void){
 					&& GetPropInt(class, "Panel") == pass
 					&& !IsPaletteExcluded(GetNameStr(class)))
 				{
-					/* create + name + register in one call - a palette instance
-					   builds its panel (and, e.g., ScriptBox its inner host) in its
-					   deferred build, which needs it to resolve by path like any
-					   placed object */
-					inst = Widget_Create(PaletteView, GetNameStr(class), GetNameStr(class));
-					if (inst && GetMainView(inst)) {
-						SetPropInt(inst, "X", 10 + (slot % 3) * 80);
-						SetPropInt(inst, "Y", 10 + (slot / 3) * 66);
-						slot++;
-
-						snprintf(dbg, sizeof(dbg),
-						         "palette pass=%d slot=%d %s at X=%s Y=%s size W=%s H=%s",
-						         pass, slot - 1, GetNameStr(class),
-						         GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
-						         GetPropStr(inst, "W"), GetPropStr(inst, "H"));
-						DebugPrint(dbg, __FILE__, __LINE__, PLACE);
-
-						/* the alias is this instance's full path, same         */
-						/* convention as a client-created instance's /Root/...   */
-						/* (createInstance, app.js) - see the doc comment above  */
-						/* and Bridge_Set's Bridge_Rename for what happens if    */
-						/* it ever moves out of here later.                      */
-						snprintf(alias, sizeof(alias), "/Root/Palette/%s", GetNameStr(class));
-						SetPropStr(Palette, alias, alias);
-					}
-					else if (inst)
-						/* no main view - not a placeable palette item (an atomic
-						   control lives INSIDE widgets, never on its own). Undo the
-						   create so it is not named/registered into the palette. */
-					{
-						snprintf(dbg, sizeof(dbg),
-						         "palette pass=%d %s has no main view - destroyed, no slot",
-						         pass, GetNameStr(class));
-						DebugPrint(dbg, __FILE__, __LINE__, PLACE);
-						Widget_Destroy(inst);
-					}
+					if (count < PALETTE_MAX)
+						order[count++] = class;
+					else
+						DebugPrint("palette: more classes than PALETTE_MAX - "
+								   "the rest are not shown",
+								   __FILE__, __LINE__, ERROR);
 				}
 
-				class = GetNextSibling(class);
+				class = NextClass(class);
 			}
-			library = GetNextSibling(library);
+		}
+
+		qsort(order, (size_t) count, sizeof(NodeObj), PaletteNameCmp);
+
+		for (i = 0; i < count; i++)
+		{
+			class = order[i];
+
+			/* create + name + register in one call - a palette instance
+			   builds its panel (and, e.g., ScriptBox its inner host) in its
+			   deferred build, which needs it to resolve by path like any
+			   placed object */
+			inst = Widget_Create(PaletteView, GetNameStr(class), GetNameStr(class));
+			if (!inst)
+				PaletteNote(bNoMake, sizeof(bNoMake), &lNoMake, GetNameStr(class));
+			if (inst && GetMainView(inst)) {
+				PaletteNote(bPlaced, sizeof(bPlaced), &lPlaced, GetNameStr(class));
+				SetPropInt(inst, "X", 10 + (slot % 3) * 80);
+				SetPropInt(inst, "Y", 10 + (slot / 3) * 66);
+				slot++;
+
+				snprintf(dbg, sizeof(dbg),
+				         "palette pass=%d slot=%d %s at X=%s Y=%s size W=%s H=%s",
+				         pass, slot - 1, GetNameStr(class),
+				         GetPropStr(inst, "X"), GetPropStr(inst, "Y"),
+				         GetPropStr(inst, "W"), GetPropStr(inst, "H"));
+				DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+
+				/* the alias is this instance's full path, same         */
+				/* convention as a client-created instance's /Root/...   */
+				/* (createInstance, app.js) - see the doc comment above  */
+				/* and Bridge_Set's Bridge_Rename for what happens if    */
+				/* it ever moves out of here later.                      */
+				snprintf(alias, sizeof(alias), "/Root/Palette/%s", GetNameStr(class));
+				SetPropStr(Palette, alias, alias);
+			}
+			else if (inst)
+				/* no main view - not a placeable palette item (an atomic
+				   control lives INSIDE widgets, never on its own). Undo the
+				   create so it is not named/registered into the palette. */
+			{
+				snprintf(dbg, sizeof(dbg),
+				         "palette pass=%d %s has no main view - destroyed, no slot",
+				         pass, GetNameStr(class));
+				DebugPrint(dbg, __FILE__, __LINE__, PLACE);
+				Widget_Destroy(inst);
+				PaletteNote(bNoView, sizeof(bNoView), &lNoView, GetNameStr(class));
+			}
+		}
+	}
+
+	{
+		/* its own buffer, sized for the WORST of the lines below - the
+		   longest is the container read-back, a 200-byte path plus the
+		   1200-byte member list plus its wording. Truncating any of these
+		   would look exactly like the fault they exist to find, which is
+		   why this is sized against the inputs rather than by eye. */
+		char line[1600];
+
+		/* PROG_FLOW, not PLACE: this is a once-per-boot summary and it sits
+		   beside "list of objs" and "classes started" - the three lines that
+		   together say what loaded, what started, and what the walk can
+		   reach. A diagnostic nobody sees at the default level is not a
+		   diagnostic. */
+		snprintf(line, sizeof(line), "the class walk found %d: %s", n, found);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		snprintf(line, sizeof(line), "palette placed: %s", bPlaced);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		snprintf(line, sizeof(line), "palette not instantiable (no InstanceStart): %s", bNoStart);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		snprintf(line, sizeof(line), "palette excluded: %s", bExcluded);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		snprintf(line, sizeof(line), "palette could NOT be created: %s", bNoMake);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		snprintf(line, sizeof(line), "palette created but no main view: %s", bNoView);
+		DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
+
+		/* GROUND TRUTH, read back out of the tree rather than from what the
+		   loop above thinks it did. "placed" is a claim; this is the
+		   container's actual contents, and the two disagreeing is the whole
+		   diagnosis. */
+		{
+			char ppath[200];
+			char have[1200];
+			int  hlen = 0, hn = 0;
+			NodeObj m;
+			char *c;
+
+			have[0] = '\0';
+			if (PathOfInstance(PaletteView, ppath, sizeof(ppath)))
+			{
+				for (m = FirstInstance(); m; m = NextInstance(m))
+				{
+					c = GetPropStr(m, "Container");
+					if (!c || strcmp(c, ppath) != 0)
+						continue;
+					hn++;
+					PaletteNote(have, sizeof(have), &hlen, GetPropStr(m, "Name"));
+				}
+				snprintf(line, sizeof(line), "palette '%s' actually holds %d: %s",
+						 ppath, hn, have);
+			}
+			else
+				snprintf(line, sizeof(line), "palette has no path - nothing can be in it");
+
+			DebugPrint(line, __FILE__, __LINE__, PROG_FLOW);
 		}
 	}
 }

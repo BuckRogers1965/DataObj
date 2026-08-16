@@ -606,6 +606,10 @@ NodeObj MsgFromNode(void)
 	return curFromNode;
 }
 
+/* object.c, same library - declared here rather than including object.h,
+   which redeclares the node types this file defines */
+int PuntToClass(NodeObj instance, int message, NodeObj data);
+
 void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNode)
 {
 	NodeObj toInstance, portnode, chunk;
@@ -666,6 +670,13 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 		SetName(chunk, port);
 		SetValueStr(chunk, value);
 		verdict = onmsg(toInstance, message, chunk);
+
+		/* refused by the instance: offer it up the class chain before
+		   giving up on it. rtrn_dropped means "not mine", and until this
+		   existed that was the end of the road - see PuntToClass. */
+		if (verdict == rtrn_dropped)
+			verdict = PuntToClass(toInstance, message, chunk);
+
 		DelNode(chunk);
 
 		if (verdict == rtrn_propagate)
@@ -673,6 +684,28 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 
 		curFromNode = prevFrom;
 		return;
+	}
+
+	/* NO HANDLER ON THE INSTANCE IS ALSO "not mine". The instance has no
+	   opinion about this property, so the class chain gets its turn before
+	   the universal default applies - that is what lets a class answer for
+	   a property none of its instances declared, which is most of what a
+	   class is for. Handled means the chain took it; anything else falls
+	   through to the store, same as it always did. */
+	{
+		int verdict;
+
+		chunk = NewNode(STRING);
+		SetName(chunk, port);
+		SetValueStr(chunk, value);
+		verdict = PuntToClass(toInstance, message, chunk);
+		DelNode(chunk);
+
+		if (verdict == rtrn_handled)
+		{
+			curFromNode = prevFrom;
+			return;
+		}
 	}
 
 	SetPropStr(toInstance, port, value);

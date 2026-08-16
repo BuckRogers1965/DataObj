@@ -928,7 +928,7 @@ static void DestroyContentsAsync(NodeObj container, void (*onDone)(NodeObj conta
 {
 	char       ownPath[300], prefix[320], pbuf[300], dbg[512];
 	int        preLen, n = 0;
-	NodeObj    lib, cls, mem, snap;
+	NodeObj    mem, snap;
 	DestroyCtx *dc;
 
 	DebugPrint("DESTROY-CONTENTS-ASYNC enter", __FILE__, __LINE__, IMPORT);
@@ -946,9 +946,7 @@ static void DestroyContentsAsync(NodeObj container, void (*onDone)(NodeObj conta
 	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
 
 	snap = NewNode(INTEGER);
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-	  for (mem = GetChild(cls); mem; mem = GetNextSibling(mem))
+	for (mem = FirstInstance(); mem; mem = NextInstance(mem))
 	  {
 		if (!PathOfInstance(mem, pbuf, sizeof(pbuf)))
 			continue;
@@ -1259,12 +1257,10 @@ static void Push(InstanceData *local, NodeObj node)
    passing the previously-returned instance back walks the whole set once. */
 static NodeObj NextContainerChild(char *path, NodeObj after)
 {
-	NodeObj lib, cls, inst;
+	NodeObj inst;
 	int seen = (after == NULL);
 
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-			for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
 			{
 				char *c;
 				if (!seen)

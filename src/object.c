@@ -33,6 +33,128 @@ static NSObj * GetPathIndex(void)
 	return PathIndex;
 }
 
+/* CLASS NAME -> CLASS NODE, for the same reason the path index exists: a
+   name lookup should cost the length of the name, not a walk over every
+   class of every library. FindClass was that walk, and bring-up rebuilt a
+   throwaway copy of this index on every sweep.
+
+   It is maintained by RegisterClass/UnRegisterClass, so it is correct
+   whatever shape the registry tree has - which is what lets a class move
+   out of its library's child list without any lookup noticing. */
+static NSObj * ClassIndex = NULL;
+
+static NSObj * GetClassIndex(void)
+{
+	if (!ClassIndex)
+		ClassIndex = NSCreate();
+	return ClassIndex;
+}
+
+/* THE CONTAINER'S OWN LIST OF WHAT IS IN IT.
+
+   "What is in this container" was answered by walking every instance in
+   the session and string-comparing its Container - five copies of that
+   scan, for the question everything asks most. The answer is known at the
+   moment it becomes true: RegisterPath already resolves the container in
+   order to tell it about the arrival. Keeping what it is told turns a walk
+   of the whole session into a walk of a short list.
+
+   POINTERS, NOT CHILDREN. An instance is already a child of its class and
+   a sibling of that class's other instances - one parent, one nextSib,
+   both spent on the type tree. So the list is entries under a Members
+   property, each standing for one instance. Containment remains the
+   Container property; this is an index of it, held where the announcement
+   already arrives.
+
+   The list node is LONG-typed so IsPortableProp refuses it: an index is
+   not data, and neither a clone nor a flow file should carry one. */
+static NodeObj MembersOf(NodeObj container, int create)
+{
+	NodeObj list;
+
+	if (!container)
+		return NULL;
+
+	list = GetPropNode(container, "Members");
+	if (!list && create)
+	{
+		list = NewNode(LONG);
+		SetName(list, "Members");
+		AddProp(container, list);
+	}
+
+	return list;
+}
+
+static void AddMember(NodeObj container, NodeObj inst)
+{
+	NodeObj list, entry;
+
+	if (!container || !inst)
+		return;
+
+	list = MembersOf(container, 1);
+	if (!list)
+		return;
+
+	/* named twice is not two members - RegisterPath is called again on
+	   every rename, and the instance is already in here */
+	for (entry = GetChild(list); entry; entry = GetNextSibling(entry))
+		if ((NodeObj) GetPropLong(entry, "Instance") == inst)
+			return;
+
+	entry = NewNode(INTEGER);
+	SetName(entry, "Member");
+	SetPropLong(entry, "Instance", (long) inst);
+	AppendChild(list, entry);
+}
+
+static void RemoveMember(NodeObj container, NodeObj inst)
+{
+	NodeObj list = MembersOf(container, 0);
+	NodeObj entry;
+
+	for (entry = list ? GetChild(list) : NULL; entry; entry = GetNextSibling(entry))
+		if ((NodeObj) GetPropLong(entry, "Instance") == inst)
+		{
+			DelSibling(entry);
+			DelNode(entry);
+			return;
+		}
+}
+
+/* walk it as:  for (e = FirstMember(c); e; e = GetNextSibling(e))
+                    inst = MemberInstance(e);                        */
+NodeObj FirstMember(NodeObj container)
+{
+	NodeObj list = MembersOf(container, 0);
+
+	return list ? GetChild(list) : NULL;
+}
+
+NodeObj MemberInstance(NodeObj entry)
+{
+	return entry ? (NodeObj) GetPropLong(entry, "Instance") : NULL;
+}
+
+/* the container of a path, or NULL for a root - the same split
+   RegisterPath and UnregisterPath both need */
+static NodeObj ContainerOfPath(char *path)
+{
+	char cpath[300], *slash;
+
+	if (!path || !path[0])
+		return NULL;
+
+	snprintf(cpath, sizeof(cpath), "%s", path);
+	slash = strrchr(cpath, '/');
+	if (!slash || slash == cpath)
+		return NULL;
+	*slash = '\0';
+
+	return ResolvePath(cpath);
+}
+
 void RegisterPath(char * path, NodeObj inst)
 {
 	NodeObj container;
@@ -57,14 +179,32 @@ void RegisterPath(char * path, NodeObj inst)
 	*slash = '\0';
 	container = ResolvePath(cpath);
 	if (container)
+	{
+		/* the event, for whoever is watching */
 		SetPropStr(container, "LastMember", path);
+		/* and the record, for whoever asks later */
+		AddMember(container, inst);
+	}
 }
 
+/* Arrival was announced and departure was silent, which is why nothing
+   could keep a list: it would go stale on the first delete. This is the
+   other edge - resolve first, un-name, then take it out of its
+   container's list. */
 void UnregisterPath(char * path)
 {
+	NodeObj inst, container;
+
 	if (!path || !path[0])
 		return;
+
+	inst = ResolvePath(path);
+	container = ContainerOfPath(path);
+
 	NSDelete(GetPathIndex(), path);
+
+	if (inst && container)
+		RemoveMember(container, inst);
 }
 
 NodeObj ResolvePath(char * path)
@@ -326,6 +466,23 @@ void SetClassParent(NodeObj class, char *parentname)
 
 	SetPropStr(class, "Parent", parentname);
 	SetPropLong(class, "ParentClass", (long) parent);
+
+	/* AND MOVE IT. The parent link is the walkable relation, so it is the
+	   one that gets the tree: a class becomes a child of its parent class,
+	   and GetParent walks instance -> class -> ... -> Object with no
+	   lookup at all.
+
+	   Re-pointable on purpose. Calling this again moves the class again,
+	   which is what lets a class be spliced in between an existing class
+	   and its parent - a module whose whole content is one overridden
+	   handler, dropped in the scan path, with neither end recompiled or
+	   even aware. Nothing caches the resolved chain, so a splice takes
+	   effect on the next message. */
+	if (GetParent(class) != parent)
+	{
+		DelSibling(class);			/* out of the library, or the old parent */
+		AddChild(parent, class);
+	}
 }
 
 /* true once every entry's file is Loaded AND the class it named exists at an */
@@ -340,7 +497,6 @@ void SetClassParent(NodeObj class, char *parentname)
    they were being called once per dependency per pass. */
 typedef struct {
 	NSObj *files;		/* "widget.object"  -> NodeObj library */
-	NSObj *classes;		/* "Widget"         -> NodeObj class   */
 } DepIndex;
 
 /* a library and how many of its dependencies were unmet when the working
@@ -357,15 +513,6 @@ static int DepRankCmp(const void *a, const void *b)
 
 /* every class a library registered becomes findable the moment it starts -
    nothing can depend on a class before its library has run ClassStart */
-static void IndexLibraryClasses(DepIndex *ix, NodeObj library)
-{
-	NodeObj class;
-
-	for (class = GetChild(library); class; class = GetNextSibling(class))
-		if (GetNameStr(class))
-			NSInsert(ix->classes, GetNameStr(class), (long) class);
-}
-
 /* ONE dependency entry. Once satisfied it is stamped Met and never asked
    about again - so the total work is one resolution per declared
    dependency, no matter how many times its library is revisited. */
@@ -382,8 +529,11 @@ static int DependencyMet(DepIndex *ix, NodeObj entry)
 	if (!depLib || !GetPropInt(depLib, "Loaded"))
 		return 0;
 
+	/* the class index is permanent and maintained by RegisterClass, so a
+	   class is findable the instant its module registers it - no per-sweep
+	   copy to build and nothing to keep in step */
 	classname = GetPropStr(entry, "Class");
-	depClass = classname ? (NodeObj) NSSearch(ix->classes, classname) : NULL;
+	depClass = FindClass(classname);
 	if (!ClassVersionOk(depClass, GetPropStr(entry, "Major"),
 						GetPropStr(entry, "Minor")))
 		return 0;
@@ -564,18 +714,17 @@ loadClasses(void){
 			return;
 		}
 
-		/* index every library by the file it came from, and every class of
-		   everything ALREADY started (the core's own) - that is the whole
-		   starting state a dependency can resolve against */
+		/* index every library by the file it came from. Classes need no
+		   pass of their own any more: RegisterClass keeps the permanent
+		   class index, so the core's own classes are already in it and
+		   every module's appear the instant its ClassStart registers
+		   them. */
 		ix.files   = NSCreate();
-		ix.classes = NSCreate();
 		for (library = GetChild(RegObjList); library; library = GetNextSibling(library)) {
 			char *file = GetPropStr(library, "File");
 
 			if (file && file[0])
 				NSInsert(ix.files, file, (long) library);
-			if (GetPropInt(library, "Loaded"))
-				IndexLibraryClasses(&ix, library);
 		}
 
 		/* the working list: every unstarted library, FEWEST DEPENDENCIES
@@ -590,7 +739,6 @@ loadClasses(void){
 				DebugPrint("loadClasses: out of memory ranking the working list",
 						   __FILE__, __LINE__, ERROR);
 				NSRelease(ix.files);
-				NSRelease(ix.classes);
 				free(work);
 				return;
 			}
@@ -627,7 +775,6 @@ loadClasses(void){
 				ClassStart = (msgobj) GetPropLong(library, "ClassStart");
 				if (ClassStart) ClassStart(library, 0, NULL);
 				SetPropInt(library, "Loaded", 1);
-				IndexLibraryClasses(&ix, library);	/* now findable by name */
 				remaining--;
 				started++;
 				stalled = 0;
@@ -678,7 +825,6 @@ loadClasses(void){
 		}
 
 		NSRelease(ix.files);
-		NSRelease(ix.classes);
 		free(work);
 		madeProgress = started > 0;
 		(void) madeProgress;
@@ -796,6 +942,215 @@ NodeObj AuthenticateUser(NodeObj main, char *name, char *token){
 	return user;
 }
 
+/* WALKING THE REGISTRY WITHOUT KNOWING ITS SHAPE.
+
+   Every caller that wanted "every class" or "every instance" wrote the
+   nested loop itself - seventeen of them, each spelling out
+   RegObjList -> library -> class -> instance. That is a private copy of the
+   registry's shape in seventeen places, and every one of them has to be
+   found and edited the day the shape changes.
+
+   A cursor instead of a nested loop. `for (c = FirstClass(); c; c =
+   NextClass(c))` reads the same, keeps early exits working, and asks the
+   registry where to go next instead of assuming. What a class's parent is,
+   and where instances hang, becomes these four functions' business and
+   nobody else's.
+
+   GetParent is what makes the cursor possible: a node knows where it sits,
+   so a walk can resume from any node without carrying the levels above it
+   in local variables. */
+
+/* A class node's children are its subclasses AND its instances, so every
+   step of both walks asks which it is looking at. IsClass is stamped by
+   RegisterClass and by nothing else. */
+static int IsClassNode(NodeObj n)
+{
+	return n && GetPropInt(n, "IsClass");
+}
+
+static NodeObj FirstClassChild(NodeObj n)
+{
+	NodeObj c;
+
+	for (c = n ? GetChild(n) : NULL; c; c = GetNextSibling(c))
+		if (IsClassNode(c))
+			return c;
+
+	return NULL;
+}
+
+static NodeObj NextClassSibling(NodeObj n)
+{
+	for (n = n ? GetNextSibling(n) : NULL; n; n = GetNextSibling(n))
+		if (IsClassNode(n))
+			return n;
+
+	return NULL;
+}
+
+/* the first class of this library or, failing that, of any library after
+   it - a library that registered nothing, or whose classes have all moved
+   under their parents, is skipped rather than ending the walk */
+static NodeObj FirstClassFrom(NodeObj library)
+{
+	NodeObj class;
+
+	for (; library; library = GetNextSibling(library))
+		if ((class = FirstClassChild(library)))
+			return class;
+
+	return NULL;
+}
+
+NodeObj FirstClass(void)
+{
+	NodeObj root = GetRegObjList();
+
+	return FirstClassFrom(root ? GetChild(root) : NULL);
+}
+
+/* depth first, because the type tree is a tree: down into subclasses,
+   then across, then out to the next root class and eventually the next
+   library. Every class is reached exactly once whether it sits under its
+   library (a root, like Object) or under its parent class. */
+NodeObj NextClass(NodeObj class)
+{
+	NodeObj n, p;
+
+	if (!class)
+		return NULL;
+
+	if ((n = FirstClassChild(class)))
+		return n;
+
+	for (p = class; IsClassNode(p); p = GetParent(p))
+		if ((n = NextClassSibling(p)))
+			return n;
+
+	/* climbed past the last root class: p is the library that held it */
+	return FirstClassFrom(p ? GetNextSibling(p) : NULL);
+}
+
+static NodeObj FirstInstanceChild(NodeObj class)
+{
+	NodeObj c;
+
+	for (c = class ? GetChild(class) : NULL; c; c = GetNextSibling(c))
+		if (!IsClassNode(c))
+			return c;
+
+	return NULL;
+}
+
+static NodeObj NextInstanceSibling(NodeObj inst)
+{
+	for (inst = inst ? GetNextSibling(inst) : NULL; inst; inst = GetNextSibling(inst))
+		if (!IsClassNode(inst))
+			return inst;
+
+	return NULL;
+}
+
+/* the first instance of this class or of any class after it */
+static NodeObj FirstInstanceFrom(NodeObj class)
+{
+	NodeObj inst;
+
+	for (; class; class = NextClass(class))
+		if ((inst = FirstInstanceChild(class)))
+			return inst;
+
+	return NULL;
+}
+
+NodeObj FirstInstance(void)
+{
+	return FirstInstanceFrom(FirstClass());
+}
+
+NodeObj NextInstance(NodeObj inst)
+{
+	NodeObj next;
+
+	if (!inst)
+		return NULL;
+
+	if ((next = NextInstanceSibling(inst)))
+		return next;
+
+	return FirstInstanceFrom(NextClass(GetParent(inst)));
+}
+
+/* THE DISPATCH LADDER.
+
+   A handler that returns rtrn_dropped has said "not mine". Until now that
+   ended there. It is the punt signal - already specified, already returned
+   by every handler that declines - and this gives it somewhere to go:
+
+     an instance that drops    -> its class
+     a class that drops        -> its parent class
+     Object                    -> handles it or drops it, and a drop there
+                                  is a real drop
+
+   A class opts in by putting a ClassMsg on its class node; a class with
+   none is simply transparent and the message carries on up. So this
+   changes nothing until a class implements one.
+
+   WALKED LIVE, EVERY TIME. Nothing here caches the chain, because a class
+   can be spliced in between an existing class and its parent at runtime -
+   a module whose whole content is one overridden handler, dropped in the
+   scan path, with neither end recompiled or aware. A cached chain is
+   exactly what would make such a splice not take effect. The cost is a
+   pointer hop per level on a message that was already refused.
+
+   The property the message was about is the data node's name, same
+   convention as every other handler. */
+int PuntToClass(NodeObj instance, MsgId message, NodeObj data)
+{
+	NodeObj class;
+	msgobj  handler;
+	int     verdict;
+	char    dbg[300];
+
+	for (class = ClassOfInstance(instance); IsClassNode(class); class = GetParent(class))
+	{
+		handler = (msgobj) GetPropLong(class, "ClassMsg");
+		if (!handler)
+			continue;
+
+		verdict = handler(instance, message, data);
+
+		snprintf(dbg, sizeof(dbg), "PUNT '%s'.%s -> class '%s' said %s",
+				 GetPropStr(instance, "Name") ? GetPropStr(instance, "Name") : "?",
+				 data && GetNameStr(data) ? GetNameStr(data) : "?",
+				 GetNameStr(class) ? GetNameStr(class) : "?",
+				 verdict == rtrn_handled   ? "HANDLED" :
+				 verdict == rtrn_propagate ? "PROPAGATE" :
+				 verdict == rtrn_dropped   ? "dropped, punting on" : "an unknown code");
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+
+		if (verdict != rtrn_dropped)
+			return verdict;
+	}
+
+	return rtrn_dropped;
+}
+
+/* the class an instance is one of, and the library a class came from -
+   asked rather than remembered, so a caller that has one end of the walk
+   can get the other without having carried it */
+NodeObj ClassOfInstance(NodeObj inst)
+{
+	return inst ? GetParent(inst) : NULL;
+}
+
+/* the tree above a class is its PARENT CLASS now, so the library it came
+   from is the property RegisterClass stamped */
+NodeObj LibraryOfClass(NodeObj class)
+{
+	return class ? (NodeObj) GetPropLong(class, "Library") : NULL;
+}
+
 /* the registry root - RegObjList -> libraries -> classes - for anything */
 /* that needs to walk every class (a palette) rather than find one by    */
 /* name; GetChild/GetNextSibling at both levels is all that takes        */
@@ -809,19 +1164,10 @@ NodeObj GetRegObjList(void){
 NodeObj
 FindClass(char * classname){
 
-	NodeObj library = GetChild(RegObjList);
-	NodeObj class;
+	if (!classname || !classname[0])
+		return NULL;
 
-	while (library) {
-		class = GetChild(library);
-		while (class) {
-			if (CmpName(class, classname))
-				return class;
-			class = GetNextSibling(class);
-		}
-		library = GetNextSibling(library);
-	}
-	return NULL;
+	return (NodeObj) NSSearch(GetClassIndex(), classname);
 }
 
 /* The same walk, a different question: which class SHOWS a property of     */
@@ -832,21 +1178,15 @@ FindClass(char * classname){
 /* without naming one.                                                      */
 NodeObj FindClassRendering(int widget)
 {
-	NodeObj library = GetChild(RegObjList);
 	NodeObj class;
 
 	if (!widget)
 		return NULL;
 
-	while (library) {
-		class = GetChild(library);
-		while (class) {
-			if (GetPropInt(class, "Renders") == widget)
-				return class;
-			class = GetNextSibling(class);
-		}
-		library = GetNextSibling(library);
-	}
+	for (class = FirstClass(); class; class = NextClass(class))
+		if (GetPropInt(class, "Renders") == widget)
+			return class;
+
 	return NULL;
 }
 
@@ -1174,6 +1514,26 @@ NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
 	{
 		DeleteInstance(inst);
 		return NULL;
+	}
+
+	/* NAMED FOR WHAT IT STANDS FOR - the instance it aliases and the
+	   property: bob_1's Value is bob_1_Value. CreateObject names a new
+	   thing after its class, which for an alias says only what draws it
+	   and nothing about which thing it is a doorway onto. Minted in the
+	   container so two aliases of the same property are still distinct. */
+	{
+		char base[192], newname[192], cpath[300];
+		char *tn = GetPropStr(targetInst, "Name");
+
+		snprintf(base, sizeof(base), "%s_%s",
+				 (tn && tn[0]) ? tn : GetNameStr(class), propname);
+
+		if (PathOfInstance(container, cpath, sizeof(cpath)))
+			MintFreshName(base, cpath, newname, sizeof(newname));
+		else
+			snprintf(newname, sizeof(newname), "%s", base);
+
+		SetOrDeliverProp(inst, "Name", newname);
 	}
 
 	snprintf(dbg, sizeof(dbg), "CreateAlias: '%s'.%s -> a %s pointing at it",
@@ -1535,20 +1895,27 @@ static void InstancePath(NodeObj inst, char *out, int outlen)
 /* the engine's own registry walk - names are unique within a container     */
 static int NameTakenIn(char *name, char *containerPath)
 {
-	NodeObj library, class, inst;
+	NodeObj inst;
 	char *cont, *nm;
 
-	for (library = GetChild(RegObjList); library; library = GetNextSibling(library))
-		for (class = GetChild(library); class; class = GetNextSibling(class))
-			for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
-			{
-				cont = GetPropStr(inst, "Container");
-				if (strcmp(cont ? cont : "", containerPath ? containerPath : "") != 0)
-					continue;
-				nm = GetPropStr(inst, "Name");
-				if (nm && strcmp(nm, name) == 0)
-					return 1;
-			}
+	/* THE SCAN, DELIBERATELY, not the Members index. The index holds
+	   NAMED members - RegisterPath is what puts them there - and naming is
+	   the translator's job, done after the engine returns (see
+	   Bridge_RegisterClone). This question is asked WHILE a clone or a
+	   load is placing siblings: their Container is set, their name is
+	   being minted right now, and none of them are in any index yet.
+	   Asking the Container property is the only thing that sees them, and
+	   minting against a stale answer hands out a name already taken. */
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
+	{
+		cont = GetPropStr(inst, "Container");
+		if (strcmp(cont ? cont : "", containerPath ? containerPath : "") != 0)
+			continue;
+		nm = GetPropStr(inst, "Name");
+		if (nm && strcmp(nm, name) == 0)
+			return 1;
+	}
+
 	return 0;
 }
 
@@ -1620,25 +1987,26 @@ static void CloneRelinkProps(NodeObj src, NodeObj clone, NodeObj map)
 /* first, because cloning ADDS instances to the same registry this walks.  */
 static void CloneGroupPass(char *srcPath, char *clonePath, NodeObj map, int pass)
 {
-	NodeObj list, library, class, inst, entry, clone;
+	NodeObj list, inst, entry, clone;
 	char *cont, *classname, *nm;
 	char childSrc[256], childClone[256], key[24];
 	char dbg[300];
 	int n = 0;
 
+	/* the scan, for the same reason as NameTakenIn: a clone of a clone
+	   reads members that the engine placed but has not yet named, and the
+	   index only knows named ones */
 	list = NewNode(INTEGER);
-	for (library = GetChild(RegObjList); library; library = GetNextSibling(library))
-		for (class = GetChild(library); class; class = GetNextSibling(class))
-			for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
-			{
-				cont = GetPropStr(inst, "Container");
-				if (!cont || strcmp(cont, srcPath) != 0)
-					continue;
-				if (GetPropInt(inst, "_Hidden"))
-					continue;	/* plumbing is not content */
-				snprintf(key, sizeof(key), "%d", n++);
-				SetPropLong(list, key, (long) inst);
-			}
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
+	{
+		cont = GetPropStr(inst, "Container");
+		if (!cont || strcmp(cont, srcPath) != 0)
+			continue;
+		if (GetPropInt(inst, "_Hidden"))
+			continue;	/* plumbing is not content */
+		snprintf(key, sizeof(key), "%d", n++);
+		SetPropLong(list, key, (long) inst);
+	}
 
 	snprintf(dbg, sizeof(dbg), "CLONE pass %d: %d member(s) in '%s' -> '%s'",
 			 pass, n, srcPath, clonePath);
@@ -2202,9 +2570,35 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
 		}
 
+		/* refused by the instance: offer it up the class chain before
+		   giving up on it (PuntToClass) */
+		if (verdict == rtrn_dropped)
+		{
+			chunk = NewNode(STRING);
+			SetName(chunk, propname);
+			SetValueStr(chunk, value);
+			verdict = PuntToClass(owner, msg_send, chunk);
+			DelNode(chunk);
+		}
+
 		if (verdict == rtrn_propagate)
 			SetPropStr(owner, propname, value);
 		return;
+	}
+
+	/* no handler on the instance is also "not mine" - the class chain gets
+	   its turn before the universal default (see DeliverToSubscriber) */
+	{
+		int verdict;
+
+		chunk = NewNode(STRING);
+		SetName(chunk, propname);
+		SetValueStr(chunk, value);
+		verdict = PuntToClass(propnode ? owner : target, msg_send, chunk);
+		DelNode(chunk);
+
+		if (verdict == rtrn_handled)
+			return;
 	}
 
 	SetPropStr(propnode ? owner : target, propname, value);
@@ -2386,6 +2780,57 @@ NodeObj RegisterLibrary(NodeObj library){
 	return library;
 }
 
+/* THE END OF THE CHAIN, and it answers for everything.
+
+   Storing a value is not a special case in the delivery code, it is the
+   root class's behaviour - so it lives here, and a property write nobody
+   claimed is HANDLED rather than unhandled. That is what keeps the log
+   below meaningful: it only fires for a message that genuinely nothing
+   wanted.
+
+   The one thing it has to tell apart is "nobody had an opinion" from
+   "somebody refused it", because a disabled control returning
+   rtrn_dropped must not have its value stored anyway. It reads that off
+   the property itself: an OnMsg means someone was asked and said no.
+
+   Anything that reaches here and cannot be handled is logged and dropped.
+   A message nothing wanted is not necessarily an error, but it must never
+   be silent - "nothing happened and nobody said why" is the most
+   expensive kind of bug there is. */
+static int ObjectClassMsg(NodeObj instance, MsgId message, NodeObj data)
+{
+	char    dbg[400];
+	char   *prop = (data && GetNameStr(data)) ? GetNameStr(data) : NULL;
+	char   *val  = data ? GetValueStr(data) : NULL;
+	NodeObj propnode;
+
+	if (instance && prop && message != msg_eof)
+	{
+		propnode = GetPropNode(instance, prop);
+
+		/* no handler anywhere below: nobody had an opinion, so the default
+		   applies and that IS handling it */
+		if (!propnode || !GetPropLong(propnode, "OnMsg"))
+		{
+			SetPropStr(instance, prop, val ? val : "");
+			return rtrn_handled;
+		}
+	}
+
+	/* WIRE, so the default log reads exactly as it did before this chain
+	   existed. A refusal is already reported where it happened ("handler
+	   said DROPPED"); saying it again at the top would be the same event
+	   twice, and a disabled control refuses constantly. This line is the
+	   end of the trace for anyone following one message, not news. */
+	snprintf(dbg, sizeof(dbg),
+			 "UNHANDLED at Object: '%s'.%s = '%.60s' (msg %d) - dropped",
+			 (instance && GetPropStr(instance, "Name")) ? GetPropStr(instance, "Name") : "?",
+			 prop ? prop : "?", val ? val : "", (int) message);
+	DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+
+	return rtrn_dropped;
+}
+
 /* The one class the core itself provides: Object, the end of the chain and
    the ABI anchor - every module declares Object against CORE_LIBRARY_FILE, so
    its version is what keeps a module built for an older core out of this one.
@@ -2418,7 +2863,8 @@ void RegisterCoreClasses(void)
 	   the moment they exist and loadClasses never counts them as pending */
 	SetPropInt(library, "Loaded", 1);
 
-	CoreClass(library, "Object", NULL);
+	/* the root class answers last, and answers for everything */
+	SetPropLong(CoreClass(library, "Object", NULL), "ClassMsg", (long) ObjectClassMsg);
 }
 
 void UnregisterLibrary(NodeObj library){
@@ -2459,6 +2905,23 @@ NodeObj RegisterClass(NodeObj library, NodeObj class){
 	}
 
 	PrintRegInfo("Registering class '%s'", class);
+
+	/* A CLASS IS A NODE IN THE TYPE TREE, and this is what tells a walk
+	   which kind of child it is looking at: a class node's children are
+	   its subclasses AND its instances, and only the class says so. */
+	SetPropInt(class, "IsClass", 1);
+
+	/* which .object provided it. A class comes from exactly one file, so
+	   that relation is single-valued and belongs in a property - the child
+	   list is needed for the walkable relation, which is subtyping. */
+	SetPropLong(class, "Library", (long) library);
+
+	NSInsert(GetClassIndex(), GetNameStr(class), (long) class);
+
+	/* it starts under its library and moves under its parent class the
+	   moment the module declares one (SetClassParent). A class that never
+	   declares a parent - Object - stays here, which is what roots the
+	   type tree. */
 	AddChild(library, class);
 	//PrintNode(library);
 	//msgobj InstanceStart = (msgobj)GetPropLong(class, "InstanceStart");
@@ -2467,14 +2930,16 @@ NodeObj RegisterClass(NodeObj library, NodeObj class){
 }
 
 void UnRegisterClass(NodeObj library, NodeObj class){
-	(void) class;
+	if (class && GetNameStr(class))
+		NSDelete(GetClassIndex(), GetNameStr(class));
     PrintRegInfo("Unregistering class '%s'", library);
 	//DelNode(node);
 }
 
 /* the interface lives as a property on the class, not a child - a       */
-/* class's children are its instances (RegisterInstance), and mixing     */
-/* interface entries into that list would break anything that walks it   */
+/* class's children are its subclasses (SetClassParent) and its          */
+/* instances (RegisterInstance), and both are walked; mixing interface   */
+/* entries into that list would break anything that walks it             */
 NodeObj GetClassInterface(NodeObj class){
 
 	if (!class)
@@ -2594,21 +3059,10 @@ static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
 /* deadInstance - see DeleteInstance                                       */
 static void ScrubRegistrySubscriptions(NodeObj deadInstance)
 {
-	NodeObj library, class, instance;
+	NodeObj instance;
 
-	library = GetChild(RegObjList);
-	while (library) {
-		class = GetChild(library);
-		while (class) {
-			instance = GetChild(class);
-			while (instance) {
-				ScrubSubscriberProps(instance, deadInstance);
-				instance = GetNextSibling(instance);
-			}
-			class = GetNextSibling(class);
-		}
-		library = GetNextSibling(library);
-	}
+	for (instance = FirstInstance(); instance; instance = NextInstance(instance))
+		ScrubSubscriberProps(instance, deadInstance);
 }
 
 /* blank every link (aliased property) under `node`'s props that points   */
@@ -2636,21 +3090,10 @@ static void ScrubLinkProps(NodeObj node, NodeObj deadInstance)
 /* neutralizing links aimed at deadInstance - see DeleteInstance          */
 static void ScrubRegistryLinks(NodeObj deadInstance)
 {
-	NodeObj library, class, instance;
+	NodeObj instance;
 
-	library = GetChild(RegObjList);
-	while (library) {
-		class = GetChild(library);
-		while (class) {
-			instance = GetChild(class);
-			while (instance) {
-				ScrubLinkProps(instance, deadInstance);
-				instance = GetNextSibling(instance);
-			}
-			class = GetNextSibling(class);
-		}
-		library = GetNextSibling(library);
-	}
+	for (instance = FirstInstance(); instance; instance = NextInstance(instance))
+		ScrubLinkProps(instance, deadInstance);
 }
 
 /* the actual, working removal UnRegisterInstance's own stub never did -  */
@@ -2690,6 +3133,18 @@ void DeleteInstance(NodeObj instance)
 		instanceEnd = (msgobj)GetPropLong(class, "InstanceEnd");
 		if (instanceEnd)
 			instanceEnd(instance, msg_update, NULL);
+	}
+
+	/* UN-NAME IT FIRST. DeleteInstance never did, so the path trie kept
+	   pointing at freed memory for anything deleted through the engine
+	   rather than through the bridge - and any index built on those names
+	   would inherit the same dangling entries. Captured before anything is
+	   torn down, because PathOfInstance derives from Name and Container. */
+	{
+		char gone[300];
+
+		if (PathOfInstance(instance, gone, sizeof(gone)))
+			UnregisterPath(gone);
 	}
 
 	ScrubRegistrySubscriptions(instance);

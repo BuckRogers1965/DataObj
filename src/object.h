@@ -41,6 +41,45 @@ NodeObj CreateRoot(char * name);
 /* class (a palette) with GetChild/GetNextSibling at both levels        */
 NodeObj GetRegObjList(void);
 
+/* WALK THE REGISTRY WITH THESE, not with a nested loop of your own.
+
+     for (cls  = FirstClass();    cls;  cls  = NextClass(cls))
+     for (inst = FirstInstance(); inst; inst = NextInstance(inst))
+
+   Spelling out RegObjList -> library -> class -> instance at a call site
+   copies the registry's shape into that file, and every copy has to be
+   found and edited the day the shape changes. These four know the shape;
+   nobody else needs to. Early exit as usual - the cursor resumes from any
+   node, because a node knows where it sits.
+
+   ClassOfInstance/LibraryOfClass give back the level above when a walk
+   needs it, so nothing has to carry it in a local. */
+NodeObj FirstClass(void);
+NodeObj NextClass(NodeObj class);
+NodeObj FirstInstance(void);
+NodeObj NextInstance(NodeObj inst);
+NodeObj ClassOfInstance(NodeObj inst);
+
+/* WHAT IS IN THIS CONTAINER, without walking every instance in the
+   session. The list is maintained where naming happens - RegisterPath
+   adds, UnregisterPath removes - so it is an index of the Container
+   property rather than a second truth about it.
+
+     for (e = FirstMember(view); e; e = GetNextSibling(e))
+         inst = MemberInstance(e);                                     */
+NodeObj FirstMember(NodeObj container);
+NodeObj MemberInstance(NodeObj entry);
+
+/* A handler that returned rtrn_dropped said "not mine". This offers the
+   message up the class chain - instance -> its class -> its parent -> ...
+   -> Object, which handles it or drops it for real. A class opts in with a
+   ClassMsg on its class node; one without is transparent.
+
+   Walked live on every call, never cached, so a class spliced in between
+   an existing class and its parent takes effect on the next message. */
+int PuntToClass(NodeObj instance, MsgId message, NodeObj data);
+NodeObj LibraryOfClass(NodeObj class);
+
 /* The palette, the topbar chrome, and what it takes to be placed at all
    (a name, a place, a size) live in control.object - the palette exists
    only to show controls. Include control.h to reach them. */

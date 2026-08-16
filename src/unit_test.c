@@ -849,15 +849,14 @@ void UT_FlowTest(NodeObj container){
 /* ---- copied verbatim from object.c ---- */
 void UT_InterfaceTest(){
 
-	NodeObj library, class, interface, prop;
+	NodeObj class, interface, prop;
 	char *text, *name;
 
 	printf("\n\nRunning interface publication tests\n\n");
 
 	/* every class the registry actually holds, rather than a list of names
 	   that has to be kept in step with what exists */
-	for (library = GetChild(GetRegObjList()); library; library = GetNextSibling(library))
-	for (class = GetChild(library); class; class = GetNextSibling(class)) {
+	for (class = FirstClass(); class; class = NextClass(class)) {
 
 		name = GetNameStr(class);
 

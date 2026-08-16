@@ -112,12 +112,11 @@ static int TCPPort_GetVarInt(NodeObj sock, MsgId var)
    private - no path, no container, nothing else can reach it */
 static NodeObj TCPPort_NewSocket(NodeObj instance)
 {
-	NodeObj lib, cls, args, sock = NULL;
+	NodeObj cls, args, sock = NULL;
 	msgobj instanceStart;
 	char *name;
 
-	for (lib = GetChild(GetRegObjList()); lib && !sock; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	for (cls = FirstClass(); cls && !sock; cls = NextClass(cls))
 		{
 			name = GetNameStr(cls);
 			if (!name || strcmp(name, "TCPSocket"))

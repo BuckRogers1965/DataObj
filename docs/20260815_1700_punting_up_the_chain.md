@@ -28,24 +28,33 @@ exactly the way `view.js` already says about layout: "members lay out by their
 own X/Y stops being something the framework imposes and becomes THIS class's
 opinion, which a Row, a Grid or a table-of-records can subclass and replace."
 
-## The empty slot
+## What the container was told and threw away
 
-Instances are children of their class:
-
-    AddChild(class, Instance);          /* object.c:2536 */
-
-Nothing anywhere walks an instance's children. Not the bridge, not the
-serializer, not a single object. The slot has been empty since it existed.
-
-So a View's members go there. The container keeps what it already gets told -
-`RegisterPath` finds the container and writes `LastMember` on it (`object.c:60`),
-described in its own comment as "the one place every creator meets: import,
-clone, a bridge create, an object building its own panel." The announcement has
-always been there. Nothing kept it, because `LastMember` is one string built to
-be subscribed to, and a property that changes is an event, not a record.
+`RegisterPath` already resolves the container of anything being named and
+writes `LastMember` on it (`object.c:60`), described in its own comment as "the
+one place every creator meets: import, clone, a bridge create, an object
+building its own panel." The announcement has always been there. Nothing kept
+it, because `LastMember` is one string built to be subscribed to, and a property
+that changes is an event, not a record.
 
 We have been told about every member at the moment it arrived, and thrown it
 away, and then walked the whole registry to work out what we had been told.
+
+**Where a kept list can and cannot go.** An earlier draft of this put members in
+the instance's own child slot, on the grounds that nothing walks it. Nothing
+does - but the slot cannot be used for that, and the reason is worth stating
+because it is the same fact the rest of this piece rests on. A node has one
+`parent` and one `nextSib`. An instance already spends both on the type tree:
+it is a child of its class and a sibling of that class's other instances.
+Making it the child of its container would clobber the first and splice it out
+of the second.
+
+Containment is not a tree relation here and never was. It is the `Container`
+property, and what a kept list would be is an INDEX of that property, held
+where the announcement already arrives - a `Members` property carrying pointers,
+which is a shape the tree already uses twice (the Palette's alias list,
+`CloneGroupPass`'s member gather). The child slot belongs to the type tree; the
+index belongs beside the announcement.
 
 ## The verdict with nowhere to go
 
@@ -134,9 +143,8 @@ discriminator - one relation, which is "what is below me":
                     +-- instances of TCPPort
 
 A class with subclasses has them as its children. A leaf class has its
-instances. An instance has its members. Walking down from Control gives every
-control class; walking down from Button gives every Button in the session;
-walking down from a View gives what is in it. It is one walk with one meaning,
+instances. Walking down from Control gives every control class; walking down
+from Button gives every Button in the session. It is one walk with one meaning,
 and `RegObjList -> library -> class -> instance` was already that walk with
 provenance wedged into the middle of it.
 
@@ -215,11 +223,11 @@ things with different parent classes - a TCPPort panel holds Textboxes,
 MoButtons, LEDs, a Dropdown, sub-Views - and they have nothing in common except
 being in it. That is the difference between the two uses of the child list, and
 it is not a smell: subclasses under a class share a parent by definition,
-members under an instance share nothing by definition. A walker standing on a
-class is asking "what is a kind of me". A walker standing on an instance is
-asking "what is inside me". They are different questions asked at different
-levels, and neither can be mistaken for the other by anything that knows where
-it is standing.
+instances under a class share their class by definition. A walker standing on a
+class is asking one question - "what is below me in the type tree" - and the
+answer is subclasses where there are any and instances where there are not.
+Containment is a different question entirely, and it is not asked of this tree
+at all: it is asked of the `Container` property.
 
 The third relation is the one to keep out of the tree deliberately. A handle is
 opaque: no node of the engine's is ever handed out, and the widget holds it
@@ -333,3 +341,172 @@ Finish classing. Object becomes a real class in the chain rather than a name at
 the end of one, parents become links, the ladder becomes `GetParent`, and we
 stop walking the whole tree for information we were handed at the door and
 threw away.
+
+---
+
+# What it took, 16 August
+
+*Appended after the work. The plan above is unedited; this is what happened
+when it met the code.*
+
+## Step 1: the walk stopped being copied
+
+The cursor - `FirstClass`/`NextClass`, `FirstInstance`/`NextInstance` - went in
+first, and every hand-rolled nested loop was converted to it. That is
+behaviour-preserving by construction, which was the point: it had to be
+provable before the tree moved underneath it.
+
+Three things the survey found that the plan had wrong:
+
+**29 sites, not 17.** The first count missed everything spelled
+`GetChild(RegObjList)` without the accessor - including twelve inside
+`object.c` itself.
+
+**`FindClass` was one of them.** It was a hand-rolled nested walk, not a
+lookup. So was `FindClassRendering`. Both are three lines now.
+
+**Five containment queries, not three.** `NameTakenIn` and `CloneGroupPass`
+were also scanning every instance in the session to filter on `Container`.
+
+And one thing the compiler cannot help with. Converting a nested loop to a
+cursor deletes the loop that assigned the outer variable - and if the body
+still USES that variable, `-Wall` says nothing, because the variable is read,
+so it is not unused. It is just uninitialised. That happened twice:
+`BuildPalette` was left iterating with garbage, caught by reading the tail; and
+`Bridge_ListInstances` shipped, and segfaulted on the first `list-instances`
+the browser sent. A mechanical transform over four files on the strength of "it
+compiles clean" is not verified, and the audit that finds it - scan each
+converted loop body for the variables the transform orphaned - should have been
+written before the transform, not after the core dump.
+
+## Step 2: the registry became the type tree
+
+`SetClassParent` moves the node now: out of the library's child list, in under
+the parent class. Object declares no parent, so it stays under the Framework
+library and roots the tree. `RegisterClass` stamps three things - `IsClass` (the
+marker both cursors filter on, since a class's children are now subclasses AND
+instances), `Library` (single-valued, so it is a property), and an entry in a
+permanent class-name trie.
+
+That trie is the piece the plan did not anticipate. `IndexLibraryClasses`
+rebuilt a throwaway class index on every bring-up sweep from `GetChild(library)`
+- exactly what the move breaks. Making the index permanent and maintained by
+`RegisterClass` deleted that function, made `FindClass` a real lookup, and
+means a class is findable the instant its module registers it.
+
+**Re-pointable on purpose**: calling `SetClassParent` again moves the class
+again, and nothing caches a resolved chain. A class spliced in between an
+existing class and its parent takes effect on the next message, which is the
+whole reason not to build a vtable.
+
+## The thing that leaked out: order
+
+Nothing about the reparent should have been visible. One thing was.
+
+The client assigns z-index at render time (`toTop`, `++topZ`), so **stacking is
+the order `instance-created` events arrive**. That order came from the instance
+walk, which had just changed from library order to type-tree order. A large
+control ended up in front of ones it had always sat behind and started
+swallowing clicks aimed at them - five guitest failures, every one of the form
+"timed out waiting for <subject>", because each test takes an element's centre
+and clicks that point.
+
+Two fixes, at two levels. `Bridge_ListInstances` now sorts a container's members
+by name, so announcement order is a stated decision rather than an artefact of
+the registry's shape. And the palette sorts its own entries alphabetically
+instead of inheriting whatever the walk yields - which is also what it looked
+like when that was an accident of scan order. The client deciding stacking from
+arrival order at all is on the roadmap; so is the test fragility, because a test
+that clicks a coordinate is asserting about the whole page rather than the
+element it named.
+
+## Step 3: the ladder, and what Object is for
+
+`rtrn_dropped` has somewhere to go: instance, then its class, then its parent,
+ending at Object. A class opts in with a `ClassMsg`; one without is transparent.
+Walked live every time.
+
+Two corrections came out of building it.
+
+**"Does not handle" includes "has no handler at all."** The first cut only
+punted an explicit refusal, which meant a class could never answer for a
+property its instances had not declared - and that is most of what a class is
+for. The order at every level is now: instance handler, class chain, universal
+store.
+
+**Which makes the universal store Object's job.** Storing a value stopped being
+a special case in the delivery code and became the root class's behaviour, so a
+property nobody claimed is HANDLED rather than unhandled. Object tells refusal
+from indifference by reading the property itself: an `OnMsg` means someone was
+asked and said no, and a refused value must not be stored anyway.
+
+The discipline that kept this honest: **nothing about the engine's behaviour was
+allowed to change.** When the first version logged every refusal at the default
+level, that was a change - a disabled control refuses constantly, and the
+refusal is already reported where it happens - so it moved to `WIRE`. The
+default log reads exactly as it did before the chain existed.
+
+## Step 4: containment, and a hole under it
+
+The plan said members go in the instance's child slot. They cannot: a node has
+one `parent` and one `nextSib`, and an instance spends both on the type tree.
+Containment is the `Container` property and stays one; what a kept list can be
+is an INDEX of it. The post above has been corrected.
+
+Building that index turned up something bigger. **`DeleteInstance` never called
+`UnregisterPath`.** Anything deleted through the engine rather than through the
+bridge left its name in the path trie pointing at freed memory - a live bug, and
+a hard blocker, because an index built on those names inherits every dangling
+entry. Deletion un-names first now, so containment finally has both edges:
+`RegisterPath` records arrivals, `UnregisterPath` records departures.
+
+Then the index disagreed with the scan, which is exactly why both were left
+running. `NameTakenIn` moved onto it and cloning a clone came back empty,
+because **the index holds NAMED members and naming is the translator's job,
+done after the engine returns.** Minting runs WHILE placement is happening: the
+siblings have their `Container` set and are not named yet. Two different
+questions that looked like one - placed members are a superset of named ones -
+and only the `Container` property answers the first. Both minting walks went
+back to the scan with the reason recorded at each site.
+
+## The naming regression, which the tests could not see
+
+Aliasing a control produced `Slider_3`. It should say what the doorway opens
+onto, not what draws it - and renaming the target changed nothing, because the
+base was the class and a class never moves.
+
+The cause was one expression. Removing the Alias class left the mint on
+`GetNameStr(GetParent(inst))`, under a comment reading "asks the instance
+instead of saying a literal". It asks the instance for its CLASS. Right intent,
+wrong by one hop.
+
+The repair was to stop having two naming paths at all. Clone never had one: the
+engine names it, and `Bridge_RegisterClone` reads `Container` + `Name` back.
+Aliases do the same now - `CreateAlias` sets the name, the bridge addresses it.
+
+**And nothing in the suite could have caught it, because nothing in the suite
+ever stated what anything should be CALLED.** Every check reads names out of the
+events it was just handed and uses them; one helper deliberately identifies the
+alias by "has a Target that looks like a path" so it does not have to know. They
+assert that things WORK. They never assert that they are LEGIBLE. That is not a
+small gap: this framework addresses by path, so a minted name is the public
+contract, and changing one is a breaking change in the same sense as renaming
+an endpoint - saved flows, scripts holding a path, REST URLs.
+
+`test_minted_names` is the answer, and it is brittle on purpose: a given name is
+kept, an alias is `<instance>_<property>`, a repeat mints the next free `_k`,
+and a clone takes the lowest free suffix on its source's base with any trailing
+`_N` stripped. Four literal strings. If one fails, either it was a mistake or
+the contract moved and the file records the new one - but never quietly.
+
+## What today actually says
+
+Every one of these was the same failure wearing different clothes: **move a
+mechanism, preserve the mechanism, silently drop a behaviour that was riding on
+it.** The orphaned loop variable, the containment index versus minting, the
+alias name. The mechanism is the part you are thinking about, which is exactly
+why it is not the part that breaks.
+
+The defence is not more care. It is that the behaviour has to be written down
+somewhere a machine reads it - which is what the harness is for, and what it was
+not doing for names.

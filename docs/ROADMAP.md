@@ -2733,3 +2733,128 @@ no structs, no pointers into the engine cross that line, so there is no external
 reference that can go stale - the same conclusion the language hosts reached
 from the other direction with their opaque handles. Three subsystems, one
 answer, and it is what keeps deletion a walk rather than a search.
+
+## Found 2026-08-15 - a clone's Help panel comes up empty
+
+A cloned widget opens its Help panel and there is no text in it. The source
+widget's Help works; the clone's does not.
+
+**What is established.** `HelpFile` is written with `SetPropStr`, so it is a
+STRING, so `IsPortableProp` passes it and the clone carries it. The handler is
+not so lucky: `Widget_AddHelp` stamps `SetPropLong(openPort, "OnMsg",
+(long)Widget_OnHelpOpen)` onto the `ReservedViewOpen` property NODE, and
+`IsPortableProp` rejects LONG values - correctly, since a function pointer is
+not data. So a clone has the file and no handler unless something re-stamps it.
+
+Something is supposed to. `CloneObject` calls the class's `InstanceStart`,
+which arms `Widget_DeferBuild`; when that task fires, `Widget_AddHelp` runs and
+`Widget_SubPanel` re-stamps the handler on whatever `Help` view it finds. But
+`CloneInstance` runs its three `CloneGroupPass` passes SYNCHRONOUSLY, before
+that task fires - so the passes have already cloned the source's own `Help`
+view by the time the build tries to adopt one. If the cloned member did not
+land on the name `Help` (a minted `Help_1`, say), adoption misses, a second
+empty Help view is created, and the one on screen is the one with no handler.
+
+**The general rule this is an instance of, which is the part worth fixing.** A
+handler stamped on a property node is not portable, by design. Therefore
+anything whose behaviour depends on a stamped handler must re-establish it
+after a clone, and "re-establish" means adopting the cloned member rather than
+racing it. This is the same family as the widget clone that lost its controls
+(2026-08-13): the structure survives the copy and the behaviour does not, and
+the structure is what tests were looking at.
+
+**The test gap, which is why this got through.** Nothing in the harness touches
+Help - not one line in any suite. And the clone tests assert STRUCTURE: that
+the copy holds every member at every depth. A clone can pass all of that with
+every handler missing. The test to add is behavioural: clone a widget, open the
+clone's Help, assert text arrives - because that assertion passes only if the
+whole chain survived the copy, including the parts that are function pointers.
+
+Worth writing the general form of that test once and applying it to every
+stamped-handler behaviour, not just Help.
+
+## Found 2026-08-15 - the client stacks by arrival order
+
+`registerWidgetAtom` and `registerView` both call `toTop(el)` as they render,
+and `toTop` is `zIndex = ++topZ` off a counter that only counts up. So **z-order
+in the browser is the order `instance-created` events arrived**, and nothing
+else. Not position, not class, not anything the engine states.
+
+That makes the order the engine happens to announce things in into a rendering
+decision. Reparenting the class registry changed the instance walk from library
+order to type-tree order, which changed announcement order, which restacked the
+palette - a large control ended up in front of ones it had always sat behind and
+started swallowing clicks aimed at them. Five guitest failures, all of the form
+"timed out waiting for <subject>", because each test takes an element's centre
+and clicks that point: the pick landed on whatever was on top.
+
+**Done now, engine side:** `Bridge_ListInstances` sorts a container's members by
+name before announcing them, so arrival order is a stated decision rather than
+an artefact of the registry's shape. That stops the leak; it does not fix the
+cause.
+
+**The actual fix, client side.** Stacking should not come from arrival order at
+all. This is the `toTop` item already listed above - the counter starts at 100,
+never resets, and the wire layers sit at a fixed 100000 to stay above it, which
+is a ceiling rather than a guarantee. Renumbering the stack down to its real
+depth on each promotion fixes the unbounded growth; deciding stacking from
+something the engine states (or from nothing, for members laid out in a
+container) fixes this.
+
+**And the test is fragile, which is the third thing.** A test that computes an
+element's centre and clicks the coordinate is asserting about the whole page,
+not about the element it named - anything overlapping silently redirects the
+gesture, and the failure surfaces later as a timeout with no mention of what was
+actually hit. The gesture helpers should verify that the point they are about to
+click resolves to the element they meant (`elementFromPoint`), and say so when
+it does not. That one change turns five mystery timeouts into one accurate
+message.
+
+## Found 2026-08-16 - "done" has to mean every path it made resolves
+
+`load-flow` answers with `flow-loaded`, sent from `Bridge_LoadFlowDone` - the
+serializer's own completion callback. A client that waits for that event and
+then acts has, on the evidence, acted too early:
+
+    list-instances '/Root/RawTests/LoadThenClone/LrView': announced 0 member(s)
+    BRIDGE ERROR: 'create-instance' - unknown container
+    BRIDGE ERROR: 'clone-instance' - unknown instance
+
+Those are not missed events. That is the engine correctly reporting that the
+paths do not resolve, after it said the load was finished. The same log shows
+listings landing between one instance's `Container` write and its `Name` write,
+so the client was reading a tree that was still being assembled.
+
+**Why only one build.** A load is staggered on purpose -
+`DESTROY-CONTENTS-ASYNC: snapshot done, 367 victims - staggering destroy`, then
+a rebuild spread over ticks, so the engine never blocks. Under asan every step
+is slower and the half-rebuilt window is wide enough to fall into. On `-O3` it
+closes before anyone looks. That is the whole reason this read as "rawtest
+randomly blows up in asan" for weeks.
+
+**Why no human has ever hit it.** Nobody clicks faster than a staggered load.
+The window has never been reachable by hand, which is why it only surfaced in a
+test.
+
+**Why that stops being a defence.** Scripts are becoming first-class clients
+here - a REST caller doing POST then GET, an agent driving a flow through the
+manifest. None of them have human latency, and all of them will do exactly what
+the test did. Human slowness has been holding this closed, and the `/Root/mcp`
+surface is the thing that opens it.
+
+**The general rule, which is bigger than this one event.** An event that claims
+completion must mean every path it created resolves. Otherwise a client cannot
+tell "done" from "nearly done", and its only recourse is to guess a delay -
+which is a race with better manners, not a fix. Worth auditing every completion
+event the protocol sends against that rule, not just this one.
+
+**What to check first:** whether `LoadViewAsync` invokes its done callback after
+the last create step or merely after scheduling them, and whether `RegisterPath`
+has run for everything by the time it fires.
+
+**Meanwhile:** `rawtest`'s `settled()` waits for the container to actually hold
+its members instead of sleeping, and PRINTS A NOTE when it had to wait. That
+note is the tripwire - if `flow-loaded arrived before it was ready` appears, the
+completion claim is wrong and every non-human client inherits it. The harness
+absorbing the race is a stopgap, and the note is there so absorbing it never
+becomes the same thing as not having it.

@@ -674,9 +674,24 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	/* given (scripts), otherwise - or when the name is already taken,    */
 	/* see Bridge_Create - minted where it lives, and stamped back into   */
 	/* the command for a fully-determined replay                           */
+	/* THE ENGINE NAMED IT, exactly as it names a clone. CreateAlias sets
+	   Name to what the thing stands for (bob_1's Value -> bob_1_Value),
+	   minted unique in its container - so the bridge reads Container+Name
+	   back and addresses it, the same two lines Bridge_RegisterClone uses.
+	   It does not mint a second name over the top.
+
+	   Minting here is what broke it: removing the Alias class left this on
+	   GetNameStr(GetParent(inst)), which is the CLASS, so an aliased slider
+	   came out Slider_3 - naming what draws it rather than what it opens
+	   onto, and renaming the target changed nothing because the class never
+	   moves. A client-supplied "as" still wins, for scripts. */
 	if (!alias || !alias[0] || ResolvePath(alias))
 	{
-		Bridge_FreshAlias(local, container, GetNameStr(GetParent(inst)), fresh, sizeof(fresh));
+		char *cont = GetPropStr(inst, "Container");
+		char *nm   = GetPropStr(inst, "Name");
+
+		snprintf(fresh, sizeof(fresh), "%s/%s",
+				 (cont && cont[0]) ? cont : "/Root", (nm && nm[0]) ? nm : "");
 		alias = fresh;
 		SetPropStr(command, "as", alias);
 	}
@@ -1352,7 +1367,7 @@ void Bridge_BindActivate(NodeObj instance, InstanceData *local, NodeObj command)
  */
 static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *oldAlias, char *newAlias)
 {
-	NodeObj snap, entry, inst, ce, table, ks, ke, lib, cls;
+	NodeObj snap, entry, inst, ce, table, ks, ke;
 	char prefix[300], newP[512], newCont[512], oldCont[300], buf[1200], key[24], nk[560], dbg[1400], pbuf[300];
 	char *p, *cont, *k, *ok, *escFrom, *escTo, *slash;
 	long cut;
@@ -1370,9 +1385,7 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	/* trie - lookups, not walks); each instance's current path derives     */
 	/* from its own Name/Container, which still carry the OLD prefix here.  */
 	snap = NewNode(INTEGER);
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
 	  {
 		if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 			continue;
@@ -1438,9 +1451,7 @@ static void Bridge_RepathSubtree(NodeObj instance, InstanceData *local, char *ol
 	/* This is what left the renamed view's own alias broken while a clone's  */
 	/* (announced with a fresh Target) worked. Swap the prefix, delivered so  */
 	/* the GUI re-binds.                                                      */
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
 	  {
 		if (!IsAlias(inst, NULL, NULL))
 			continue;
@@ -1818,7 +1829,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 		   prefix, exactly the way a rename re-paths it - and delete each.
 		   Snapshot before deleting, because deleting mutates the registry
 		   this walks. */
-		NodeObj snap, entry, lib, cls, mem;
+		NodeObj snap, entry, mem;
 		char prefix[300], pbuf[300], cont[300];
 		int preLen;
 		char *p, *slash;
@@ -1830,9 +1841,7 @@ void Bridge_Delete(NodeObj instance, InstanceData *local, NodeObj command)
 		/* the container itself, keyed by its own path */
 		SetPropLong(snap, alias, (long) inst);
 		/* then every descendant */
-		for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-		  for (mem = GetChild(cls); mem; mem = GetNextSibling(mem))
+		for (mem = FirstInstance(); mem; mem = NextInstance(mem))
 		  {
 			if (!PathOfInstance(mem, pbuf, sizeof(pbuf)))
 				continue;
@@ -2332,10 +2341,23 @@ void Bridge_Login(NodeObj instance, InstanceData *local, NodeObj command)
  * There could eventually be millions of objects in a session; a window
  * only ever needs the ones it can see.
  */
+#define LIST_MAX 4096
+
+/* what a container's members are announced in: their own names. See the
+   comment in Bridge_ListInstances for why the order is a decision. */
+static int Bridge_MemberNameCmp(const void *a, const void *b)
+{
+	char *na = GetPropStr(*(NodeObj *) a, "Name");
+	char *nb = GetPropStr(*(NodeObj *) b, "Name");
+
+	return strcasecmp(na ? na : "", nb ? nb : "");
+}
+
 void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	NodeObj inst, class, chunk;
 	char *container, *cont;
+	char dbg[400];
 
 	container = command ? GetPropStr(command, "container") : NULL;
 	if (!container || !container[0])
@@ -2352,21 +2374,61 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 	   below finds them exactly like it finds a slider a user dragged out. */
 
 	{
-		NodeObj lib;
-		char pbuf[300];
+		/* IN A STATED ORDER, by name. The client stacks what it renders in
+		   the order it arrives (toTop, app.js), so the order this walk
+		   happens to produce becomes z-order in the browser - and that made
+		   a change to the shape of the registry silently restack the
+		   palette, putting a big control in front of the ones it used to
+		   sit behind and swallowing clicks aimed at them. Arrival order is
+		   a decision, so it gets made here instead of being inherited from
+		   whatever the walk yields.
 
-		for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		 for (class = GetChild(lib); class; class = GetNextSibling(class))
-		  for (inst = GetChild(class); inst; inst = GetNextSibling(inst))
-		  {
+		   The client fixing its own stacking is the real repair and is on
+		   the roadmap; this is what stops the engine's internals leaking
+		   into it in the meantime. */
+		NodeObj members[LIST_MAX];
+		char    pbuf[300];
+		int     count = 0, i;
+
+		for (inst = FirstInstance(); inst; inst = NextInstance(inst))
+		{
 			/* unnamed engine internals derive no path - they were never  */
 			/* in the alias table before either                            */
 			if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
 				continue;
 			cont = GetPropStr(inst, "Container");
-			if (strcmp(cont ? cont : "", container) == 0)
-				Bridge_InstanceEvent(instance, local, pbuf, GetNameStr(class), class, "Root", cont, GetPropInt(inst, "_Hidden"), local->replyConn);
-		  }
+			if (strcmp(cont ? cont : "", container) != 0)
+				continue;
+
+			if (count < LIST_MAX)
+				members[count++] = inst;
+			else
+			{
+				snprintf(dbg, sizeof(dbg),
+						 "list-instances '%s': more than %d members - the rest "
+						 "are not announced", container, LIST_MAX);
+				DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+				break;
+			}
+		}
+
+		qsort(members, (size_t) count, sizeof(NodeObj), Bridge_MemberNameCmp);
+
+		for (i = 0; i < count; i++)
+		{
+			inst = members[i];
+			if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
+				continue;
+			class = ClassOfInstance(inst);
+			cont = GetPropStr(inst, "Container");
+			Bridge_InstanceEvent(instance, local, pbuf, GetNameStr(class), class,
+								 "Root", cont, GetPropInt(inst, "_Hidden"),
+								 local->replyConn);
+		}
+
+		snprintf(dbg, sizeof(dbg), "list-instances '%s': announced %d member(s), name order",
+				 container, count);
+		DebugPrint(dbg, __FILE__, __LINE__, REGISTER);
 	}
 
 	chunk = NewNode(STRING);
@@ -2395,16 +2457,14 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 void Bridge_ListConnections(NodeObj instance, InstanceData *local)
 {
 	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-	NodeObj port, sub, sink, chunk, lib, cls;
+	NodeObj port, sub, sink, chunk;
 	NodeObj inst;
 	char *fromAlias, *toAlias, *toPort;
 	char fromBuf[300], toAliasBuf[ALIASLEN];
 	char *escFrom, *escFromPort, *escTo, *escToPort;
 	char buf[600];
 
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-	 for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
-	  for (inst = GetChild(cls); inst; inst = GetNextSibling(inst))
+	for (inst = FirstInstance(); inst; inst = NextInstance(inst))
 	  {
 		/* unnamed - not addressable, so not a drawable wire end */
 		if (!PathOfInstance(inst, fromBuf, sizeof(fromBuf)))
@@ -3013,7 +3073,7 @@ int Bridge_OnFileCmd(NodeObj instance, MsgId message, NodeObj data)
 static void Bridge_BuildShow(NodeObj instance)
 {
 	static int   built = 0;
-	NodeObj      lib, cls, show, web;
+	NodeObj      cls, show, web;
 	char        *jsPath, *cssPath, *js, *css, *name, *esc;
 	int          n = 0, t;
 	FILE        *jf, *cf;
@@ -3046,8 +3106,7 @@ static void Bridge_BuildShow(NodeObj instance)
 				"function register(name, def) { window.GTWidgets[name] = def; }\n");
 	fprintf(cf, "/* assembled from each class's own Show/web/css */\n");
 
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	for (cls = FirstClass(); cls; cls = NextClass(cls))
 		{
 			show = GetPropNode(cls, "Show");
 			web  = show ? GetPropNode(show, "web") : NULL;

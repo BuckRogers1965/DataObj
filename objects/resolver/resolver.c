@@ -71,12 +71,11 @@ static void Resolver_Lamps(NodeObj instance, char *busy, char *found)
    panel that answers land on. */
 static NodeObj Resolver_NewEngine(NodeObj instance)
 {
-	NodeObj lib, cls, args, engine = NULL;
+	NodeObj cls, args, engine = NULL;
 	msgobj instanceStart;
 	char *name;
 
-	for (lib = GetChild(GetRegObjList()); lib && !engine; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	for (cls = FirstClass(); cls && !engine; cls = NextClass(cls))
 		{
 			name = GetNameStr(cls);
 			if (!name || strcmp(name, "DNS"))

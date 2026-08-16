@@ -874,13 +874,12 @@ int MCPSource_AgentOnRequest(NodeObj agentView, MsgId message, NodeObj data);
    about the class tree, not a marker anyone has to remember to set. */
 static void MCPAgent_HostList(char *out, int outlen)
 {
-	NodeObj lib, cls;
+	NodeObj cls;
 	int     used, first = 1;
 	char   *par, *nm;
 
 	out[0] = '\0';
-	for (lib = GetChild(GetRegObjList()); lib; lib = GetNextSibling(lib))
-		for (cls = GetChild(lib); cls; cls = GetNextSibling(cls))
+	for (cls = FirstClass(); cls; cls = NextClass(cls))
 		{
 			par = GetPropStr(cls, "Parent");
 			if (!par || strcmp(par, "Script"))
