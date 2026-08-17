@@ -635,7 +635,9 @@ static void Rest_Member(NodeObj instance, char *method, char *request,
 	char full[600];
 	char propPath[300];
 	NodeObj inst;
-	char why[500];
+	/* holds the log line, which carries `full` whole - so it has to be
+	   bigger than full is, not bigger than a path usually is */
+	char why[800];
 
 	snprintf(full, sizeof(full), "%s/%s", Rest_ManifestView(instance), request);
 
@@ -643,6 +645,12 @@ static void Rest_Member(NodeObj instance, char *method, char *request,
 
 	if (!inst)
 	{
+		/* the caller gets their own word for it and nothing else; the log
+		   gets the engine path that was actually tried, which is the half
+		   that says whether the view moved or the name was wrong */
+		snprintf(why, sizeof(why), "%s %s: nothing is named '%s'", method, request, full);
+		DebugPrint(why, __FILE__, __LINE__, ERROR);
+
 		snprintf(why, sizeof(why), "no such member: %s", request);
 		Rest_SendError(instance, "404 Not Found", why, connId);
 		return;

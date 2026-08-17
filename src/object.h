@@ -29,6 +29,17 @@ NodeObj AuthenticateUser(NodeObj main, char * name, char * token);
 NodeObj
 CreateObject(NodeObj container, char * classname);
 
+/* The same creation, deliberately UNNAMED: a private handle, placed like
+ * anything else but reachable only through the pointer its owner keeps.
+ * The socket inside a port widget and the language host inside a ScriptBox
+ * are these. Nothing addresses one, so nothing lists, saves or wires it by
+ * path - and that is stated here rather than achieved by not calling
+ * RegisterPath, which is how it used to be told apart from an oversight:
+ * it wasn't.
+ */
+NodeObj
+CreatePrivate(NodeObj container, char * classname);
+
 /* A root IS A VIEW - an ordinary one. The only difference is that it has
  * no container, because it is the top; that is why it is made here rather
  * than with CreateObject, which requires a location. As many as you like
@@ -109,6 +120,19 @@ void    RegisterPath(char * path, NodeObj inst);
 void    UnregisterPath(char * path);
 NodeObj ResolvePath(char * path);
 int     PathOfInstance(NodeObj inst, char * out, int outlen);
+
+/* THE SAME LOOKUP, ASKED AS AN ASSERTION. "Not found" is the wanted answer
+   for a mint or an exists-check and a fault for anything that was holding
+   the thing or was handed the name by a user - one NULL, two facts, so the
+   call site says which by which one it calls. These report at ERROR against
+   the CALLER's file and line, then return what the plain form returns.
+   Rule of thumb: walking FirstMember means every one of them was named on
+   purpose, so use the Require form; walking FirstInstance reaches private
+   handles that are unnamed deliberately, so use the plain one.            */
+NodeObj RequirePathAt(char * path, char * file, int line);
+int     RequirePathOfAt(NodeObj inst, char * out, int outlen, char * file, int line);
+#define RequirePath(path)               RequirePathAt((path), __FILE__, __LINE__)
+#define RequirePathOf(inst, out, len)   RequirePathOfAt((inst), (out), (len), __FILE__, __LINE__)
 
 /* allocation accounting: message envelopes currently queued between     */
 /* SndMsg and DispatchMsg - reads 0 at rest; a climb means messages are   */

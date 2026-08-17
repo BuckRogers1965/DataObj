@@ -471,6 +471,44 @@ def test_minted_names(raw, r, home):
              "clone=%s" % clone,
              clone == home + "/bob_2")
 
+    # 5. THE NAME AND THE PATH ARE THE SAME FACT. A thing's Name property is
+    #    the last segment of the path it answers to - not a copy kept in
+    #    step, the same thing read two ways. They were set by two separate
+    #    calls for as long as this worked at all, so they COULD disagree,
+    #    and a disagreement is invisible until something tries to address
+    #    the thing: the reverse lookup derives the path from the Name, so a
+    #    Name that drifted leaves it unreachable while sitting in the index
+    #    the whole time.
+    if not clone:
+        return
+    nm = raw.value_of(clone, "Name")
+    r.expect("names: an instance's Name IS the last segment of its path",
+             "%s answers to Name='bob_2' - one fact, so the two cannot drift"
+             % clone,
+             "path=%s Name=%s" % (clone, nm),
+             nm == "bob_2")
+
+    # 6. and they move TOGETHER. A rename that re-keyed the index but left
+    #    the Name behind (or the reverse) is the same silent unreachability,
+    #    arrived at from the other direction.
+    raw.events = []
+    raw.send({"cmd": "set-property", "instance": clone, "prop": "Name",
+              "value": "fred"})
+    evr = raw.wait_event(lambda e: e.get("event") == "instance-renamed"
+                         and e.get("from") == clone)
+    moved = evr.get("to") if evr else None
+    r.expect("names: a rename moves the path",
+             "renaming %s to fred re-keys it to %s/fred" % (clone, home),
+             "to=%s" % moved,
+             moved == home + "/fred")
+    if moved:
+        nm2 = raw.value_of(moved, "Name")
+        r.expect("names: a rename moves the Name with the path",
+                 "%s/fred answers to Name='fred' - neither half is left behind"
+                 % home,
+                 "path=%s Name=%s" % (moved, nm2),
+                 nm2 == "fred")
+
 
 def test_widget_stamp(raw, r, home, source):
     """The engine decides what shows a property, from what the target's class

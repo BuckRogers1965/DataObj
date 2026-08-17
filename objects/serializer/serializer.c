@@ -87,7 +87,7 @@ void ExportView(NodeObj view, char *path)
 	char    viewpath[300], sername[64], wrname[64];
 	NodeObj ser, wr;
 
-	if (!view || !path || !path[0] || !PathOfInstance(view, viewpath, sizeof(viewpath)))
+	if (!view || !path || !path[0] || !RequirePathOf(view, viewpath, sizeof(viewpath)))
 		return;
 
 	if (!ExportHome)
@@ -236,7 +236,7 @@ static char *ImportCreate(char *className, char *nodeName,
 						   NodeObj propbag, char *containerPath, int force)
 {
 	NodeObj home, inst, p;
-	char    desired[320], fresh[320], *x, *y, *ident, *alias, *slash, dbg[512];
+	char    desired[320], fresh[320], *x, *y, *ident, *alias, dbg[512];
 	char   *cpath = (containerPath && containerPath[0]) ? containerPath : "/Root";
 
 	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE enter: class='%s' name='%s' container='%s' force=%d",
@@ -293,8 +293,6 @@ static char *ImportCreate(char *className, char *nodeName,
 	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: registering path '%s'", alias);
 	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
 	RegisterPath(alias, inst);
-	slash = strrchr(alias, '/');
-	SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
 
 	/* the rest of the saved properties - skip identity/geometry (set
 	   above) and State (a runtime readout, not portable state).
@@ -721,7 +719,7 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 	for (d = GetChild(deferred); d; d = GetNextSibling(d))
 	{
 		char    of[320], fresh[320], want[320];
-		char   *container, *prop, *w, *lb, *alias, *slash, *saved;
+		char   *container, *prop, *w, *lb, *alias, *saved;
 		NodeObj target, home, inst;
 
 		ImportResolveTarget(importRoot, GetPropStr(d, "of_old"), of, sizeof(of));
@@ -787,8 +785,6 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 			alias = fresh;
 		}
 		RegisterPath(alias, inst);
-		slash = strrchr(alias, '/');
-		SetOrDeliverProp(inst, "Name", slash ? slash + 1 : alias);
 
 		/* restore the alias's own look (create-alias stamps the target's
 		   published default; the saved alias may have been restyled) */
@@ -933,7 +929,7 @@ static void DestroyContentsAsync(NodeObj container, void (*onDone)(NodeObj conta
 
 	DebugPrint("DESTROY-CONTENTS-ASYNC enter", __FILE__, __LINE__, IMPORT);
 
-	if (!container || !PathOfInstance(container, ownPath, sizeof(ownPath)))
+	if (!container || !RequirePathOf(container, ownPath, sizeof(ownPath)))
 	{
 		DebugPrint("DESTROY-CONTENTS-ASYNC: container missing/unpathable, bail", __FILE__, __LINE__, IMPORT);
 		if (onDone)
@@ -986,7 +982,7 @@ NodeObj ImportView(NodeObj container, char *path, char *dropX, char *dropY)
 	DebugPrint("IMPORT-VIEW enter", __FILE__, __LINE__, IMPORT);
 
 	if (!container || !path || !path[0]
-		|| !PathOfInstance(container, containerPath, sizeof(containerPath)))
+		|| !RequirePathOf(container, containerPath, sizeof(containerPath)))
 	{
 		DebugPrint("IMPORT-VIEW: bad args or unpathable container, bail", __FILE__, __LINE__, IMPORT);
 		return NULL;
@@ -1126,7 +1122,7 @@ void LoadViewAsync(NodeObj container, char *path,
 	DebugPrint("LOAD-VIEW-ASYNC enter", __FILE__, __LINE__, IMPORT);
 
 	if (!container || !path || !path[0]
-		|| !PathOfInstance(container, containerPath, sizeof(containerPath)))
+		|| !RequirePathOf(container, containerPath, sizeof(containerPath)))
 	{
 		DebugPrint("LOAD-VIEW-ASYNC: bad args or unpathable container, bail", __FILE__, __LINE__, IMPORT);
 		if (onDone)
@@ -1410,7 +1406,7 @@ static int Step(InstanceData *local)
 
 		f->phase = 1;
 		f->first = 1;
-		if (!PathOfInstance(f->node, f->cpath, sizeof(f->cpath)))
+		if (!RequirePathOf(f->node, f->cpath, sizeof(f->cpath)))
 			f->cpath[0] = '\0';
 		f->child = f->cpath[0] ? NextContainerChild(f->cpath, NULL) : NULL;
 		return 1;

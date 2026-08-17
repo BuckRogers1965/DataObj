@@ -2858,3 +2858,81 @@ note is the tripwire - if `flow-loaded arrived before it was ready` appears, the
 completion claim is wrong and every non-human client inherits it. The harness
 absorbing the race is a stopgap, and the note is there so absorbing it never
 becomes the same thing as not having it.
+
+## Found 2026-08-16 - a test waits for a STATE, never for a duration
+
+`leaktest`'s subscribe/destroy check failed on `release` and passed on the
+other four builds, with the totals conserved: `d1={'Nodes': 128, 'Datas': 256}`
+against `d2={'Nodes': 112, 'Datas': 224}`. Sixteen nodes did not leak - they
+landed on the near side of a sampling boundary instead of the far side, and
+the two windows add up to the same thing. Allocation counts do not depend on
+the optimiser. Timing does, and that cycle is built out of
+`time.sleep(0.6/0.4/0.3/1.2/0.6)` with a flat `2.5` before each sample.
+
+**A sleep is an assertion about how fast the machine is.** It says "by now the
+work is finished" without ever asking, so it is wrong twice: too short and the
+test measures a half-finished fabric, too long and every run pays for the
+slowest build. Both failures look like flakiness rather than like the guess
+they are, which is what makes them expensive - the report accuses the engine
+and the engine is fine.
+
+**The rule: every wait in the harness names the state it is waiting for.**
+Wait for the event that says the thing happened, or poll the fabric for the
+condition itself - a path that resolves, a container that holds its members, a
+counter that stopped moving - with the sleep left only as a timeout, whose
+expiry is a FAILURE with a message saying which state never arrived. "It has
+been 1.2 seconds" is not a state.
+
+**The two shapes already in the tree, one right and one wrong.** `delete()`
+waits for `instance-removed`, so it is correct at any speed.
+`subscribe_destroy_cycle` destroys through a Lua script's `destroy()` verb
+precisely because that is NOT the delete-instance path - and there is no event
+on that route, so it can only sleep. That is the real gap: the state exists
+(the instances are gone, the subscriptions are reclaimed) and nothing
+announces it. `rawtest`'s `settled()` is the pattern that works - it waits for
+the container to actually hold its members, and prints a note when it had to
+wait, so absorbing a race never quietly becomes not having one.
+
+**What to do, in order.** Audit every `time.sleep` in testharness for what
+state it is standing in for, and replace it with a wait on that state; where
+no event exists to wait on, that is a finding about the protocol, not a
+licence to sleep - a route that destroys things without announcing it is a
+route a non-human client cannot follow either. Same rule as the completion
+claim above: a client that cannot tell "done" from "nearly done" can only
+guess a delay, and a test is just the first client to have that problem.
+
+## Found 2026-08-16 - what naming-at-creation unlocked, and what it did not
+
+`CreateObject` now mints and registers, `CreatePrivate` is the deliberate
+opposite, and `RegisterPath` treats a second name as a move. Three things
+follow from that, two of them worth doing and one of them a correction.
+
+**`NameTakenIn` is now redundant, and it is the expensive half of minting.**
+`MintFreshName` probes twice per candidate: `ResolvePath` (O(path length), the
+trie) and `NameTakenIn` (a walk of every instance in the session, comparing
+`Name` and `Container`). The scan exists because a placed instance could be
+unnamed, and an unnamed member is invisible to the index - which is exactly why
+it was reverted back in when the Members index landed. **Placed now implies
+named**, so the scan can go and minting becomes a trie lookup. Worth checking
+first: private handles ARE placed and unnamed by design, so confirm nothing
+mints a name a `CreatePrivate` instance is already carrying (a socket calls
+itself `TCPSocket` in its own `InstanceStart`) - the bases differ today, and
+that should be verified rather than assumed.
+
+**The container scans still have not moved.** `Bridge_ListInstances`,
+`NextContainerChild` (serializer) and rest's manifest still walk every instance
+comparing `Container` strings. The Members index answers that directly, and
+after this change the two agree on every placed member. This is the same item
+as the classing work's - it is just now unblocked.
+
+**The correction: the two-phase widget constructor does NOT go away.** The blog
+piece claimed a constructor can now build its own panel. It cannot.
+`CreateObject` calls `InstanceStart` and mints after it RETURNS - the instance
+does not exist until the constructor makes it, so inside `InstanceStart` there
+is still no path, and `scriptbox.c`'s deferred build is still required and
+still correct. Closing that window is a separate change with a different shape:
+the name would have to be decided before the constructor runs and handed to it,
+which means `InstanceStart` taking its identity as an argument rather than
+discovering it afterwards. Not obviously worth it - the deferred build works -
+but it is the only remaining reason widget construction is in two halves, so
+it should be recorded as a choice rather than left looking like an accident.

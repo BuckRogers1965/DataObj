@@ -713,7 +713,7 @@ int MCPSource_OnConnect(NodeObj instance, MsgId message, NodeObj data)
 	local->rxlen = 0;
 	local->pending = MCP_LIST;
 
-	local->inner = CreateObject(instance, "TCP");
+	local->inner = CreatePrivate(instance, "TCP");
 	if (!local->inner)
 	{
 		MCPSource_SetNet(instance, "Error: TCP class is not loaded");
@@ -1264,10 +1264,10 @@ int MCPSource_AgentOnRequest(NodeObj agentView, MsgId message, NodeObj data)
 		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
-	ad->inner = CreateObject(agentView, "TCP");
+	ad->inner = CreatePrivate(agentView, "TCP");
 	if (!ad->inner)
 	{
-		DebugPrint("MCPSource agent request failed: CreateObject('TCP') returned NULL", __FILE__, __LINE__, ERROR);
+		DebugPrint("MCPSource agent request failed: CreatePrivate('TCP') returned NULL", __FILE__, __LINE__, ERROR);
 		if (o.b) free(o.b);
 		return rtrn_handled;
 	}

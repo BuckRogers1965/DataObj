@@ -564,13 +564,18 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 	/* is re-minted). Keeping the name is what makes the internals wire up.  */
 	if (!alias || !alias[0] || (ResolvePath(alias) && !force))
 	{
-		Bridge_FreshAlias(local, container, classname, fresh, sizeof(fresh));
+		/* IT ARRIVED NAMED. CreateObject mints in the container by the same
+		   rule this does, so minting a second one here would step over the
+		   name the engine had already taken and the first Slider dropped on
+		   an empty canvas would come back Slider_2. Take the name it has;
+		   mint only if it somehow has none. */
+		if (!PathOfInstance(inst, fresh, sizeof(fresh)))
+			Bridge_FreshAlias(local, container, classname, fresh, sizeof(fresh));
 		alias = fresh;
 		SetPropStr(command, "as", alias);
 	}
 
 	RegisterPath(alias, inst);
-	Bridge_SetNameFromAlias(inst, alias);
 	Bridge_InstanceEvent(instance, local, alias, classname, GetParent(inst), "Root", GetPropStr(inst, "Container"), hidden, 0);
 }
 
@@ -697,7 +702,6 @@ void Bridge_CreateAlias(NodeObj instance, InstanceData *local, NodeObj command)
 	}
 
 	RegisterPath(alias, inst);
-	Bridge_SetNameFromAlias(inst, alias);
 	/* announce what it IS - the control the engine made. There is no alias  */
 	/* class to name any more, so this asks the instance instead of saying    */
 	/* a literal, and the client draws it as the ordinary control it is       */
@@ -820,7 +824,6 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 		SetPropInt(view, "W", 300);
 
 		RegisterPath(viewAlias, view);
-		Bridge_SetNameFromAlias(view, viewAlias);
 		/* Tell the ASKER the panel exists, and say where it really lives.
 		   It is nested in the object now, so nobody stumbles across it in
 		   a root listing any more - without this the client gets the panel's
@@ -921,7 +924,6 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 					Bridge_FreshAlias(local, viewAlias, name, memberAlias, sizeof(memberAlias));
 			}
 			RegisterPath(memberAlias, member);
-			Bridge_SetNameFromAlias(member, memberAlias);
 		}
 
 		snprintf(num, sizeof(num), "%d", y + 38);
@@ -2417,7 +2419,7 @@ void Bridge_ListInstances(NodeObj instance, InstanceData *local, NodeObj command
 		for (i = 0; i < count; i++)
 		{
 			inst = members[i];
-			if (!PathOfInstance(inst, pbuf, sizeof(pbuf)))
+			if (!RequirePathOf(inst, pbuf, sizeof(pbuf)))
 				continue;
 			class = ClassOfInstance(inst);
 			cont = GetPropStr(inst, "Container");

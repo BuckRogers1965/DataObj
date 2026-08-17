@@ -162,7 +162,71 @@ void RegisterPath(char * path, NodeObj inst)
 
 	if (!path || !path[0] || !inst)
 		return;
+
+	/* A SECOND NAME IS A MOVE, NOT AN EXTRA ONE. Naming something that is
+	   already named has to retire the old name, or the index keeps a key
+	   nobody will ever remove: the thing answers to two paths, only one of
+	   which its own Name agrees with, and the other sits there forever
+	   holding a name no mint will hand out again. The two rename paths in
+	   the bridge do this by hand, in the right order, because they knew;
+	   doing it here is what lets anything else register a name over an
+	   older one and be right. Their own UnregisterPath still runs first,
+	   which leaves nothing here to find - a no-op, not a double.
+	   Chrome's short well-known keys are deliberately a SECOND way to
+	   reach one instance, so they are not this: they name no location,
+	   and the leading slash is the difference. */
+	if (path[0] == '/')
+	{
+		char was[300];
+
+		if (PathOfInstance(inst, was, sizeof(was)) && strcmp(was, path) != 0)
+		{
+			char dbg[400];
+
+			snprintf(dbg, sizeof(dbg), "RENAMED '%s' -> '%s'", was, path);
+			DebugPrint(dbg, __FILE__, __LINE__, REGISTER);
+			UnregisterPath(was);
+		}
+	}
+
 	NSInsert(GetPathIndex(), path, (long) inst);
+
+	/* THE LAST SEGMENT IS THE NAME. It was already in the caller's hand and
+	   thrown away here, so every caller set it again on the next line -
+	   RegisterPath then Bridge_SetNameFromAlias, twice in the bridge's
+	   creates, twice more in import. Worse than duplication: the two could
+	   disagree, and a Name that disagrees with the path it was registered
+	   under is exactly the failure PathOfInstance reports as "calls itself
+	   X but that path is not in the index" - it derives from the Name, so
+	   the thing goes unaddressable while sitting in the index the whole
+	   time. Setting it HERE is what makes the two unable to differ.
+	   Set before the container is told, so whoever reacts to the arrival
+	   reads the name it arrived under rather than the one it had a moment
+	   ago. Only for a real path: the chrome's short well-known aliases
+	   (bridge.c) are lookup keys, not locations, and name nothing. */
+	if (path[0] == '/')
+	{
+		char *base = strrchr(path, '/') + 1;
+		char *had  = GetPropStr(inst, "Name");
+		char  prev[160];
+
+		/* COPIED, not held: `had` points into the Name property's own
+		   DataObj, and the write below replaces it - reading it afterwards
+		   to say what the name used to be is reading freed memory. */
+		snprintf(prev, sizeof(prev), "%s", (had && had[0]) ? had : "");
+
+		if (base[0] && strcmp(prev, base) != 0)
+		{
+			char dbg[400];
+
+			SetPropStr(inst, "Name", base);
+			snprintf(dbg, sizeof(dbg), "NAMED '%s' from its path '%s'%s%s",
+					 base, path,
+					 prev[0] ? ", was " : " (had no name)",
+					 prev[0] ? prev : "");
+			DebugPrint(dbg, __FILE__, __LINE__, REGISTER);
+		}
+	}
 
 	/* the container just gained a member, and that is otherwise invisible:
 	   containment is a property on the CHILD, so its fan-out reaches
@@ -304,6 +368,84 @@ int PathOfInstance(NodeObj inst, char * out, int outlen)
 		snprintf(out, outlen, "/%s", name);
 
 	return ResolvePath(out) == inst;
+}
+
+/* THE SAME LOOKUP, ASKED AS A DIFFERENT QUESTION.
+
+   ResolvePath and PathOfInstance both answer "not found" with NULL/0, and
+   two completely different facts arrive that way:
+
+     - the name is free, or this handle was never meant to be addressable.
+       That is the answer the caller WANTED. Minting asks it, an adopt check
+       asks it, a script's `exists` asks it. Saying anything at all about it
+       would be noise on the success path.
+
+     - the name was supposed to be there. A script writing a property by
+       path, a translator moving something it is already holding, a save
+       walking a container's own members. Absent here is a fault, and every
+       one of those sites swallowed it - `if (!PathOfInstance(...)) continue;`
+       - so a save quietly omitted a member and a mistyped path in a script
+       did nothing whatever, without a word.
+
+   Same trie, same lookup, same answer. What the call site knows and the
+   function cannot is which of the two it is asking, so it says so by which
+   one it calls. The Require forms are the second question: they report it,
+   naming the CALLER's file and line rather than this one, and then return
+   exactly what the plain form returns. They change nothing about what
+   happens - only about what is known when it does. */
+NodeObj RequirePathAt(char * path, char * file, int line)
+{
+	NodeObj inst = ResolvePath(path);
+	char dbg[400];
+
+	if (inst)
+		return inst;
+
+	snprintf(dbg, sizeof(dbg), "nothing is named '%s'",
+			 (path && path[0]) ? path : "");
+	DebugPrint(dbg, file, line, ERROR);
+
+	return NULL;
+}
+
+/* The reverse, for a caller that is HOLDING the instance. It is alive, so
+   a missing path is a fault in the naming rather than in the question.
+   Which fault matters, because the two have different causes and looked
+   identical for as long as both were 0: no Name at all (never named, or a
+   private handle somewhere that expects an addressable one), against a
+   Name whose path is not in the index (a sibling already holds it, or a
+   re-key was skipped and the thing is buried under its old name). */
+int RequirePathOfAt(NodeObj inst, char * out, int outlen, char * file, int line)
+{
+	char * name, * cont;
+	char dbg[500];
+
+	if (PathOfInstance(inst, out, outlen))
+		return 1;
+
+	if (!inst)
+	{
+		DebugPrint("asked where nothing lives", file, line, ERROR);
+		return 0;
+	}
+
+	name = GetPropStr(inst, "Name");
+	cont = GetPropStr(inst, "Container");
+
+	if (!name || !name[0])
+		snprintf(dbg, sizeof(dbg),
+				 "a live %s in '%s' has no Name, so nothing can reach it",
+				 GetNameStr(inst) ? GetNameStr(inst) : "instance",
+				 (cont && cont[0]) ? cont : "/Root");
+	else
+		snprintf(dbg, sizeof(dbg),
+				 "'%s' calls itself '%s' but that path is not in the index - "
+				 "a sibling holds the name, or a rename never re-keyed",
+				 (cont && cont[0]) ? cont : "/Root", name);
+
+	DebugPrint(dbg, file, line, ERROR);
+
+	return 0;
 }
 
 NodeObj RegObjList;
@@ -1190,8 +1332,20 @@ NodeObj FindClassRendering(int widget)
 	return NULL;
 }
 
+/* MADE SOMEWHERE, ANSWERING TO NOBODY. A private handle is a real instance
+   its owner keeps a pointer to and nothing else can reach: the socket
+   inside a port widget, the language host inside a ScriptBox. It is placed
+   - it has to live somewhere, like everything else - but it is never named,
+   so no path resolves to it, no listing announces it and no save records
+   it.
+
+   That state was reached by OMISSION: create it and then just don't name
+   it. Which works, and is indistinguishable from forgetting to, and left
+   the engine unable to tell a private part from a member whose naming had
+   not happened yet - the same ambiguity that made "no path" unloggable.
+   Saying it is what makes the difference real. */
 NodeObj
-CreateObject(NodeObj container, char * classname){
+CreatePrivate(NodeObj container, char * classname){
 
 	NodeObj class, inst;
 	msgobj InstanceStart;
@@ -1201,7 +1355,7 @@ CreateObject(NodeObj container, char * classname){
 	if (!class) {
 		char miss[200];
 		snprintf(miss, sizeof(miss),
-				 "CreateObject('%s'): no such registered class - its module is not"
+				 "CreatePrivate('%s'): no such registered class - its module is not"
 				 " loaded, or its own dependencies were unmet",
 				 classname ? classname : "");
 		DebugPrint ( miss, __FILE__, __LINE__, ERROR);
@@ -1212,7 +1366,7 @@ CreateObject(NodeObj container, char * classname){
 	if (!InstanceStart) {
 		char miss[200];
 		snprintf(miss, sizeof(miss),
-				 "CreateObject('%s'): that class has no InstanceStart, so nothing"
+				 "CreatePrivate('%s'): that class has no InstanceStart, so nothing"
 				 " can instantiate it", classname ? classname : "");
 		DebugPrint ( miss, __FILE__, __LINE__, ERROR);
 		return NULL;
@@ -1229,7 +1383,7 @@ CreateObject(NodeObj container, char * classname){
 
 		if (!container) {
 			snprintf(dbg, sizeof(dbg),
-					 "CreateObject('%s') REFUSED: no container given. Every object "
+					 "CreatePrivate('%s') REFUSED: no container given. Every object "
 					 "is created somewhere - pass the view it belongs in.", classname);
 			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 			return NULL;
@@ -1237,7 +1391,7 @@ CreateObject(NodeObj container, char * classname){
 
 		if (!PathOfInstance(container, cpath, sizeof(cpath))) {
 			snprintf(dbg, sizeof(dbg),
-					 "CreateObject('%s') REFUSED: the container has no path of its "
+					 "CreatePrivate('%s') REFUSED: the container has no path of its "
 					 "own, so it cannot hold anything yet. container path: '%s'", classname, GetPropStr(container, "Container"));
 			DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 			PrintNode(container);
@@ -1251,7 +1405,7 @@ CreateObject(NodeObj container, char * classname){
 
 	inst = (NodeObj)GetPropLong(class, "LastInstance");
 	if (!inst) {
-		DebugPrint("CreateObject: the class made no instance", __FILE__, __LINE__, ERROR);
+		DebugPrint("CreatePrivate: the class made no instance", __FILE__, __LINE__, ERROR);
 		return NULL;
 	}
 
@@ -1263,10 +1417,53 @@ CreateObject(NodeObj container, char * classname){
 	/*
 	{
 		char dbg[400];
-		snprintf(dbg, sizeof(dbg), "CreateObject %s -> %s", classname, cpath);
+		snprintf(dbg, sizeof(dbg), "CreatePrivate %s -> %s", classname, cpath);
 		DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 	}
 	*/
+
+	return inst;
+}
+
+/* An ordinary member of its container: placed the same way, and NAMED, so
+   it can be addressed, listed, saved and wired by path from the moment it
+   exists. The difference from a private handle is the name, and it is the
+   only difference.
+
+   NAMING IS PART OF CREATION. It used to be the caller's next line, which
+   left a live, placed, class-registered instance that nothing could reach
+   for as long as the caller took to get round to it - and every caller
+   closed that window by hand, with the same three lines, re-resolving the
+   container path this function had resolved and thrown away. Worse than
+   the duplication: an object could not build its own panel in its own
+   constructor, because a panel is made of objects created IN it and
+   creating something in it needs its path. That is the only reason widget
+   construction is in two halves.
+
+   The name minted here is a placeholder in the sense that anyone may name
+   it something better on the next line - RegisterPath treats a second name
+   as a move and retires this one. It is not a placeholder in any sense
+   that matters to the fabric: the thing is addressable now, and there is
+   no moment when it is not. */
+NodeObj
+CreateObject(NodeObj container, char * classname){
+
+	NodeObj inst = CreatePrivate(container, classname);
+	char cpath[300], name[192], path[512];
+
+	if (!inst)
+		return NULL;
+
+	/* CreatePrivate refuses a container with no path of its own, so by
+	   here there is one - asked as an assertion because if that ever
+	   stopped being true the instance would come back unaddressable and
+	   this is the only place that would know. */
+	if (!RequirePathOf(container, cpath, sizeof(cpath)))
+		return inst;
+
+	MintFreshName(classname, cpath, name, sizeof(name));
+	snprintf(path, sizeof(path), "%s/%s", cpath, name);
+	RegisterPath(path, inst);
 
 	return inst;
 }
@@ -1528,12 +1725,21 @@ NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
 		snprintf(base, sizeof(base), "%s_%s",
 				 (tn && tn[0]) ? tn : GetNameStr(class), propname);
 
-		if (PathOfInstance(container, cpath, sizeof(cpath)))
-			MintFreshName(base, cpath, newname, sizeof(newname));
-		else
-			snprintf(newname, sizeof(newname), "%s", base);
+		/* REGISTERED, not just renamed. It arrived with a minted name of
+		   its own (CreateObject), so writing the Name alone would leave
+		   that path in the index pointing at something that no longer
+		   answers to it - registering the new name is what retires the
+		   old one. */
+		if (RequirePathOf(container, cpath, sizeof(cpath)))
+		{
+			char path[512];
 
-		SetOrDeliverProp(inst, "Name", newname);
+			MintFreshName(base, cpath, newname, sizeof(newname));
+			snprintf(path, sizeof(path), "%s/%s", cpath, newname);
+			RegisterPath(path, inst);
+		}
+		else
+			SetOrDeliverProp(inst, "Name", base);
 	}
 
 	snprintf(dbg, sizeof(dbg), "CreateAlias: '%s'.%s -> a %s pointing at it",

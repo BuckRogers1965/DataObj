@@ -306,10 +306,10 @@ static NodeObj Sibling(NodeObj self, char *name)
 
 	if (!owner || !name || !name[0])
 		return NULL;
-	if (!PathOfInstance(owner, own, sizeof(own)))
+	if (!RequirePathOf(owner, own, sizeof(own)))
 		return NULL;
 	snprintf(path, sizeof(path), "%s/%s", own, name);
-	return ResolvePath(path);
+	return RequirePath(path);
 }
 
 /* --- state ------------------------------------------------------------- */
@@ -371,7 +371,7 @@ static DataObj V_sibset(NodeObj self, DataObj *argv, long cb)
 
 static DataObj V_pathget(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj inst = ResolvePath(Arg(argv, 0));
+	NodeObj inst = RequirePath(Arg(argv, 0));
 	char   *v;
 	(void) self; (void) cb;
 	v = inst ? ScriptReadProp(inst, Arg(argv, 1)) : NULL;
@@ -380,7 +380,7 @@ static DataObj V_pathget(NodeObj self, DataObj *argv, long cb)
 
 static DataObj V_pathset(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj inst = ResolvePath(Arg(argv, 0));
+	NodeObj inst = RequirePath(Arg(argv, 0));
 	(void) self; (void) cb;
 	if (inst)
 		SetOrDeliverProp(inst, Arg(argv, 1), Arg(argv, 2));
@@ -438,7 +438,7 @@ static DataObj V_create(NodeObj self, DataObj *argv, long cb)
 		return Str("");
 	*slash = 0;
 
-	container = ResolvePath(cpath[0] ? cpath : "/Root");
+	container = RequirePath(cpath[0] ? cpath : "/Root");
 	if (!container)
 		return Str("");
 
@@ -446,14 +446,15 @@ static DataObj V_create(NodeObj self, DataObj *argv, long cb)
 	if (!inst)
 		return Str("");
 
-	SetPropStr(inst, "Name", slash + 1);
+	/* RegisterPath names it from the path - and a Name written first would
+	   strand the name it arrived with (see Widget_Create) */
 	RegisterPath(path, inst);
 	return Str(path);
 }
 
 static DataObj V_destroy(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj inst = ResolvePath(Arg(argv, 0));
+	NodeObj inst = RequirePath(Arg(argv, 0));
 	(void) self; (void) cb;
 
 	if (inst)
@@ -466,7 +467,7 @@ static DataObj V_destroy(NodeObj self, DataObj *argv, long cb)
 
 static DataObj V_activate(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj inst = ResolvePath(Arg(argv, 0));
+	NodeObj inst = RequirePath(Arg(argv, 0));
 	(void) self; (void) cb;
 
 	if (inst)
@@ -476,8 +477,8 @@ static DataObj V_activate(NodeObj self, DataObj *argv, long cb)
 
 static DataObj V_disconnect(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj from = ResolvePath(Arg(argv, 0));
-	NodeObj to   = ResolvePath(Arg(argv, 2));
+	NodeObj from = RequirePath(Arg(argv, 0));
+	NodeObj to   = RequirePath(Arg(argv, 2));
 	(void) self; (void) cb;
 
 	if (from && to)
@@ -532,7 +533,7 @@ static int ScriptSub_OnMsg(NodeObj instance, MsgId message, NodeObj data)
 
 static DataObj V_connect(NodeObj self, DataObj *argv, long cb)
 {
-	NodeObj       from = ResolvePath(Arg(argv, 0));
+	NodeObj       from = RequirePath(Arg(argv, 0));
 	ScriptCommon *c    = Common(self);
 	ScriptSub    *s;
 	NodeObj       sink, to;
@@ -544,7 +545,7 @@ static DataObj V_connect(NodeObj self, DataObj *argv, long cb)
 	   Connect the bridge's connect command makes */
 	if (!cb)
 	{
-		to = ResolvePath(Arg(argv, 2));
+		to = RequirePath(Arg(argv, 2));
 		if (to)
 			Connect(from, Arg(argv, 1), to, Arg(argv, 3));
 		return NULL;

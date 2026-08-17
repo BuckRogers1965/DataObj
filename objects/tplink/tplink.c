@@ -242,7 +242,7 @@ static void TPLink_Start(NodeObj instance, int which)
 		local->inner = NULL;
 	}
 
-	local->inner = CreateObject(instance, "TCP");
+	local->inner = CreatePrivate(instance, "TCP");
 	if (!local->inner)
 	{
 		TPLink_SetNet(instance, "Error: TCP class is not loaded");

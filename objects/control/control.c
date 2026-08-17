@@ -89,11 +89,18 @@ NodeObj Widget_Create(NodeObj container, char *cls, char *name)
 	if (!inst)
 		return NULL;
 
-	SetPropStr(inst, "Name", name);
+	/* NO Name WRITE HERE. It arrived named and registered under a minted
+	   name; RegisterPath below moves it to this one and sets the Name from
+	   it. Writing the Name first would make PathOfInstance derive a path
+	   that is not in the index, so the minted one could not be found to
+	   retire, and it would sit there forever holding a name. */
 
 	/* register its path so it resolves like any placed object - now it can
-	   hold its own children (its panel, an inner host, ...) */
-	if (PathOfInstance(container, cpath, sizeof(cpath)))
+	   hold its own children (its panel, an inner host, ...). CreateObject
+	   already refused an unpathable container, so failing HERE means the
+	   container lost its name between the two calls - the widget would come
+	   up unaddressable and silent about it. */
+	if (RequirePathOf(container, cpath, sizeof(cpath)))
 	{
 		snprintf(path, sizeof(path), "%s/%s", cpath, name);
 		RegisterPath(path, inst);
@@ -507,8 +514,9 @@ void BuildChrome(void){
 	fileMenu = CreateObject(GetRootView(), "MenuButton");
 	if (fileMenu) {
 		/* an ordinary instance in the root view, with an ordinary name -
-		   no short-name category, nothing for a walker to special-case */
-		SetPropStr(fileMenu, "Name", "FileMenu");
+		   no short-name category, nothing for a walker to special-case.
+		   Registering IS the naming; a Name written first would strand the
+		   name it was created with (see Widget_Create). */
 		RegisterPath("/Root/FileMenu", fileMenu);
 		/* somewhere of their own: both menus defaulted to 0,0 and sat
 		   exactly on top of each other, so only the top one could ever
@@ -526,7 +534,6 @@ void BuildChrome(void){
 
 	modeMenu = CreateObject(GetRootView(), "MenuButton");
 	if (modeMenu) {
-		SetPropStr(modeMenu, "Name", "ModeMenu");
 		RegisterPath("/Root/ModeMenu", modeMenu);
 		SetPropInt(modeMenu, "X", 110);
 		SetPropInt(modeMenu, "Y", 6);

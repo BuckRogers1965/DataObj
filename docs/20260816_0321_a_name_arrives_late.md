@@ -196,3 +196,152 @@ thirty two-phase constructors, ten silent skips.
 
 A state nobody designed does not announce itself. It gets accommodated, once per
 site, by people who each think they are handling a detail.
+
+---
+
+## What it took, 16 August
+
+All of the above got built. Not in the order it was written, and one of the
+claims above is wrong - that part is at the end.
+
+### The two questions, spelled apart
+
+`RequirePath` and `RequirePathOf` sit beside `ResolvePath` and
+`PathOfInstance`. Same trie, same lookup, same answer; the difference is that
+the Require forms report before returning it. They are macros over
+`...At(..., __FILE__, __LINE__)`, so the ERROR names the caller rather than
+object.c - which matters more than it sounds, because the whole point is that
+the *site* knows what the function cannot.
+
+`RequirePathOf` says which of the two faults it is: no `Name` at all, against a
+`Name` whose path is not in the index. Those had been indistinguishable for as
+long as both were `0`.
+
+The rule for choosing turned out to be structural, and it is in the header:
+**walking `FirstMember` means every one of them was named on purpose, so
+assert; walking `FirstInstance` reaches private handles that are unnamed
+deliberately, so probe.** Which iterator you are standing in tells you which
+question you are asking. That is why five sites stayed exactly as they were and
+were not oversights after all.
+
+The worst case was the one this started from. `script.c`'s `pathset` did
+
+    NodeObj inst = ResolvePath(Arg(argv, 0));
+    if (inst) SetOrDeliverProp(inst, ...);
+
+so a mistyped path in a script did nothing, silently, forever. Every path verb
+in that file now asserts. `exists` is the one probe left - the API had been
+telling us the two questions were different all along.
+
+### What it found first: the basename, discarded
+
+Every one of the nine create sites had the same shape: work out a full path,
+`RegisterPath(alias, inst)`, then set `Name` from that path's last segment.
+`Bridge_SetNameFromAlias` four times, open-coded in import twice, on the line
+before in script and control.
+
+`RegisterPath` already splits the path on its last slash - it needs the
+container. It had the basename in hand and threw it away, which is the same
+shape as the container announcement it throws away in the piece before this
+one. And because the two were separate calls they COULD disagree, which is
+exactly the fault `RequirePathOf` reports: the reverse lookup derives from the
+`Name`, so a `Name` that drifted from its registered path leaves the thing
+unreachable while sitting in the index the whole time.
+
+So `RegisterPath` sets the `Name`, before it tells the container, and six
+companion calls went away. The two `Bridge_SetNameFromAlias` calls that restore
+a name after a REFUSED rename stayed - no register follows those, so they are
+not this.
+
+### The bug I put in, and the thing that found it
+
+That change shipped with a use-after-free in the log line:
+
+    char *had = GetPropStr(inst, "Name");   /* into the Name DataObj */
+    ...
+    SetPropStr(inst, "Name", base);          /* replaces it          */
+    snprintf(dbg, ..., had[0] ? ", was " : ..., had);
+
+Reading the old name AFTER the write that freed it, to say what the name used
+to be.
+
+Four of five builds passed. `free()` leaves the bytes where they are, so
+`snprintf` read the old name back intact and printed a correct log line;
+`-O0`, `-O3` and gcov were all reading freed memory and getting away with it,
+and ubsan does not check heap lifetime. ASan poisons the block and quarantines
+it, so the same read aborts the process on the spot. The variant that failed is
+the one that worked.
+
+Worth being blunt about the review value here: the block is six lines, it was
+written deliberately, and reading it twice did not surface it. On paper `had` is
+just a string you print. Nothing but an allocator that refuses to let a freed
+byte look normal was ever going to catch it.
+
+### The snag: `CreateObject` was already the private-handle route
+
+The plan said `CreateObject` should name and register. It cannot, as written,
+because three widgets create their inner TCP sockets with it - mcpsource twice,
+tplink once - and depend on them staying unaddressable. Naming them would drop
+three widgets' private sockets onto the canvas and into every save.
+
+Which is the same finding again, one level up. **The difference between "a
+member" and "a private part" was expressed by omission** - create it and then
+just do not name it - so the engine could not tell one from the other, exactly
+as it could not tell an expected missing name from a broken one.
+
+`CreatePrivate` is that state said out loud. The body is the old `CreateObject`
+verbatim; `CreateObject` is now `CreatePrivate` plus a name. The three sites say
+which one they mean. Nothing about what happens changed - only about what is
+stated, which is the whole theme.
+
+### Naming is part of creation
+
+`CreateObject` mints in the container with `MintFreshName` and registers, so it
+returns something addressable. `RegisterPath` treats a second name as a move and
+retires the first, which is what lets a caller rename it on the next line
+without leaking the minted one.
+
+Five sites had to stop writing `Name` themselves: `Widget_Create`,
+`BuildChrome` twice, `script.c`'s create, and `CreateAlias` - which had been
+writing `Name` and never registering at all, leaving the bridge to register it
+afterwards. A `Name` write between the mint and the register defeats the
+re-key, because `PathOfInstance` would then derive a path that is not in the
+index and the minted one could not be found to retire.
+
+**And one contract consequence.** With the engine minting, a caller that also
+mints steps over the name the engine just took - the first Slider dropped on an
+empty canvas would come back `Slider_2`. `Bridge_Create` now keeps the name the
+instance arrived with. One minting authority instead of two, which is what
+`CloneInstance`'s comment has said all along: *the engine names it, this is the
+core's job, not the caller's.*
+
+The `Widget_Create` adopt problem - the one place the piece above called out as
+not mechanical - turned out not to exist. The adopt check already ran BEFORE
+the create, so nothing had to move.
+
+### The claim above that is wrong
+
+This piece says the flip means a constructor can build its own panel, and that
+the two-phase widget construction becomes a choice.
+
+It does not. `CreateObject` calls `InstanceStart` and mints AFTER it returns -
+the instance does not exist until the constructor makes it, so inside
+`InstanceStart` there is still no path. `scriptbox.c:354` stays exactly as it
+is, and stays correct. Closing that window means deciding the name before the
+constructor runs and handing it in, which is a different change with a
+different shape.
+
+The window that closed is the one between `CreateObject` returning and the
+caller getting round to naming - which is the one the nine triples existed for,
+and the one where a save could find a placed thing with no name. That is worth
+having. It is just not the same window, and I wrote it as though it were.
+
+---
+
+The pattern under all of it, three times in one file: **the engine knew the
+answer and threw it away.** The container was told about every arrival and kept
+nothing. `RegisterPath` held the basename and dropped it. `CreateObject`
+resolved the container path and discarded it so nine callers could resolve it
+again. Each one got absorbed locally by whoever hit it, which is why none of
+them ever looked like a bug.
+
