@@ -442,7 +442,7 @@ static DataObj V_create(NodeObj self, DataObj *argv, long cb)
 	if (!container)
 		return Str("");
 
-	inst = CreateObject(container, cls);
+	inst = CreateObject(container, cls, slash + 1);
 	if (!inst)
 		return Str("");
 

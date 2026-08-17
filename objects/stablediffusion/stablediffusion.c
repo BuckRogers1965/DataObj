@@ -43,7 +43,6 @@ typedef struct InstanceData
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void SD_BuildPanel(NodeObj instance);
 static WidgetItem SDPanel[];
 static int  SD_BuildTask(NodeObj instance, NodeObj data, int msgid);
 static int  SD_Poll(NodeObj instance, NodeObj taskdata, int reason);
@@ -771,11 +770,6 @@ int SD_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		SD_BuildPanel(instance);
-	}
 	return rtrn_handled;
 }
 
@@ -819,6 +813,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, SDPanel);
+
 	local->poll = CreateTask(ObjGetTaskList());
 	local->retry = CreateTask(ObjGetTaskList());
 	local->buildTask = CreateTask(ObjGetTaskList());
@@ -856,10 +853,6 @@ static WidgetItem SDPanel[] = {
 	{ NULL }
 };
 
-static void SD_BuildPanel(NodeObj instance)
-{
-	Widget_BuildTable(instance, SDPanel);
-}
 
 static int SD_BuildTask(NodeObj instance, NodeObj data, int msgid)
 {
@@ -873,7 +866,6 @@ static int SD_BuildTask(NodeObj instance, NodeObj data, int msgid)
 	if (!local->panelBuilt)
 	{
 		local->panelBuilt = 1;
-		SD_BuildPanel(instance);
 		SD_Activate(instance, msg_initialize, NULL);
 		if (local->enabled)
 			SD_StartModels(instance, local);

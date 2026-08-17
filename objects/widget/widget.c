@@ -10,7 +10,6 @@
 #define WIDGET_IMPL
 #include "widget.h"
 
-typedef int (*WidgetActivate)(NodeObj, MsgId, NodeObj);
 
 
 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
@@ -374,108 +373,107 @@ void Widget_Init(NodeObj instance, WidgetItem *table)
 	}
 }
 
-/* ---- the deferred panel build, shared by every widget ---- */
+/* ---- the panel, declared at construction and built at creation ---- */
 
-int Widget_BuildOnce(NodeObj instance, WidgetItem *table)
+/* PUT ME WHERE I WAS TOLD, UNDER THE NAME I WAS GIVEN, AND LAY OUT MY PANEL.
+
+   The one call a widget's constructor makes about its own existence.
+   CreateObject settles the name before the instance is made and hands both
+   facts over, so this can register the instance and then build its controls
+   INSIDE it - the controls need their container to have a path, which is
+   the whole reason this could not happen in a constructor before.
+
+   The name is kept, never re-minted: the controls are created under this
+   path and the widget must not move out from under them. Minting is only
+   for a caller that genuinely had no name to give.
+
+   The table is walked in its own order, which is why panels are listed
+   before controls - a control names the panel it goes in, so the panel has
+   to exist first. */
+void Widget_Place(NodeObj instance, NodeObj place, WidgetItem *table)
 {
-	if (!instance || !table || GetPropInt(instance, "PanelBuilt"))
-		return 0;
-	SetPropInt(instance, "PanelBuilt", 1);
+	NodeObj home = place ? (NodeObj) GetPropLong(place, "Container") : NULL;
+	char   *mine = place ? GetPropStr(place, "Name") : NULL;
+	char    cpath[300], name[192], path[512];
+	/* holds the path AND the whole member list, so it is sized off what it
+	   carries rather than off what a path usually is */
+	char    dbg[1024];
+
+	if (!instance || !table)
+		return;
+
+	if (!home)
+	{
+		snprintf(dbg, sizeof(dbg),
+				 "PLACE '%s': no location handed to the constructor - nothing "
+				 "can be built inside something that is nowhere",
+				 GetNameStr(instance) ? GetNameStr(instance) : "?");
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return;
+	}
+
+	if (!PathOfInstance(home, cpath, sizeof(cpath)))
+	{
+		snprintf(dbg, sizeof(dbg),
+				 "PLACE '%s': the location handed over ('%s') has no path of "
+				 "its own, so nothing can be created in it",
+				 GetNameStr(instance) ? GetNameStr(instance) : "?",
+				 GetPropStr(home, "Name") ? GetPropStr(home, "Name") : "?");
+		DebugPrint(dbg, __FILE__, __LINE__, ERROR);
+		return;
+	}
+
+	if (mine && mine[0])
+		snprintf(name, sizeof(name), "%s", mine);
+	else
+		MintFreshName(GetNameStr(instance) ? GetNameStr(instance) : "Widget",
+					  cpath, name, sizeof(name));
+
+	snprintf(path, sizeof(path), "%s/%s", cpath, name);
+	RegisterPath(path, instance);
+
 	Widget_BuildTable(instance, table);
-	return 1;
-}
 
-/* A deferred build is ONE-SHOT: the task exists to fire once, so it is freed
-   when it fires rather than left parked. CreateTask always allocates, and
-   RemoveTask only returns an entry to the reuse pool - which nothing in this
-   path draws from, since it calls CreateTask again next time. A handle left
-   behind is one task_entry per widget panel ever built: constant per build, so
-   a compounding check never sees it, and the palette alone arms about
-   twenty-eight of them before anyone touches anything.
-   Freeing it from inside its own callback is safe - ExecTasks unlinks a task
-   from the run list before invoking it and never refers to it again. */
-static void Widget_BuildDone(NodeObj instance)
-{
-	TaskObj task = (TaskObj)GetPropLong(instance, "WidgetBuildTask");
-
-	if (task)
+	/* what it actually made, by name - one line per widget, at -v 3 */
 	{
-		SetPropLong(instance, "WidgetBuildTask", 0);
-		DeleteTask(task);
+		NodeObj e;
+		int     n = 0;
+		char    made[420];
+
+		made[0] = 0;
+		for (e = FirstMember(instance); e; e = GetNextSibling(e))
+		{
+			NodeObj m  = MemberInstance(e);
+			char   *mn = m ? GetPropStr(m, "Name") : NULL;
+
+			if (mn && strlen(made) + strlen(mn) + 3 < sizeof(made))
+			{
+				if (made[0])
+					strcat(made, ", ");
+				strcat(made, mn);
+			}
+			n++;
+		}
+		snprintf(dbg, sizeof(dbg), "PLACE '%s' holds %d: %s",
+				 path, n, made[0] ? made : "(nothing)");
+		DebugPrint(dbg, __FILE__, __LINE__, PLACE);
 	}
 }
 
-/* one tick after creation the bridge has placed this instance and registered
-   its path, so the controls and sub-views created inside it resolve. Build the
-   panel once (unless an early Activate already did), then run the object's own
-   placement setup by calling its Activate with msg_initialize. */
-static int Widget_BuildTask(NodeObj instance, NodeObj data, int msgid)
-{
-	WidgetItem *table = (WidgetItem *)GetPropLong(instance, "WidgetTable");
+/* A PANEL IS DECLARED BY A CLASS, NOT BUILT BY AN INSTANCE.
 
-	(void) data;
-	(void) msgid;
+   The table IS the declaration - the same fact the reference widgets carry
+   as ControlInfo beside their code - and Widget_Publish already receives it
+   at ClassStart. The panel is built by whoever creates an instance, at the
+   point where it has a name and a place and the controls inside it resolve.
 
-	if (Widget_BuildOnce(instance, table))
-	{
-		WidgetActivate act = (WidgetActivate)GetPropLong(instance, "Activate");
-		if (act)
-			act(instance, msg_initialize, NULL);
-	}
-	Widget_BuildDone(instance);
-	return rtrn_handled;
-}
-
-void Widget_DeferBuild(NodeObj instance, WidgetItem *table)
-{
-	NodeObj task;
-
-	if (!instance || !table)
-		return;
-	SetPropLong(instance, "WidgetTable", (long)table);
-	task = CreateTask(ObjGetTaskList());
-	SetPropLong(instance, "WidgetBuildTask", (long)task);
-	AddTaskMilli(task, 1, (FuncPtr)Widget_BuildTask, msg_send, instance);
-}
-
-void Widget_CancelBuild(NodeObj instance)
-{
-	TaskObj task = (TaskObj)GetPropLong(instance, "WidgetBuildTask");
-
-	if (task)
-	{
-		/* DeleteTask, not RemoveTask: RemoveTask only parks the entry on the
-		   reuse pool, and this path allocates a fresh one every time. */
-		SetPropLong(instance, "WidgetBuildTask", 0);
-		DeleteTask(task);
-	}
-}
-
-/* the quiet build - panel only, no Activate (so a source doesn't start acting
-   the moment it is placed) */
-static int Widget_BuildTaskQuiet(NodeObj instance, NodeObj data, int msgid)
-{
-	WidgetItem *table = (WidgetItem *)GetPropLong(instance, "WidgetTable");
-
-	(void) data;
-	(void) msgid;
-
-	Widget_BuildOnce(instance, table);
-	Widget_BuildDone(instance);
-	return rtrn_handled;
-}
-
-void Widget_DeferBuildQuiet(NodeObj instance, WidgetItem *table)
-{
-	NodeObj task;
-
-	if (!instance || !table)
-		return;
-	SetPropLong(instance, "WidgetTable", (long)table);
-	task = CreateTask(ObjGetTaskList());
-	SetPropLong(instance, "WidgetBuildTask", (long)task);
-	AddTaskMilli(task, 1, (FuncPtr)Widget_BuildTaskQuiet, msg_send, instance);
-}
+   What this replaces was mine and it was wrong twice over. The widget armed
+   a task to build itself a tick later, because at InstanceStart it had no
+   path yet - so construction became two phases, which needed a flag to
+   remember which half had run, and the flag was an ordinary property. Every
+   clone, save and import carried "already built" and skipped the half that
+   installs the compiled handlers, so a copy came up looking complete and
+   behaving dead. */
 
 /* ---------------------------------------------------------------------------
  * The Widget class: a Control that contains Controls, plus the behaviours
@@ -526,10 +524,8 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	SetPropLong(ClassSelf, "BuildTable",      (long)Widget_BuildTable);
 	SetPropLong(ClassSelf, "Publish",         (long)Widget_Publish);
 	SetPropLong(ClassSelf, "Init",            (long)Widget_Init);
-	SetPropLong(ClassSelf, "BuildOnce",       (long)Widget_BuildOnce);
-	SetPropLong(ClassSelf, "DeferBuild",      (long)Widget_DeferBuild);
-	SetPropLong(ClassSelf, "CancelBuild",     (long)Widget_CancelBuild);
-	SetPropLong(ClassSelf, "DeferBuildQuiet", (long)Widget_DeferBuildQuiet);
+	SetPropLong(ClassSelf, "Place",           (long)Widget_Place);
+
 
 	return rtrn_handled;
 }

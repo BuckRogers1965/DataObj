@@ -64,16 +64,31 @@ int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
    No list maintained anywhere and no marker property to remember to set -
    being a language host is now a fact about the class tree. Drop a new
    language .object in and it appears in the dropdown.                      */
+static int ScriptBox_NameCmp(const void *a, const void *b)
+{
+	return strcasecmp(*(char * const *) a, *(char * const *) b);
+}
+
+#define SCRIPTBOX_MAX_HOSTS 32
+
+/* IN NAME ORDER, STATED HERE. The class walk hands them over in module load
+   order, and modules are found by a raw directory scan - so the order was
+   readdir order, which a rebuild reshuffles. Lua sat last for months and
+   came back second after one. That matters beyond tidiness because
+   ScriptBox_PickDefault reads the FIRST entry: which language a new box
+   speaks was decided by how the filesystem happened to list a directory.
+   Same fault the palette had until BuildPalette sorted its own contents. */
 static void ScriptBox_DiscoverHosts(char *out, int outlen)
 {
 	NodeObj cls;
-	int used = 0, first = 1;
-	char *nm;
+	char   *names[SCRIPTBOX_MAX_HOSTS];
+	int     n = 0, i, used;
 
 	out[0] = '\0';
 	for (cls = FirstClass(); cls; cls = NextClass(cls))
 		{
 			char *par = GetPropStr(cls, "Parent");
+			char *nm;
 
 			if (!par || strcmp(par, "Script"))
 				continue;
@@ -82,10 +97,27 @@ static void ScriptBox_DiscoverHosts(char *out, int outlen)
 			if (!nm)
 				continue;
 
-			used = (int) strlen(out);
-			snprintf(out + used, outlen - used, "%s%s", first ? "" : ",", nm);
-			first = 0;
+			if (n < SCRIPTBOX_MAX_HOSTS)
+				names[n++] = nm;
+			else
+				DebugPrint("ScriptBox: more language hosts than SCRIPTBOX_MAX_HOSTS "
+						   "- the rest are not offered", __FILE__, __LINE__, ERROR);
 		}
+
+	qsort(names, (size_t) n, sizeof(char *), ScriptBox_NameCmp);
+
+	for (i = 0; i < n; i++)
+	{
+		used = (int) strlen(out);
+		snprintf(out + used, outlen - used, "%s%s", i ? "," : "", names[i]);
+	}
+
+	{
+		char dbg[400];
+		snprintf(dbg, sizeof(dbg), "ScriptBox: %d language host(s), name order: %s",
+				 n, out[0] ? out : "(none)");
+		DebugPrint(dbg, __FILE__, __LINE__, REGISTER);
+	}
 }
 
 /* append one line to the Output box - a script that emits several times   */
@@ -349,10 +381,9 @@ int ScriptBox_Activate(NodeObj instance, MsgId message, NodeObj data)
 		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
-	/* now the box has a path (deferred build / activation), build the panel and
-	   bring the inner host up - a sub-object needs the box's OWN path first, so
-	   this cannot happen in InstanceStart (the path is set after it returns) */
-	Widget_BuildOnce(instance, ScriptBoxPanel);
+	/* bring the inner host up on first activation, not at construction: a
+	   palette seed is a real instance, and starting an interpreter for every
+	   one of them at boot is work nobody asked for. */
 	if (!local->host)
 		ScriptBox_SwapHost(instance, GetPropStr(instance, "Language"));
 
@@ -477,6 +508,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	Widget_MainSize(instance, ScriptBoxPanel);
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, ScriptBoxPanel);
+
 	/* the deferred build calls Activate(msg_initialize) once the box has a path -
 	   that is where the panel AND the inner host come up (both need the path, so
 	   NEITHER can be created here in InstanceStart). msg_initialize does not run
@@ -486,7 +520,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   boot and a catalog entry is looked at, not run (BuildPalette's own
 	   contract, control.c). The loud variant called Activate one tick after
 	   creation, which is what compiled and lit every box at startup. */
-	Widget_DeferBuildQuiet(instance, ScriptBoxPanel);
 
 	return rtrn_handled;
 }
@@ -495,7 +528,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* the host IS ours to delete: it is a private handle, not a

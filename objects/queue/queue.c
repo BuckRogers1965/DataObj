@@ -171,7 +171,6 @@ int Queue_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, QueuePanel);
 
 	if (local->active)
 		return rtrn_handled;
@@ -225,7 +224,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, QueuePanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, QueuePanel);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, QueuePanel);
 
 	return rtrn_handled;
 }
@@ -234,7 +235,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->q)

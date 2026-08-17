@@ -46,7 +46,6 @@ typedef struct InstanceData
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void Ollama_BuildPanel(NodeObj instance);
 static WidgetItem OllamaPanel[];
 static int  Ollama_BuildTask(NodeObj instance, NodeObj data, int msgid);
 static int  Ollama_Poll(NodeObj instance, NodeObj taskdata, int reason);
@@ -641,11 +640,6 @@ int Ollama_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		Ollama_BuildPanel(instance);
-	}
 	return rtrn_handled;
 }
 
@@ -687,6 +681,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	Widget_MainSize(instance, OllamaPanel);
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, OllamaPanel);
+
 	local->poll = CreateTask(ObjGetTaskList());
 	local->buildTask = CreateTask(ObjGetTaskList());
 	AddTaskMilli(local->buildTask, 1, (FuncPtr)Ollama_BuildTask, msg_send, instance);
@@ -717,11 +714,6 @@ static WidgetItem OllamaPanel[] = {
 	{ NULL }
 };
 
-static void Ollama_BuildPanel(NodeObj instance)
-{
-	/* main view, Help, and every control - all from the one table */
-	Widget_BuildTable(instance, OllamaPanel);
-}
 
 static int Ollama_BuildTask(NodeObj instance, NodeObj data, int msgid)
 {
@@ -733,7 +725,6 @@ static int Ollama_BuildTask(NodeObj instance, NodeObj data, int msgid)
 	if (local && !local->panelBuilt)
 	{
 		local->panelBuilt = 1;
-		Ollama_BuildPanel(instance);
 		Ollama_Activate(instance, msg_initialize, NULL);
 		if (local->enabled)			/* fill the model dropdown from the server */
 			Ollama_StartModels(instance, local);

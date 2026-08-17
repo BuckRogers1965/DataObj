@@ -85,7 +85,7 @@ NodeObj Widget_Create(NodeObj container, char *cls, char *name)
 		}
 	}
 
-	inst = CreateObject(container, cls);
+	inst = CreateObject(container, cls, name);
 	if (!inst)
 		return NULL;
 
@@ -511,7 +511,7 @@ void BuildChrome(void){
 	Chrome = NewNode(INTEGER);
 	SetName(Chrome, "Chrome");
 
-	fileMenu = CreateObject(GetRootView(), "MenuButton");
+	fileMenu = CreateObject(GetRootView(), "MenuButton", "FileMenu");
 	if (fileMenu) {
 		/* an ordinary instance in the root view, with an ordinary name -
 		   no short-name category, nothing for a walker to special-case.
@@ -532,7 +532,7 @@ void BuildChrome(void){
 		SetPropStr(Chrome, "FileMenu", "/Root/FileMenu");
 	}
 
-	modeMenu = CreateObject(GetRootView(), "MenuButton");
+	modeMenu = CreateObject(GetRootView(), "MenuButton", "ModeMenu");
 	if (modeMenu) {
 		RegisterPath("/Root/ModeMenu", modeMenu);
 		SetPropInt(modeMenu, "X", 110);
@@ -573,7 +573,7 @@ NodeObj BuildSettingsView(NodeObj target, ControlSpec *specs, int count)
 
 	for (i = 0; i < count; i++)
 	{
-		control = CreateObject(SettingsHome, specs[i].controlClass);
+		control = CreateObject(SettingsHome, specs[i].controlClass, NULL);
 		if (!control)
 			continue;
 

@@ -681,7 +681,6 @@ int UDPPort_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	UDPPort_Trace(instance, "activate: building panel");
 
-	Widget_BuildOnce(instance, UDPPortPanel);
 
 	SetPropStr(instance, "Ready", "0");
 	UDPPort_ShowState(instance, local->running);
@@ -750,8 +749,10 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, UDPPortPanel);
+
 	/* the panel is built one tick from now, when this instance has a path */
-	Widget_DeferBuild(instance, UDPPortPanel);
 
 	/* SETUP IS ARMED AT BIRTH - dragged out, cloned, loaded or imported, every
 	   instance gets it (the reference gets the same callback from ACTIVATE_MSG
@@ -804,7 +805,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message; (void) data;
 
-	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 
 	if (local)
 	{

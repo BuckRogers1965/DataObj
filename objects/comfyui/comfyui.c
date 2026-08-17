@@ -49,7 +49,6 @@ typedef struct InstanceData
 static NodeObj LibrarySelf;
 static NodeObj ClassSelf;
 
-static void Comfy_BuildPanel(NodeObj instance);
 static WidgetItem ComfyPanel[];
 static int  Comfy_BuildTask(NodeObj instance, NodeObj data, int msgid);
 static int  Comfy_Poll(NodeObj instance, NodeObj taskdata, int reason);
@@ -780,11 +779,6 @@ int Comfy_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	if (!local->panelBuilt)
-	{
-		local->panelBuilt = 1;
-		Comfy_BuildPanel(instance);
-	}
 	return rtrn_handled;
 }
 
@@ -848,6 +842,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, ComfyPanel);
+
 	local->poll = CreateTask(ObjGetTaskList());
 	local->retry = CreateTask(ObjGetTaskList());
 	local->buildTask = CreateTask(ObjGetTaskList());
@@ -882,12 +879,6 @@ static WidgetItem ComfyPanel[] = {
 	{ NULL }
 };
 
-static void Comfy_BuildPanel(NodeObj instance)
-{
-	/* main view, Help, the Settings sub-view, and every control - all from the
-	   one table, walked by Widget_BuildTable */
-	Widget_BuildTable(instance, ComfyPanel);
-}
 
 static int Comfy_BuildTask(NodeObj instance, NodeObj data, int msgid)
 {
@@ -901,7 +892,6 @@ static int Comfy_BuildTask(NodeObj instance, NodeObj data, int msgid)
 	if (!local->panelBuilt)
 	{
 		local->panelBuilt = 1;
-		Comfy_BuildPanel(instance);
 		Comfy_Activate(instance, msg_initialize, NULL);
 		/* settle: honor Generate/In only AFTER any startup deliveries have
 		   drained, so the widget never renders on its own at creation */

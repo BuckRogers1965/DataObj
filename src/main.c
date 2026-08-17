@@ -330,9 +330,9 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 	{
 		NodeObj BridgeTcp, Bridge, BridgeProbe;
 
-		BridgeTcp   = CreateObject(Main, "TCP");
-		Bridge      = CreateObject(Main, "Bridge");
-		BridgeProbe = CreateObject(Main, "Out");
+		BridgeTcp   = CreateObject(Main, "TCP", NULL);
+		Bridge      = CreateObject(Main, "Bridge", NULL);
+		BridgeProbe = CreateObject(Main, "Out", NULL);
 
 		if (BridgeTcp && Bridge && BridgeProbe) {
 
@@ -364,10 +364,10 @@ void CreateDefaultApp(NodeObj Main, NodeObj DefaultRootView){
 	{
 		NodeObj AuthTcp, AuthBridge, AuthProbe, AuthTimer;
 
-		AuthTcp    = CreateObject(Main, "TCP");
-		AuthBridge = CreateObject(Main, "Bridge");
-		AuthProbe  = CreateObject(Main, "Out");
-		AuthTimer  = CreateObject(Main, "Pulse");
+		AuthTcp    = CreateObject(Main, "TCP", NULL);
+		AuthBridge = CreateObject(Main, "Bridge", NULL);
+		AuthProbe  = CreateObject(Main, "Out", NULL);
+		AuthTimer  = CreateObject(Main, "Pulse", NULL);
 
 		if (AuthTcp && AuthBridge && AuthProbe && AuthTimer) {
 

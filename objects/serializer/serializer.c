@@ -237,6 +237,7 @@ static char *ImportCreate(char *className, char *nodeName,
 {
 	NodeObj home, inst, p;
 	char    desired[320], fresh[320], *x, *y, *ident, *alias, dbg[512];
+	NodeObj existing;
 	char   *cpath = (containerPath && containerPath[0]) ? containerPath : "/Root";
 
 	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE enter: class='%s' name='%s' container='%s' force=%d",
@@ -261,38 +262,63 @@ static char *ImportCreate(char *className, char *nodeName,
 		DebugPrint("IMPORT-CREATE: container path did not resolve, bail", __FILE__, __LINE__, IMPORT);
 		return NULL;
 	}
-	inst = CreateObject(home, className);
-	if (!inst)
-	{
-		DebugPrint("IMPORT-CREATE: CreateObject failed (unknown class?), bail", __FILE__, __LINE__, IMPORT);
-		return NULL;
-	}
-	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: instance created at %p, placing", (void *) inst);
-	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
-
-	x = propbag ? GetPropStr(propbag, "X") : NULL;
-	y = propbag ? GetPropStr(propbag, "Y") : NULL;
-	PlaceInstance(inst, cpath, (x && x[0]) ? x : "0", (y && y[0]) ? y : "0");
-
+	/* THE NAME IS SETTLED BEFORE THE THING IS MADE. Creation takes the name
+	   it is given and keeps it, so asking "is this taken?" afterwards asks
+	   about the instance just created and always says yes - which renamed
+	   every imported thing to a minted name (slider_1_Value_1 -> Slider_3).
+	   The saved name is KNOWN and stays: only uniqueness is in question, so
+	   suffix the name it has (Connect_1) rather than lose it. */
 	alias = NULL;
 	if (ident && ident[0])
 	{
 		snprintf(desired, sizeof(desired), "%s/%s", cpath, ident);
 		alias = desired;
 	}
-	if (!alias || !alias[0] || (!force && ResolvePath(alias)))
+
+	/* ALREADY THERE IS ALREADY THE ONE. A widget builds its declared panel
+	   when it is created, so by the time the file's copy of one of those
+	   controls is read, the control exists. Making a second would leave two
+	   instances answering to one path - the newer wins the index and the
+	   older keeps a Name that now resolves to somebody else. Adopt it and
+	   let the saved properties land on it, exactly as Widget_Create does
+	   and for the same reason. */
+	/* ONLY THE INTERNALS ADOPT. force=1 means these are the members of a
+	   view this import just made, where the saved names cannot collide -
+	   and where a widget's constructor has ALREADY built the declared ones,
+	   so the name being taken means "it is here, write onto it".
+	   The top of the import (force=0) is the opposite: it is being dropped
+	   INTO a session that may already hold that name, and adopting there
+	   would write the file over the original instead of making the copy
+	   that was asked for. Taken means taken; suffix it. */
+	existing = (force && alias && alias[0]) ? ResolvePath(alias) : NULL;
+	if (existing)
 	{
-		/* the name is KNOWN - a view called Connect stays called Connect.
-		   Only uniqueness is in question here, so suffix the name it has
-		   (Connect_1) rather than mint from the class and lose it (View_1). */
-		ImportFreshName(cpath, (ident && ident[0]) ? ident : className,
-						fresh, sizeof(fresh));
-		alias = fresh;
+		inst = existing;
+		snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: adopting the '%s' that creation already built", alias);
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+	}
+	else
+	{
+		if (!alias || !alias[0] || (!force && ResolvePath(alias)))
+		{
+			ImportFreshName(cpath, (ident && ident[0]) ? ident : className,
+							fresh, sizeof(fresh));
+			alias = fresh;
+		}
+
+		inst = CreateObject(home, className, strrchr(alias, '/') + 1);
+		if (!inst)
+		{
+			DebugPrint("IMPORT-CREATE: CreateObject failed (unknown class?), bail", __FILE__, __LINE__, IMPORT);
+			return NULL;
+		}
+		snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: created '%s'", alias);
+		DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
 	}
 
-	snprintf(dbg, sizeof(dbg), "IMPORT-CREATE: registering path '%s'", alias);
-	DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
-	RegisterPath(alias, inst);
+	x = propbag ? GetPropStr(propbag, "X") : NULL;
+	y = propbag ? GetPropStr(propbag, "Y") : NULL;
+	PlaceInstance(inst, cpath, (x && x[0]) ? x : "0", (y && y[0]) ? y : "0");
 
 	/* the rest of the saved properties - skip identity/geometry (set
 	   above) and State (a runtime readout, not portable state).
@@ -312,9 +338,32 @@ static char *ImportCreate(char *className, char *nodeName,
 		{
 			char *pn = GetNameStr(p);
 
+			NodeObj dst;
+
 			if (!pn || !strcmp(pn, "X") || !strcmp(pn, "Y") || !strcmp(pn, "Name")
 				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
 				continue;
+
+			/* A LINK IS NOT A VALUE - the same rule the clone walk follows,
+			   applied at the receiving end. A panel control's Value is a
+			   LINK into the widget's own property (Widget_Ctl), and writing
+			   a plain string into that slot replaces the link with a dead
+			   copy: the dropdown loses its selection, the checkbox its
+			   setting, the code box its text, and the widget's real
+			   property is left with nothing pointing at it.
+			   The value is not lost by skipping it - it is saved on the
+			   WIDGET, which is restored in its own right, and the link is
+			   what makes the control show it. */
+			dst = GetPropNode(inst, pn);
+			if (dst && GetNodeLink(dst))
+			{
+				snprintf(dbg, sizeof(dbg),
+						 "IMPORT-CREATE: '%s'.%s is a link - left pointing at its "
+						 "target rather than overwritten with a saved value", alias, pn);
+				DebugPrint(dbg, __FILE__, __LINE__, IMPORT);
+				continue;
+			}
+
 			SetPropStr(inst, pn, GetValueStr(p));
 		}
 
@@ -774,8 +823,18 @@ static void ImportAliasesPass(char *importRoot, NodeObj deferred)
 		alias = NULL;
 		if (saved && saved[0])
 		{
+			/* TAKEN BY ITSELF IS NOT TAKEN. CreateAlias names what it makes -
+			   Slider_1's Value becomes Slider_1_Value_1 - and registers it,
+			   so asking whether the saved name is free now finds the very
+			   instance that just claimed it and mints from the class
+			   instead. That is what renamed every imported alias to
+			   Slider_3, undoing the correct name one line after it was
+			   given. Only somebody ELSE holding the name is a collision. */
+			NodeObj holder;
+
 			snprintf(want, sizeof(want), "%s/%s", container, saved);
-			if (!ResolvePath(want))
+			holder = ResolvePath(want);
+			if (!holder || holder == inst)
 				alias = want;
 		}
 		if (!alias)
@@ -1489,7 +1548,6 @@ int Serializer_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, SerializerPanel);
 
 	if (local->active || !local->enabled)
 		return rtrn_handled;
@@ -1544,7 +1602,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, SerializerPanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuildQuiet(instance, SerializerPanel);	/* panel now; do not walk */
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, SerializerPanel);
 
 	return rtrn_handled;
 }
@@ -1568,7 +1628,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message; (void) data;
 
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->task)

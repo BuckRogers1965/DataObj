@@ -740,7 +740,6 @@ int TCPPort_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	/* build the panel once, now that the object has a real location and
 	   CreateObject(itself/subview, control) will resolve */
-	Widget_BuildOnce(instance, TCPPortPanel);
 
 	TCPPort_NormalizeHost(instance);
 
@@ -815,9 +814,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, TCPPortPanel);
+
 	/* the panel is built one tick from now, after the bridge has given this
 	   instance its path (building now would refuse - no location yet) */
-	Widget_DeferBuild(instance, TCPPortPanel);
 
 	return rtrn_handled;
 }
@@ -900,7 +901,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 
 	/* the socket is this panel's private state - no path, no container,
 	   nothing else holds a reference - so nothing else will ever free it.

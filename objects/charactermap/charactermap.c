@@ -354,7 +354,6 @@ int CharMap_Activate(NodeObj instance, MsgId message, NodeObj data)
 
 	if (!local)
 		return rtrn_dropped;
-	Widget_BuildOnce(instance, CharMapPanel);
 	CharMap_Recompute(instance);
 	return rtrn_handled;
 }
@@ -392,7 +391,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, CharMapPanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, CharMapPanel);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, CharMapPanel);
 
 	return rtrn_handled;
 }
@@ -419,7 +420,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message; (void) data;
 
-	Widget_CancelBuild(instance);
 	if (local)
 		free(local);
 	return rtrn_handled;

@@ -20,7 +20,9 @@ Run through run.sh, or standalone against a running server:
 
     python3 testharness/viewclonetest.py --host 127.0.0.1 --port 8091
 """
-import argparse, sys, time
+import argparse, os, sys, time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
+import dfdiff
 from rawtest import Raw, Report, ensure_raw_bridge, suite_view, container_children, close_new_children
 
 
@@ -207,6 +209,96 @@ def test_clone_compiled_widget(raw, r, home):
              "%d controls: %s" % (len(got_ctls),
                                   ", ".join(got_ctls[:6]) or "none"),
              got_ctls == src_ctls)
+
+
+def help_text(raw, widget, timeout=6.0):
+    """Open a widget's Help sub-view and return the text that lands in its
+    box. Subscribe FIRST, then open, then wait for the value to ARRIVE - the
+    read is a state to wait for, never a duration to guess at."""
+    box = widget + "/Help/HelpText"
+    raw.send({"cmd": "subscribe", "instance": box, "port": "Value"})
+    raw.send({"cmd": "set-property", "instance": widget + "/Help",
+              "prop": "ReservedViewOpen", "value": "1"})
+    ev = raw.wait_event(lambda e: e.get("event") == "property-changed"
+                        and e.get("instance") == box
+                        and e.get("port") == "Value"
+                        and (e.get("value") or "").strip(),
+                        timeout, "%s help text" % widget)
+    return (ev.get("value") if ev else "") or ""
+
+
+def test_clone_carries_help(raw, r, home):
+    """A CLONE IS THE SAME WIDGET. Everything a user can do to the original
+    they can do to the copy, and reading its help is the plainest example -
+    the copy is a TCPPort, TCPPort has help, so the copy has help.
+
+    What makes this worth a test rather than an assumption: help does not
+    arrive by being copied. The Help view carries a HelpFile string, which
+    IS portable and does survive - but the thing that reads that file is a
+    compiled handler stamped on the view's ReservedViewOpen property, and a
+    function pointer is exactly what a clone cannot carry. So the copy can
+    hold every member, every control, the right file name, and still open a
+    blank panel. Both halves are checked in that order, because a source
+    that has no help would make the second half pass for the wrong reason."""
+    # BUILT HERE, not borrowed from the palette. A palette instance is shared
+    # with every other suite, and a widget whose panel was restored by a load
+    # or an import comes back inert for reasons that have nothing to do with
+    # cloning - so borrowing one would make this test fail for the wrong
+    # reason, or pass for it. A freshly created widget runs its own build,
+    # which is what stamps the handler that reads the help file.
+    source = home + "/HelpSource"
+    raw.send({"cmd": "create-instance", "class": "TCPPort", "as": source,
+              "container": home, "x": "40", "y": "40"})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == source, timeout=6)
+
+    src_help = help_text(raw, source)
+    r.expect("clone help: the source widget has help to copy",
+             "opening a freshly built TCPPort's Help fills its box from "
+             "objects/tcpport/README.md",
+             "%d chars" % len(src_help),
+             bool(src_help))
+    if not src_help:
+        return
+
+    raw.send({"cmd": "clone-instance", "of": source, "container": home,
+              "x": "240", "y": "40"})
+    ev = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                        and e.get("container") == home
+                        and e.get("class") == "TCPPort"
+                        and e.get("instance") != source, timeout=6)
+    clone = ev.get("instance") if ev else None
+    r.expect("clone help: the widget cloned at all",
+             "a TCPPort instance appears in %s" % home,
+             "clone=%s" % clone,
+             bool(clone))
+    if not clone:
+        return
+
+    r.expect("clone help: the copy still knows which file its help is in",
+             "the clone's Help view carries the same HelpFile - an ordinary "
+             "string property, so cloning it is not in question",
+             "HelpFile=%r" % (raw.value_of(clone + "/Help", "HelpFile"),),
+             (raw.value_of(clone + "/Help", "HelpFile") or "").endswith("README.md"))
+
+    # BLANK IT FIRST. HelpText.Value is an ordinary string property, so the
+    # text the source had already loaded is COPIED into the clone - and a
+    # copied string is indistinguishable from working help until you ask the
+    # copy to produce it again. Clearing the box is what makes this test about
+    # the mechanism (does opening the panel READ the file?) rather than about
+    # whatever happened to be in the box at clone time.
+    raw.send({"cmd": "set-property", "instance": clone + "/Help/HelpText",
+              "prop": "Value", "value": ""})
+
+    clone_help = help_text(raw, clone)
+    r.expect("clone help: opening the copy's help shows the same text",
+             "the clone's Help box fills exactly as the source's did - a copy "
+             "of a widget is that widget, including the parts of it that are "
+             "compiled rather than copied",
+             "source=%d chars clone=%d chars%s"
+             % (len(src_help), len(clone_help),
+                "" if clone_help else "  (the panel opened EMPTY)"),
+             clone_help == src_help)
 
 
 def test_view_clone_wiring(raw, r, home):
@@ -472,6 +564,131 @@ def test_export_import_view_wiring(raw, r, home):
              before == after)
 
 
+def test_widget_round_trip(raw, r, home):
+    """EXPORT, IMPORT, EXPORT AGAIN - the two files must describe the same
+    thing.
+
+    Everything else in this suite checks structure: are the members there,
+    is the wire there. Structure survived a bug that killed every widget on
+    import - each panel control's Value is a LINK into the widget's own
+    property, and restoring the file's saved value into that slot replaced
+    the link with a dead copy. The controls were all present and all inert.
+
+    A round trip catches what a listing cannot. Whatever the first export
+    says the widget is, the second must say the same: same instances, same
+    classes, same property bags, same wires. Only the top-level name and
+    the drop position are allowed to move, because the import mints one and
+    the caller chooses the other.
+
+    A WIDGET, not a plain view: the point is the panel a class builds for
+    itself - sub-views, controls, and the links between them."""
+    view = home + "/RoundTrip"
+    raw.send({"cmd": "create-instance", "class": "View", "as": view,
+              "container": home, "x": "20", "y": "300"})
+    raw.wait_event(lambda e: e.get("event") == "instance-created"
+                   and e.get("instance") == view, timeout=6)
+    container_children(raw, view)      # start viewing it, or its members never announce
+
+    raw.send({"cmd": "create-instance", "class": "TCPPort", "as": view + "/Port",
+              "container": view, "x": "10", "y": "10"})
+    made = raw.wait_event(lambda e: e.get("event") == "instance-created"
+                          and e.get("instance") == view + "/Port", timeout=6)
+    r.expect("round trip: a widget to export",
+             "a TCPPort inside %s, panel and all" % view,
+             "created=%s" % bool(made), bool(made))
+    if not made:
+        return
+
+    def export(tag, timeout=12.0):
+        """Export and hand back the file, or None. WAITS FOR THE FILE, not
+        for the event: a save writes tag_<stamp>.flow, so globbing the moment
+        flow-saved lands can look before the name exists - and dfdiff exits
+        the process on a missing file, which takes the whole suite with it."""
+        import glob
+        # the ENGINE writes it, relative to the engine's cwd - which is the
+        # variant directory under test, not this process's directory
+        where = os.path.join(os.environ.get("FLOWDIR", "."), "saved")
+        raw.send({"cmd": "export-flow", "file": tag, "of": view})
+        raw.wait_event(lambda e: e.get("event") == "flow-saved", timeout=8)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            hits = sorted(glob.glob(os.path.join(where, tag + "_*.flow")))
+            if hits and wait_file(hits[-1]):
+                return hits[-1]
+            time.sleep(0.25)
+        return None
+
+    first = export("rtrip_a")
+    r.expect("round trip: the first export reached disk",
+             "saved/rtrip_a_<stamp>.flow written",
+             "file=%s" % first, bool(first))
+    if not first:
+        return
+
+    raw.events = []
+    raw.send({"cmd": "import-flow", "file": "rtrip_a", "into": home})
+    raw.wait_event(lambda e: e.get("event") == "flow-loaded", timeout=10)
+    time.sleep(0.6)
+
+    copies = [m for m, c in members(raw, home)
+              if c == "View" and m != view and m.split("/")[-1].startswith("RoundTrip")]
+    copy = copies[0] if copies else None
+    r.expect("round trip: the import produced a copy",
+             "a second view alongside %s" % view,
+             "copy=%s" % copy, bool(copy))
+    if not copy:
+        return
+
+    view = copy                     # export the COPY this time
+    second = export("rtrip_b")
+    r.expect("round trip: the copy exported too",
+             "saved/rtrip_b_<stamp>.flow written",
+             "file=%s" % second, bool(second))
+    if not second:
+        return
+
+    insts_a, wires_a = dfdiff.load(first)
+    insts_b, wires_b = dfdiff.load(second)
+
+    # the export root's own name is minted by the import, and where it was
+    # dropped is the caller's choice - nothing else may move
+    skip = set(dfdiff.VOLATILE) | {"Name", "Container", "X", "Y"}
+
+    missing = sorted(set(insts_a) - set(insts_b))
+    extra   = sorted(set(insts_b) - set(insts_a))
+    r.expect("round trip: the copy holds exactly what the original held",
+             "the same %d instances, by path, after a trip through disk" % len(insts_a),
+             "missing=%s extra=%s" % (missing[:6] or "none", extra[:6] or "none"),
+             not missing and not extra)
+
+    classdiff = ["%s: %s -> %s" % (dfdiff.shown(k), insts_a[k][0], insts_b[k][0])
+                 for k in sorted(set(insts_a) & set(insts_b))
+                 if insts_a[k][0] != insts_b[k][0]]
+    r.expect("round trip: every instance is still the same class",
+             "no instance changed class through the round trip",
+             "%s" % (classdiff[:6] or "none"), not classdiff)
+
+    propdiff = []
+    for k in sorted(set(insts_a) & set(insts_b)):
+        pa, pb = insts_a[k][1], insts_b[k][1]
+        for name in sorted(set(pa) | set(pb)):
+            if name in skip:
+                continue
+            if pa.get(name) != pb.get(name):
+                propdiff.append("%s.%s: %r -> %r"
+                                % (dfdiff.shown(k), name, pa.get(name), pb.get(name)))
+    r.expect("round trip: every property came back the same",
+             "identical property bags, ignoring %s" % ", ".join(sorted(skip)),
+             "%s" % (propdiff[:8] or "none"), not propdiff)
+
+    r.expect("round trip: every wire came back",
+             "the same %d wires, as an unordered set" % len(wires_a),
+             "lost=%s gained=%s"
+             % (sorted(wires_a - wires_b)[:4] or "none",
+                sorted(wires_b - wires_a)[:4] or "none"),
+             wires_a == wires_b)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
@@ -498,7 +715,8 @@ def main():
 
     for fn in (test_view_clone_wiring, test_clone_of_clone, test_clone_into_self_refused,
                test_save_load_view_wiring, test_export_import_view_wiring,
-               test_clone_compiled_widget):
+               test_clone_compiled_widget, test_clone_carries_help,
+               test_widget_round_trip):
         before = [m for m, _ in container_children(raw, home)]
         guarded(fn, raw, r, home)
         close_new_children(raw, home, before)

@@ -242,7 +242,7 @@ static void TPLink_Start(NodeObj instance, int which)
 		local->inner = NULL;
 	}
 
-	local->inner = CreatePrivate(instance, "TCP");
+	local->inner = CreatePrivate(instance, "TCP", NULL);
 	if (!local->inner)
 	{
 		TPLink_SetNet(instance, "Error: TCP class is not loaded");
@@ -482,7 +482,6 @@ int TPLink_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, TPLinkPanel);
 	TPLink_SetNet(instance, local->enabled ? NS_IDLE : NS_DISABLED);
 
 	return rtrn_handled;
@@ -544,7 +543,8 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
-	Widget_DeferBuild(instance, TPLinkPanel);
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, TPLinkPanel);
 
 	return rtrn_handled;
 }
@@ -554,7 +554,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
 	(void) message; (void) data;
-	Widget_CancelBuild(instance);
 
 	if (local)
 	{

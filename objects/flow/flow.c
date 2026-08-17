@@ -40,7 +40,7 @@ NodeObj FlowCreateObject(NodeObj flow, NodeObj container, char *classname){
 	int count;
 	char alias[80];
 
-	inst = CreateObject(container, classname);
+	inst = CreateObject(container, classname, NULL);
 	if (!inst)
 		return NULL;
 
@@ -149,7 +149,7 @@ NodeObj RunFlow(NodeObj container, NodeObj flow){
 		if (CmpName(instr, "Create")) {
 			classname = GetPropStr(instr, "Class");
 			alias     = GetPropStr(instr, "As");
-			inst = CreateObject(container, classname);
+			inst = CreateObject(container, classname, NULL);
 			if (inst) {
 				SetPropStr(inst, "FlowAlias", alias);
 				SetPropLong(aliases, alias, (long)inst);

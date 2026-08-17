@@ -154,7 +154,6 @@ int Pulse_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, PulsePanel);
 
 	if (local->active)
 		return rtrn_dropped;
@@ -221,7 +220,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, PulsePanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuildQuiet(instance, PulsePanel);	/* panel now, but do not start ticking */
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, PulsePanel);
 
 	return rtrn_handled;
 }
@@ -230,7 +231,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		/* stop the tick task before freeing local, or a still-scheduled */

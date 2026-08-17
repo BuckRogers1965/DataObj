@@ -713,7 +713,7 @@ int MCPSource_OnConnect(NodeObj instance, MsgId message, NodeObj data)
 	local->rxlen = 0;
 	local->pending = MCP_LIST;
 
-	local->inner = CreatePrivate(instance, "TCP");
+	local->inner = CreatePrivate(instance, "TCP", NULL);
 	if (!local->inner)
 	{
 		MCPSource_SetNet(instance, "Error: TCP class is not loaded");
@@ -761,7 +761,6 @@ int MCPSource_Activate(NodeObj instance, MsgId message, NodeObj data)
 	(void) message; (void) data;
 	if (!local)
 		return rtrn_dropped;
-	Widget_BuildOnce(instance, MCPSourcePanel);
 	MCPSource_SetNet(instance, local->enabled ? NS_IDLE : NS_DISABLED);
 	return rtrn_handled;
 }
@@ -810,7 +809,9 @@ int SourceInstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, MCPSourcePanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, MCPSourcePanel);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, MCPSourcePanel);
 	return rtrn_handled;
 }
 
@@ -819,7 +820,6 @@ int SourceInstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	SourceData *local = (SourceData *)GetPropLong(instance, "local");
 
 	(void) message; (void) data;
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->timeoutTask) DeleteTask(local->timeoutTask);
@@ -1264,7 +1264,7 @@ int MCPSource_AgentOnRequest(NodeObj agentView, MsgId message, NodeObj data)
 		DebugPrint(dbg, __FILE__, __LINE__, PROG_FLOW);
 	}
 
-	ad->inner = CreatePrivate(agentView, "TCP");
+	ad->inner = CreatePrivate(agentView, "TCP", NULL);
 	if (!ad->inner)
 	{
 		DebugPrint("MCPSource agent request failed: CreatePrivate('TCP') returned NULL", __FILE__, __LINE__, ERROR);

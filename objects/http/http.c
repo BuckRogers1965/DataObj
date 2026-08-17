@@ -243,7 +243,6 @@ int Http_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, HttpPanel);
 
 	if (local->active)
 		return rtrn_handled;
@@ -294,7 +293,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, HttpPanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, HttpPanel);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, HttpPanel);
 
 	return rtrn_handled;
 }
@@ -303,7 +304,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData *local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);
 	if (local)
 		free(local);
 

@@ -25,9 +25,13 @@ NodeObj AuthenticateUser(NodeObj main, char * name, char * token);
  * container is required: everything is created somewhere, and a missing
  * location is an error (logged, and the instance comes back unplaced and
  * therefore unaddressable). Only a root has no location - see CreateRoot.
+ *
+ * `name` is what it will be called, and it is kept: a caller that knows the
+ * name must not have it changed underneath. NULL/empty means the caller
+ * genuinely has none - a palette drop - and only then is one minted.
  */
 NodeObj
-CreateObject(NodeObj container, char * classname);
+CreateObject(NodeObj container, char * classname, char * name);
 
 /* The same creation, deliberately UNNAMED: a private handle, placed like
  * anything else but reachable only through the pointer its owner keeps.
@@ -38,7 +42,7 @@ CreateObject(NodeObj container, char * classname);
  * it wasn't.
  */
 NodeObj
-CreatePrivate(NodeObj container, char * classname);
+CreatePrivate(NodeObj container, char * classname, char * name);
 
 /* A root IS A VIEW - an ordinary one. The only difference is that it has
  * no container, because it is the top; that is why it is made here rather

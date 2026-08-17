@@ -534,7 +534,23 @@ void Bridge_Create(NodeObj instance, InstanceData *local, NodeObj command)
 			Bridge_Error(instance, "create-instance", "unknown container");
 			return;
 		}
-		inst = CreateObject(home, classname);
+		/* THE NAME GOES IN WITH THE CREATION. A widget builds its controls
+		   inside itself as it is constructed, so it has to be created under
+		   the name it will keep - registering the client's alias afterwards
+		   renames the widget and leaves every control it just built sitting
+		   under a path that no longer exists. Only the basename: the
+		   container is the container. A name that is already taken is not
+		   forced here; it falls through to the mint below. */
+		{
+			char *base = NULL;
+
+			if (alias && alias[0] && (force || !ResolvePath(alias)))
+			{
+				base = strrchr(alias, '/');
+				base = base ? base + 1 : alias;
+			}
+			inst = CreateObject(home, classname, base);
+		}
 	}
 	if (!inst)
 	{
@@ -797,7 +813,7 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 	if (!(existing && existing[0] && ResolvePath(existing)))
 	{
 		/* the panel belongs to the thing it dissects - created IN it */
-		view = CreateObject(inst, "View");
+		view = CreateObject(inst, "View", NULL);
 		if (!view)
 		{
 			Bridge_Error(instance, "internals", "View class not loaded");
@@ -920,7 +936,12 @@ void Bridge_Internals(NodeObj instance, InstanceData *local, NodeObj command)
 				int n = snprintf(memberAlias, sizeof(memberAlias), "%s/%s",
 								 viewAlias, name);
 
-				if (n < 0 || n >= (int)sizeof(memberAlias) || ResolvePath(memberAlias))
+				/* taken by THIS member is not taken: CreateAlias names what
+				   it makes and registers it, so the wanted name can already
+				   be held by the very instance being named here. Only
+				   somebody else holding it is a collision. */
+				if (n < 0 || n >= (int)sizeof(memberAlias)
+					|| (ResolvePath(memberAlias) && ResolvePath(memberAlias) != member))
 					Bridge_FreshAlias(local, viewAlias, name, memberAlias, sizeof(memberAlias));
 			}
 			RegisterPath(memberAlias, member);

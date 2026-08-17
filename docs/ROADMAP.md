@@ -2893,6 +2893,13 @@ announces it. `rawtest`'s `settled()` is the pattern that works - it waits for
 the container to actually hold its members, and prints a note when it had to
 wait, so absorbing a race never quietly becomes not having one.
 
+**Also found: the harness stages no help files.** `run.sh` hardlinks only
+`objects/*/*.object` into a variant directory, flat. A widget declares its help
+as `objects/<name>/README.md`, read relative to the cwd, so under test that file
+has never existed and every Help panel has always opened blank. Nothing could
+test help at all, which is part of why "a clone loses its help" went unnoticed.
+Fixed 2026-08-17 - the READMEs are staged beside the objects.
+
 **What to do, in order.** Audit every `time.sleep` in testharness for what
 state it is standing in for, and replace it with a wait on that state; where
 no event exists to wait on, that is a finding about the protocol, not a
@@ -2936,3 +2943,37 @@ which means `InstanceStart` taking its identity as an argument rather than
 discovering it afterwards. Not obviously worth it - the deferred build works -
 but it is the only remaining reason widget construction is in two halves, so
 it should be recorded as a choice rather than left looking like an accident.
+
+> **DONE 2026-08-17, and "not obviously worth it" was wrong - the deferred
+> build did not work.** It was the cause of a cloned widget's dead panel: the
+> deferred phase needed a `PanelBuilt` flag, the flag was an ordinary property,
+> and every clone, save and import inherited "already built" and skipped the
+> phase that installs the compiled handlers. The shape is exactly the one
+> guessed at here - the name is settled before the instance is made and handed
+> to the constructor with its location - and it took out more than the two
+> halves. See `20260817_0039_a_blank_help_panel.md`.
+>
+> Closed by it:
+> - **the two-phase constructor**, and with it `Widget_DeferBuild`,
+>   `Widget_DeferBuildQuiet`, `Widget_BuildOnce`, `Widget_BuildTask`,
+>   `Widget_BuildTaskQuiet`, `Widget_BuildDone`, `Widget_CancelBuild`, the
+>   `PanelBuilt`/`WidgetTable`/`WidgetBuildTask` properties, and the private
+>   copies of the same pattern in ComfyUI, Ollama and StableDiffusion.
+> - **one task per widget panel ever built.** `CreateTask` no longer appears
+>   in widget.c. The leak note in `Widget_BuildDone` - "the palette alone arms
+>   about twenty-eight of them before anyone touches anything" - describes
+>   something that no longer happens.
+> - **mint-then-rename on every object.** `CreateObject` kept the name it was
+>   handed instead of minting one and letting the caller rename it, so
+>   `Checkbox_1 -> Enable` and its 40-odd siblings are gone. Renames at boot:
+>   zero.
+> - **the clone's second creation path.** `CloneObject` calls `CreateObject`
+>   rather than the class's `InstanceStart` directly, and the group walk writes
+>   values onto members that creation already built instead of making
+>   duplicates of every declared control.
+> - **help in a clone**, which is what was actually being chased.
+>
+> Not closed by it: each widget's `*_Activate` still holds init work that
+> belongs in the constructor now that the constructor has a place and a name.
+> That is a per-widget judgement - init moves, action stays - and nothing
+> forces it, since panels build without it.

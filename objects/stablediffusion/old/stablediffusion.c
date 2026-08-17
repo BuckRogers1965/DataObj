@@ -791,6 +791,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, SDPanel);
+
 	local->poll = CreateTask(ObjGetTaskList());
 	local->retry = CreateTask(ObjGetTaskList());
 	local->buildTask = CreateTask(ObjGetTaskList());

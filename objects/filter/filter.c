@@ -203,7 +203,6 @@ int Filter_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, FilterPanel);
 
 	if (local->active)
 		return rtrn_handled;
@@ -271,13 +270,15 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, FilterPanel);
 	RegisterInstance(class, instance);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, FilterPanel);
 	/* NOT DeferBuild: Activate reads Mode exactly once (gated by
 	   local->active, above) - an auto-activate one tick after creation
 	   would read it before the client's own set-property Mode ever lands,
 	   locking in the default "all" permanently (the later, real activate
 	   is then a no-op). Same category as Pulse: activating this object
 	   has real behavioral consequences, so it waits to be told. */
-	Widget_DeferBuildQuiet(instance, FilterPanel);
 
 	return rtrn_handled;
 }
@@ -286,7 +287,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	Widget_CancelBuild(instance);
 	if (local)
 	{
 		if (local->last)

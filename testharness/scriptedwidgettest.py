@@ -90,13 +90,36 @@ def run_widget(raw, runner, in_value, timeout=4.0):
     return ev.get("value") if ev else None
 
 
-def find_widget_parts(raw, view):
-    """(InBox, OutBox, Runner) instance paths inside `view`, or (None,None,None)."""
-    mem = members(raw, view)
-    inbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/InBox")), None)
-    outbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/OutBox")), None)
-    runner = next((m for m, c in mem if c == "ScriptBox"), None)
-    return inbox, outbox, runner
+def find_widget_parts(raw, view, timeout=40.0):
+    """(InBox, OutBox, Runner) instance paths inside `view`, or (None,None,None).
+
+    WAITS for the view to actually hold them, the same way rawtest's
+    settled() does and for the same reason: a load is staggered on purpose
+    (destroy, then a rebuild spread over ticks) and `flow-loaded` has been
+    observed arriving before every path it made resolves. Asking once means
+    asking at whatever moment the listing happens to land - which is how
+    this reported OutBox=None for a box the log shows being rebuilt three
+    hundred lines later.
+
+    A condition, not a clock: a fast build pays nothing, a slow one gets as
+    long as it needs, and IT SAYS SO WHEN IT HAD TO WAIT. If that note
+    starts appearing, the completion event is early and every non-human
+    client inherits the same problem - engine bug, not something for this
+    to keep absorbing."""
+    t0 = time.time()
+    while True:
+        mem = members(raw, view)
+        inbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/InBox")), None)
+        outbox = next((m for m, c in mem if c == "Textbox" and m.endswith("/OutBox")), None)
+        runner = next((m for m, c in mem if c == "ScriptBox"), None)
+
+        if (inbox and outbox and runner) or time.time() - t0 > timeout:
+            waited = time.time() - t0
+            if waited > 0.5:
+                print("      note: %s took %.1fs to hold its parts "
+                      "(flow-loaded arrived before it was ready)" % (view, waited))
+            return inbox, outbox, runner
+        time.sleep(0.25)
 
 
 def build_scripted_view(raw, home, name):

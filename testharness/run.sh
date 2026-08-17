@@ -255,6 +255,16 @@ run_variant() {
 	# the scan skips it. Made after the shared build, since make replaces a
 	# .object with a new inode and would leave an old link stale.
 	ln -f objects/*/*.object "$d/objects/" 2>/dev/null
+	# and the help files, for the same reason: a widget declares its help as
+	# objects/<name>/README.md, read CWD-RELATIVE when the Help panel opens
+	# (Widget_OnHelpOpen). Only the flat .object files were staged here, so
+	# every Help panel in every variant opened blank and nothing could test
+	# help at all. The subdirectories hold no .object, so the scan is unchanged.
+	for f in objects/*/README.md; do
+		[ -f "$f" ] || continue
+		n=$(basename "$(dirname "$f")")
+		mkdir -p "$d/objects/$n" && ln -f "$f" "$d/objects/$n/README.md" 2>/dev/null
+	done
 	# and the same for the client: Http serves Root="web" RELATIVE TO CWD
 	# (main.c:211), and the framework runs with cwd=$d - without these the
 	# page 404s, the browser boots empty, and every guitest cascades off boot.
@@ -338,7 +348,7 @@ PY
 			[ -n "$CHROME" ] && python3 testharness/guitest.py \
 				--app "http://127.0.0.1:$web" --cdp "$cdp" $VERBOSE > "$d/log/guitest.log" 2>&1 ;;
 		*)
-			python3 "testharness/$s.py" --host 127.0.0.1 --port "$raw" \
+			FLOWDIR="$PWD/$d" python3 "testharness/$s.py" --host 127.0.0.1 --port "$raw" \
 				--webport "$web" $VERBOSE > "$d/log/$s.log" 2>&1 ;;
 		esac
 		rc=$?

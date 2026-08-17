@@ -231,7 +231,6 @@ int PulseGen_Activate(NodeObj instance, MsgId message, NodeObj data)
 	if (!local)
 		return rtrn_dropped;
 
-	Widget_BuildOnce(instance, PulseGenPanel);
 
 	/* resting state: line low, ~Out lit, not active */
 	local->high = 0;
@@ -273,7 +272,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	InitPosition(instance);
 	Widget_MainSize(instance, PulseGenPanel);
 	RegisterInstance(class, instance);
-	Widget_DeferBuild(instance, PulseGenPanel);
+
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, PulseGenPanel);
 
 	return rtrn_handled;
 }
@@ -306,7 +307,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message; (void) data;
 
-	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 	if (local)
 	{
 		if (local->task)				/* stop the clock before freeing local */

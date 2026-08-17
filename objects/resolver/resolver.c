@@ -293,9 +293,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	RegisterInstance(class, instance);
 
+	/* placed where it was told, under the name it was given, panel and all */
+	Widget_Place(instance, data, ResolverPanel);
+
 	/* the panel is built one tick from now, after the bridge has given this
 	   instance its path (building now would refuse - no location yet) */
-	Widget_DeferBuild(instance, ResolverPanel);
 
 	return rtrn_handled;
 }
@@ -330,7 +332,6 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 
 	(void) message; (void) data;
 
-	Widget_CancelBuild(instance);		/* drop a still-pending deferred build */
 
 	/* the engine is this panel's private state - no path, no container,
 	   nothing else holds a reference - so nothing else will ever free it */

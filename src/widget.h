@@ -97,10 +97,7 @@ NodeObj Widget_SubPanel(NodeObj panel, char *name, int x, int y, int w, int h);
 NodeObj Widget_AddHelp(NodeObj instance, char *helpFile);
 void Widget_Publish(NodeObj class, WidgetItem *table);
 void Widget_Init(NodeObj instance, WidgetItem *table);
-void Widget_DeferBuild(NodeObj instance, WidgetItem *table);
-int Widget_BuildOnce(NodeObj instance, WidgetItem *table);
-void Widget_DeferBuildQuiet(NodeObj instance, WidgetItem *table);
-void Widget_CancelBuild(NodeObj instance);
+void Widget_Place(NodeObj instance, NodeObj place, WidgetItem *table);
 void Widget_MainSize(NodeObj instance, WidgetItem *table);
 void Widget_BuildTable(NodeObj instance, WidgetItem *table);
 void Widget_Build(NodeObj instance, WidgetCtl *table, NodeObj *sub, int nsub);
@@ -170,35 +167,12 @@ static inline void Widget_Init(NodeObj instance, WidgetItem *table)
 		fn(instance, table);
 }
 
-static inline void Widget_DeferBuild(NodeObj instance, WidgetItem *table)
+static inline void Widget_Place(NodeObj instance, NodeObj place, WidgetItem *table)
 {
-	void (*fn)(NodeObj instance, WidgetItem *table) = (void (*)(NodeObj instance, WidgetItem *table)) WidgetEntry("DeferBuild");
+	void (*fn)(NodeObj instance, NodeObj place, WidgetItem *table) = (void (*)(NodeObj instance, NodeObj place, WidgetItem *table)) WidgetEntry("Place");
 
 	if (fn)
-		fn(instance, table);
-}
-
-static inline int Widget_BuildOnce(NodeObj instance, WidgetItem *table)
-{
-	int (*fn)(NodeObj instance, WidgetItem *table) = (int (*)(NodeObj instance, WidgetItem *table)) WidgetEntry("BuildOnce");
-
-	return fn ? fn(instance, table) : 0;
-}
-
-static inline void Widget_DeferBuildQuiet(NodeObj instance, WidgetItem *table)
-{
-	void (*fn)(NodeObj instance, WidgetItem *table) = (void (*)(NodeObj instance, WidgetItem *table)) WidgetEntry("DeferBuildQuiet");
-
-	if (fn)
-		fn(instance, table);
-}
-
-static inline void Widget_CancelBuild(NodeObj instance)
-{
-	void (*fn)(NodeObj instance) = (void (*)(NodeObj instance)) WidgetEntry("CancelBuild");
-
-	if (fn)
-		fn(instance);
+		fn(instance, place, table);
 }
 
 static inline void Widget_MainSize(NodeObj instance, WidgetItem *table)
@@ -254,21 +228,13 @@ static inline void Widget_Build(NodeObj instance, WidgetCtl *table, NodeObj *sub
    initial value, made a reactive port (its handler) or a plain property. Call
    in InstanceStart; add any non-table ports (In/Out plumbing) after it. */
 
-/* arm the one-tick-deferred panel build (call in InstanceStart, last). One tick
-   later the instance has a path, so its sub-views/controls resolve; the panel is
-   built once, then the object's Activate runs with msg_initialize (placement
-   setup). */
 
-/* build the panel if it hasn't been built yet; returns 1 if it built now. The
-   deferred build and an early Activate both call this, so it happens once,
-   whichever comes first. */
-
-/* like Widget_DeferBuild but does NOT call Activate after building - for a
-   source that would ACT on activation (a Pulse would start ticking). The panel
-   comes up on placement; the object stays quiet until something activates it. */
-
-/* cancel a still-pending deferred build (call in InstanceEnd, before the
-   instance's C state is freed). */
+/* A widget's panel is declared to its CLASS (Widget_Publish, at ClassStart)
+   and built by the engine when an instance is created - an InstanceStart
+   says nothing about it. A widget is complete when it is created, and then
+   it sits until a change arrives on one of its handlers; one that should
+   start by itself declares its own AutoStart control and sends itself the
+   event. */
 
 /* apply the main panel's size (the first "View" row) to the instance. Call in
    InstanceStart, so the size is set before any client subscribes. */

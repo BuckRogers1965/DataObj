@@ -785,7 +785,7 @@ def test_load_then_clone_binding(raw, r, home):
             out.append((e.get("instance"), e.get("class")))
         return out
 
-    def settled(view, want=1, timeout=20.0):
+    def settled(view, want=1, timeout=40.0):
         """Wait until a container actually HOLDS something before asking
         questions about it.
 

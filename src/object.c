@@ -244,6 +244,12 @@ void RegisterPath(char * path, NodeObj inst)
 	container = ResolvePath(cpath);
 	if (container)
 	{
+		/* WHERE IT WAS BUILT IS WHAT IT IS. The path already says the
+		   location - this function splits it off to find the container -
+		   so writing it back onto the instance is the same fact, not a
+		   second one a caller has to remember to keep in step. */
+		SetPropStr(inst, "Container", cpath);
+
 		/* the event, for whoever is watching */
 		SetPropStr(container, "LastMember", path);
 		/* and the record, for whoever asks later */
@@ -1345,9 +1351,9 @@ NodeObj FindClassRendering(int widget)
    not happened yet - the same ambiguity that made "no path" unloggable.
    Saying it is what makes the difference real. */
 NodeObj
-CreatePrivate(NodeObj container, char * classname){
+CreatePrivate(NodeObj container, char * classname, char * wanted){
 
-	NodeObj class, inst;
+	NodeObj class, inst, place;
 	msgobj InstanceStart;
 	char cpath[300];
 
@@ -1399,9 +1405,22 @@ CreatePrivate(NodeObj container, char * classname){
 		}
 	}
 
-	/* the class creates and registers the instance itself, */
-	/* RegisterInstance leaves it in LastInstance for us     */
-	InstanceStart(class, msg_initialize, NULL);
+	/* A THING IS BUILT IN A LOCATION, UNDER A NAME - so the constructor is
+	   handed both. Neither arrived before, which is why a widget could not
+	   build its own panel: the controls go INSIDE it, so it must already be
+	   somewhere, and under its FINAL name or its children are created under
+	   a path that stops existing the moment it is renamed. That is the
+	   whole reason panel construction was ever deferred to a task and
+	   needed a flag to remember it had happened.
+	   The place is a plain node, freed here - the constructor reads what it
+	   needs and the engine keeps nothing. */
+	place = NewNode(INTEGER);
+	SetPropLong(place, "Container", (long) container);
+	if (wanted && wanted[0])
+		SetPropStr(place, "Name", wanted);
+
+	InstanceStart(class, msg_initialize, place);
+	DelNode(place);
 
 	inst = (NodeObj)GetPropLong(class, "LastInstance");
 	if (!inst) {
@@ -1446,24 +1465,39 @@ CreatePrivate(NodeObj container, char * classname){
    that matters to the fabric: the thing is addressable now, and there is
    no moment when it is not. */
 NodeObj
-CreateObject(NodeObj container, char * classname){
+CreateObject(NodeObj container, char * classname, char * wanted){
 
-	NodeObj inst = CreatePrivate(container, classname);
+	NodeObj inst;
 	char cpath[300], name[192], path[512];
 
+	/* the name is settled BEFORE the thing is made, so the constructor can
+	   be told it and place its own contents under the path it will keep */
+	if (!RequirePathOf(container, cpath, sizeof(cpath)))
+		return NULL;
+
+	if (wanted && wanted[0])
+		snprintf(name, sizeof(name), "%s", wanted);
+	else
+		MintFreshName(classname, cpath, name, sizeof(name));
+
+	inst = CreatePrivate(container, classname, name);
 	if (!inst)
 		return NULL;
 
-	/* CreatePrivate refuses a container with no path of its own, so by
-	   here there is one - asked as an assertion because if that ever
-	   stopped being true the instance would come back unaddressable and
-	   this is the only place that would know. */
-	if (!RequirePathOf(container, cpath, sizeof(cpath)))
-		return inst;
-
-	MintFreshName(classname, cpath, name, sizeof(name));
-	snprintf(path, sizeof(path), "%s/%s", cpath, name);
-	RegisterPath(path, inst);
+	/* THE NAME IT WAS GIVEN IS THE NAME IT GETS. A caller almost always
+	   knows: Widget_Create is told "Enable", import carries the saved name,
+	   a client sends one. Minting over the top of that named every object
+	   twice - Checkbox_1 then Enable - and the first name is the one a
+	   widget's own children were created under, so renaming the parent
+	   afterwards left them addressed somewhere that no longer existed.
+	   Minting is for the caller with genuinely no name (a palette drop). */
+	/* a constructor that placed itself under the name it was handed is
+	   already right where it belongs; this is for everything that did not */
+	if (!PathOfInstance(inst, path, sizeof(path)))
+	{
+		snprintf(path, sizeof(path), "%s/%s", cpath, name);
+		RegisterPath(path, inst);
+	}
 
 	return inst;
 }
@@ -1703,7 +1737,7 @@ NodeObj CreateAlias(NodeObj container, NodeObj targetInst, char * propname)
 		return NULL;
 	}
 
-	inst = CreateObject(container, GetNameStr(class));
+	inst = CreateObject(container, GetNameStr(class), NULL);
 	if (!inst)
 		return NULL;
 
@@ -1841,27 +1875,17 @@ int IsPortableProp(NodeObj inst, NodeObj prop)
 }
 
 
-static NodeObj CloneObject(NodeObj source)
+/* Copy the source's DATA onto an instance that already exists - and only
+   its data. Structure is not copied: a widget's panel is built when the
+   instance is created, from the table its class declares, exactly as the
+   one in the palette was. This writes values onto what is already there. */
+static void CloneData(NodeObj source, NodeObj inst)
 {
-	NodeObj class, inst, prop, valnode, owner;
-	msgobj instanceStart;
+	NodeObj prop, valnode, owner;
 	char *name, *val;
 
-	if (!source)
-		return NULL;
-
-	class = GetParent(source);
-	if (!class)
-		return NULL;
-
-	instanceStart = (msgobj) GetPropLong(class, "InstanceStart");
-	if (!instanceStart)
-		return NULL;
-
-	instanceStart(class, msg_initialize, NULL);
-	inst = (NodeObj) GetPropLong(class, "LastInstance");
-	if (!inst)
-		return NULL;
+	if (!source || !inst)
+		return;
 
 	/* Copy what the SOURCE actually carries, not what its class published.
 	   Those are different sets: a property added to one instance - an agent's
@@ -1877,6 +1901,13 @@ static NodeObj CloneObject(NodeObj source)
 		if (!name || !IsPortableProp(source, prop))
 			continue;
 		if (strcmp(name, "State") == 0)		/* lifecycle, not data */
+			continue;
+
+		/* IDENTITY IS NOT DATA. The clone was created in its own place and
+		   registered under its own name; writing the source's Name over it
+		   would leave the path it answers to pointing at a name it no
+		   longer has. The caller names it, the same way any creator does. */
+		if (strcmp(name, "Name") == 0 || strcmp(name, "Container") == 0)
 			continue;
 
 		/* A LINK IS NOT A VALUE. The slot points at another instance's
@@ -1938,6 +1969,35 @@ static NodeObj CloneObject(NodeObj source)
 				SetPropStr(inst, name, val);
 		}
 	}
+}
+
+/* A CLONE IS AN INSTANCE OF THE SAME CLASS, MADE THE ONE WAY INSTANCES ARE
+   MADE, with the source's data copied onto it. There is no second creation
+   path here and there must not be: this used to call the class's
+   InstanceStart directly and take LastInstance, which skipped everything
+   CreateObject does - the name, the registration, and the class-chain
+   initialize that builds a widget's declared panel. That is why a cloned
+   widget came up with a panel full of copied values and nothing behind
+   them. */
+static NodeObj CloneObject(NodeObj source, NodeObj container, char * name)
+{
+	NodeObj class, inst;
+
+	if (!source || !container)
+		return NULL;
+
+	class = GetParent(source);
+	if (!class)
+		return NULL;
+
+	/* under the name it will KEEP: a widget builds its controls inside
+	   itself as it is constructed, so renaming it afterwards would leave
+	   them under a path that no longer exists */
+	inst = CreateObject(container, GetNameStr(class), name);
+	if (!inst)
+		return NULL;
+
+	CloneData(source, inst);
 
 	return inst;
 }
@@ -2226,16 +2286,37 @@ static void CloneGroupPass(char *srcPath, char *clonePath, NodeObj map, int pass
 
 		if (pass == 0)
 		{
-			clone = CloneObject(inst);
+			/* IT IS PROBABLY ALREADY THERE. Creating the container built
+			   whatever its class declares - a widget's panel and every
+			   control in it - so the member with this name exists already
+			   and only wants the source's values written onto it. Making a
+			   second one would leave the declared control inert beside a
+			   copy nothing is wired to. Anything the class does NOT declare
+			   (something dropped into a plain view) is not there, and that
+			   is the case that still creates. */
+			char  memberPath[512];
+			char *what;
+
+			snprintf(memberPath, sizeof(memberPath), "%s/%s",
+					 clonePath, (nm && nm[0]) ? nm : "");
+			clone = (nm && nm[0]) ? ResolvePath(memberPath) : NULL;
+
 			if (clone)
 			{
-				SetOrDeliverProp(clone, "Container", clonePath);
-				if (nm && nm[0])
-					SetOrDeliverProp(clone, "Name", nm);
-				SetConnState(map, (long) inst, (long) clone);
+				CloneData(inst, clone);
+				what = "already declared - values copied onto it";
 			}
+			else
+			{
+				clone = CloneObject(inst, ResolvePath(clonePath), nm);
+				what = clone ? "not declared by the class - created" : "FAILED";
+			}
+
+			if (clone)
+				SetConnState(map, (long) inst, (long) clone);
+
 			snprintf(dbg, sizeof(dbg), "CLONE pass 0: member '%s' (%s) %s",
-					 nm ? nm : "?", classname, clone ? "cloned" : "FAILED");
+					 nm ? nm : "?", classname, what);
 			DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 		}
 		else if (pass == 1)
@@ -2290,17 +2371,18 @@ NodeObj CloneInstance(NodeObj source, char *containerPath, NodeObj map)
 			 GetPropStr(source, "Name"), name, containerPath ? containerPath : "(root)", srcPath);
 	DebugPrint(dbg, __FILE__, __LINE__, CLONE);
 
-	top = CloneObject(source);
-	if (!top)
-		return NULL;
-	SetOrDeliverProp(top, "Container", containerPath ? containerPath : "");
-	SetOrDeliverProp(top, "Name", name);
-	SetConnState(map, (long) source, (long) top);
-
 	if (containerPath && containerPath[0])
 		snprintf(clonePath, sizeof(clonePath), "%s/%s", containerPath, name);
 	else
 		snprintf(clonePath, sizeof(clonePath), "/Root/%s", name);
+
+	/* made in its container the ordinary way - so it is named, registered,
+	   and its class has built whatever it declares - then renamed to the
+	   name minted for it (RegisterPath retires the one it arrived with) */
+	top = CloneObject(source, ContainerOfPath(clonePath), name);
+	if (!top)
+		return NULL;
+	SetConnState(map, (long) source, (long) top);
 
 	/* everything inside it - members, then the links they carried, then wires */
 	CloneGroupPass(srcPath, clonePath, map, 0);
