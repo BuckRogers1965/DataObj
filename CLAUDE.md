@@ -1,3 +1,5 @@
+@docs/readmefirst.md
+
 # CLAUDE.md
 
 This is a C framework for a node-based dataflow object system ("GrokThink framework").

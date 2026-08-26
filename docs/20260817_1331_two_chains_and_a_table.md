@@ -317,3 +317,119 @@ does not exist yet, and every value in the system is currently present and
 definite, which is exactly the wrong default for a bridged read.
 
 None of those three are table problems. They are what a data class is for.
+
+---
+
+## Status (2026-08-26): the first data extension, and what it cost to get there
+
+`data_ext` and `Table` exist, headless, with no control of any kind. A
+table can be filled, cloned, exported and imported, and the values match
+at every step. What follows is what was built, and — more usefully — the
+list of things that were built wrong first.
+
+### What landed
+
+**Two classes, one chain.** `data_ext` descends from `Object`; `Table`
+descends from `data_ext` and is its first child. `data_ext` owns the idea
+of a shape and answers the generic reading of it; `Table` answers where a
+grid differs. Nothing else was put in the base class, which is the point
+of the next section.
+
+**The cells are named properties.** Not a struct, not an array, not a
+pointer. `CloneData` (object.c) and the serializer both walk the property
+list under `IsPortableProp`, and that rule refuses a LONG-typed property
+on purpose — a pointer is a per-process fact that cannot mean anything in
+a file. So storage that is anything other than properties is storage that
+silently does not clone and does not save. The address is in the name
+(`R2C3`), because a property is found by name; and the name has to be
+unique, because `IsPortableProp` drops a duplicate.
+
+**The entry node is a door.** Every object carries one `Msg` entry whose
+`OnMsg` is its message function. Here that `OnMsg` is `PuntToClass`
+itself, so the instance dispatches into the class chain and a subclass
+that drops a message falls through to its parent with neither end knowing.
+The log says it plainly: `PUNT 'Sheet'.At -> class 'Table' said HANDLED`.
+
+**A gap found on the way.** `PuntToClass` reads `ClassMsg` off *class*
+nodes. All forty-odd modules write `ClassMsg` onto their *library* node in
+`_init`, and the only class node that ever gets one is the core's own
+`Object` (object.c:3155). So the punt walk currently reaches `Object` and
+nothing in between — `Control` sets `Handle_Message` as its `ClassMsg` and
+the chain cannot see it. These two classes stamp their own class nodes,
+which needs no core change and alters nobody else's behaviour. The general
+case is left alone deliberately: fixing it would start delivering punted
+messages to forty modules that have never received them.
+
+**A private index, and why it is safe.** Walking the property list by name
+on every cell access is the thing to avoid, so the instance keeps a
+row-major array of `NodeObj` in its `local` struct. It is an *index*: the
+pointers aim at the cell properties, which remain the only holder of any
+value. Because `local` is LONG-typed, `IsPortableProp` refuses it, so it
+never clones and never serializes — a clone or an import arrives with full
+properties and an empty index. That is exactly why the miss path is an
+ordinary property lookup that fills the index rather than an error. No
+rebuild hook and no invalidation protocol, because `SetPropStr` updates a
+property in place and an indexed node keeps its address for the life of
+the instance.
+
+**Sparse.** No value, no node. Two values in a 3x4 grid are two nodes; the
+extent lives in `Rows`/`Cols`, not in a node existing for every position.
+An empty field in the serialized text is an absent cell, not an empty one.
+
+### The mistakes, in the order they were made
+
+**A table was built as a widget the day before, and all of it was
+reverted.** A `TableView` class holding `Cell_r_c` properties, wired both
+ways to the real cells to keep the two in step. That is a copy plus
+synchronization where a link was the whole answer, and it is the same
+disease as `In`/`Out`/`Value` on every control: three holders of one value
+and the sync code between them as the bug supply. **If a design needs
+synchronization it has already made a second copy.** The grid also went
+into `src/data.c` — the core — and was held as a LONG pointer property,
+which `IsPortableProp` refuses, so clone and save saw nothing. One fault,
+three faces.
+
+**This document was quoted back as though it were a specification.** It
+proposed `ReservedViewEmbedded` and `ReservedViewModal` in the present
+tense, sitting in a paragraph describing real conventions, with nothing
+marking the seam. Both appear in **zero** code files. `ReservedViewOpen`,
+`ReservedViewResizeable` and `ReservedViewPanelX/Y` are real — and they
+are just properties, read and written like any other, with no GUI involved
+at all; the browser happens to subscribe to some of them. There is no flag
+registry to add to. A new property costs a write, because `SetPropStr`
+creates it if it is not there.
+
+**"The punt never reaches `data_ext`" was reported as a gap.** It is not.
+Table has a shape and answers all four verbs; `data_ext`'s generic answers
+are for a data object with no shape of its own, and would be wrong for a
+grid. That was an unexecuted code path being mistaken for an unmet
+requirement.
+
+**The index was described as needing no invalidation, and then it did.**
+`DESERIALIZE` means *become this text*, so cells the text does not mention
+must not survive it — which frees property nodes the index is pointing at.
+A miss can refill an index; a dangling pointer cannot. `Table_Clear` drops
+the cells and empties the index together. The round-trip test caught this
+by failing with a ghost value from a previous read still in place.
+
+**Three failures in the test host, none in the modules**, each one worth
+knowing: `CloneInstance` refuses a NULL map; `ExportView` is
+*asynchronous* — it wires a Serializer to a Writer and activates them, so
+a host has to pump `TimeUpdate`/`ExecTasks` until it drains; and
+`ExecTasks(TaskList)` is declared K&R-style with no parameters in sched.h,
+so a no-argument call compiles clean and segfaults. gdb named that one in
+a single line, which is the standing lesson about measuring rather than
+guessing.
+
+### What is deliberately not here
+
+A verb set for the base class. The top of this document listed seven —
+Shape, Address, Cursor, Snapshot, Commit, Freshness, Serialize — with one
+shape in existence and none of them earned. `data_ext` has four, and only
+because Table needed four. Even its generic answers, address-by-name and
+count-the-properties, are a guess at what a shapeless data object should
+do.
+
+**The second shape is what will say what belongs in the base class.** One
+cannot. When a data extension arrives with a different shape, whatever the
+two genuinely share moves up, and it will be visible rather than predicted.
