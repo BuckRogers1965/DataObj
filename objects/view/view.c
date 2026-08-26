@@ -99,6 +99,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	SetPropStr(instance, "ReservedViewResizeable", "1");
 
+	/* DRAWN IN PLACE instead of as an icon that opens a floating panel -
+	   the other presentation of the same object, not another kind of
+	   object. Off by default: a view on the canvas is an icon. */
+	SetPropStr(instance, "ReservedViewEmbedded", "0");
+
 	/* Open/PanelX/PanelY come from InitPosition like every other class - */
 	/* a View's panel is not special, every thing's panel works the same   */
 	InitPosition(instance);
@@ -148,6 +153,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
 	PublishProp(ClassSelf, "ReservedViewResizeable", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "ReservedViewEmbedded", PROP_CHECKBOX, "0");
 	PublishPosition(ClassSelf);
 
 	return rtrn_handled;

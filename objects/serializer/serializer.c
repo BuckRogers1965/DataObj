@@ -349,12 +349,12 @@ static char *ImportCreate(char *className, char *nodeName,
 			   both directions or in neither */
 			if (!strcmp(pn, "Self"))
 			{
-				NodeObj  icls = ClassOfInstance(inst);
-				void   (*readSelf)(NodeObj, char *) =
-					(void (*)(NodeObj, char *)) (icls ? GetPropLong(icls, "Deserialize") : 0);
+				NodeObj bag = NewNode(INTEGER);
 
-				if (readSelf)
-					readSelf(inst, GetValueStr(p));
+				SetName(bag, "Self");
+				SetPropStr(bag, "Text", GetValueStr(p));
+				PuntToClass(inst, msg_deserialize, bag);
+				DelNode(bag);
 				continue;
 			}
 
@@ -1420,19 +1420,16 @@ static int Step(InstanceData *local)
 			EmitStr(local, RelTo(local, GetValueStr(p)));	/* internal paths -> relative */
 		}
 
-		/* THE OBJECT HANDLES ITS OWN SERIALIZING. Everything a class keeps
-		   somewhere the property walk cannot see - a private object it
-		   points at with a LONG, which IsPointer refuses by design - is
-		   the class's own business to write out. A class that can do that
-		   stamps a Serialize function pointer on its class node, exactly
-		   as it stamps InstanceStart; one that does not is written by the
-		   walk above and nothing changes for it. */
+		/* THE OBJECT HANDLES ITS OWN SERIALIZING - by answering the
+		   message, like anything else. What it writes rides as one more
+		   property; a class that does not answer changes nothing. */
 		{
-			char *(*writeSelf)(NodeObj) =
-				(char *(*)(NodeObj)) (cls ? GetPropLong(cls, "Serialize") : 0);
-			char *own = writeSelf ? writeSelf(f->node) : NULL;
+			NodeObj bag = NewNode(INTEGER);
+			char   *own;
 
-			if (own)
+			SetName(bag, "Self");
+			PuntToClass(f->node, msg_serialize, bag);
+			if ((own = GetPropStr(bag, "Text")) != NULL && own[0])
 			{
 				char dbg[200];
 
@@ -1446,8 +1443,8 @@ static int Step(InstanceData *local)
 				snprintf(dbg, sizeof(dbg), "SELF '%s' wrote %d bytes of its own state",
 						 GetNameStr(f->node) ? GetNameStr(f->node) : "?", (int) strlen(own));
 				DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
-				free(own);
 			}
+			DelNode(bag);
 		}
 
 		/* outgoing wires: Connect() records a "Subscriber" sub-node on the   */

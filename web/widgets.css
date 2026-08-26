@@ -50,6 +50,27 @@
 }
 
 
+/* ---- TableView ---- */
+/* a divider is a grab strip on a cell edge. Visible - it is furniture you
+   are meant to find, the way a spreadsheet's column edge is - and brighter
+   under the pointer. */
+.table-divider {
+  position: absolute;
+  background: #4a4e5a;
+  z-index: 2;
+}
+.table-divider:hover { background: #6b9fe6; }
+
+.table-divider-col {
+  width: 4px;
+  cursor: col-resize;
+}
+.table-divider-row {
+  height: 4px;
+  cursor: row-resize;
+}
+
+
 /* ---- View ---- */
 /* What containment LOOKS like - the icon, the panel it opens, its header
    and collapse, the inner area members are placed in, the resize handle
@@ -145,6 +166,21 @@
 .view-dot:hover { background: #e6c66b; }
 .view-dot.in  { left: -5px; }
 .view-dot.out { right: -5px; }
+
+/* a view whose whole name is one character: a symbol button, 10x10 of
+   glyph with just enough room to click */
+.instance-icon.instance-icon-glyph {
+  padding: 2px;
+  gap: 0;
+  border-radius: 4px;
+  line-height: 10px;
+}
+.instance-icon-glyph .instance-icon-label {
+  font-size: 10px;
+  width: 10px;
+  height: 10px;
+  text-align: center;
+}
 
 
 /* ---- Textbox ---- */

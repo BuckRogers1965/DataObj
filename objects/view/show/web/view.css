@@ -92,3 +92,18 @@
 .view-dot:hover { background: #e6c66b; }
 .view-dot.in  { left: -5px; }
 .view-dot.out { right: -5px; }
+
+/* a view whose whole name is one character: a symbol button, 10x10 of
+   glyph with just enough room to click */
+.instance-icon.instance-icon-glyph {
+  padding: 2px;
+  gap: 0;
+  border-radius: 4px;
+  line-height: 10px;
+}
+.instance-icon-glyph .instance-icon-label {
+  font-size: 10px;
+  width: 10px;
+  height: 10px;
+  text-align: center;
+}

@@ -1277,7 +1277,12 @@ int PuntToClass(NodeObj instance, MsgId message, NodeObj data)
 				 verdict == rtrn_dropped   ? "dropped, punting on" : "an unknown code");
 		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
 
-		if (verdict != rtrn_dropped)
+		/* rtrn_unhandled is the real "not mine". rtrn_dropped is still
+		   accepted here because 238 handlers across objects/ currently
+		   spell "not mine" that way; as each is converted this reduces to
+		   the first test alone, and a deliberate drop stops being
+		   overridden by its parent. */
+		if (verdict != rtrn_unhandled && verdict != rtrn_dropped)
 			return verdict;
 	}
 
@@ -1881,35 +1886,33 @@ int IsPortableProp(NodeObj inst, NodeObj prop)
    one in the palette was. This writes values onto what is already there. */
 static void CloneData(NodeObj source, NodeObj inst)
 {
-	/* THE OBJECT HANDLES ITS OWN SERIALIZING, on this path too. Anything a
-	   class keeps where the property walk cannot see it - a private object
-	   reached by a LONG, which IsPortableProp refuses - is carried by the
-	   class itself or not at all. Same two function pointers the serializer
-	   asks for, so a class writes itself once and both paths work. */
-	{
-		NodeObj  cls = ClassOfInstance(source);
-		char   *(*writeSelf)(NodeObj) =
-			(char *(*)(NodeObj)) (cls ? GetPropLong(cls, "Serialize") : 0);
-		void   (*readSelf)(NodeObj, char *) =
-			(void (*)(NodeObj, char *)) (cls ? GetPropLong(cls, "Deserialize") : 0);
-
-		if (writeSelf && readSelf)
-		{
-			char *own = writeSelf(source);
-
-			if (own)
-			{
-				readSelf(inst, own);
-				free(own);
-			}
-		}
-	}
-
 	NodeObj prop, valnode, owner;
 	char *name, *val;
+	int   mine;
 
 	if (!source || !inst)
 		return;
+
+	/* CLONING IS A MESSAGE, AND SO IS SERIALIZING. Anything a class keeps
+	   where the property walk cannot see it - a private object it points at
+	   with a LONG, which IsPortableProp refuses - is carried by asking the
+	   source to write itself and handing that to the copy. A class that
+	   does not answer says so, and only the walk below applies, exactly as
+	   before. */
+	{
+		NodeObj bag = NewNode(INTEGER);
+
+		SetName(bag, "Self");
+		PuntToClass(source, msg_serialize, bag);
+		mine = PuntToClass(inst, msg_deserialize, bag);
+		DelNode(bag);
+
+		/* IF THE CLASS DID THE WHOLE JOB, DO NOT DO IT AGAIN. A class that
+		   answered has copied itself; the walk below is the default for
+		   everything that did not. */
+		if (mine == rtrn_handled)
+			return;
+	}
 
 	/* Copy what the SOURCE actually carries, not what its class published.
 	   Those are different sets: a property added to one instance - an agent's
@@ -3137,6 +3140,16 @@ static int ObjectClassMsg(NodeObj instance, MsgId message, NodeObj data)
 	char   *prop = (data && GetNameStr(data)) ? GetNameStr(data) : NULL;
 	char   *val  = data ? GetValueStr(data) : NULL;
 	NodeObj propnode;
+
+	/* THE UNIVERSAL DEFAULT IS FOR VALUES, NOT FOR VERBS. Storing whatever
+	   arrived onto the named property is the right answer for a value that
+	   nothing else took an interest in - it is not an answer to "write
+	   yourself out". Left unguarded, msg_deserialize's carrier node was
+	   stored as a property called Self and reported HANDLED, which told
+	   CloneData the class had copied itself and stopped it copying
+	   anything: a cloned group came back with none of its members' X/Y. */
+	if (message == msg_serialize || message == msg_deserialize)
+		return rtrn_unhandled;
 
 	if (instance && prop && message != msg_eof)
 	{

@@ -840,6 +840,12 @@ function onPropertyChanged(alias, port, value) {
   const view = views[alias];
   if (view) {
     if (port === 'ReservedViewResizeable') view.resizeHandle.style.display = value === '0' ? 'none' : 'block';
+    /* a view class that renders something of its own gets its properties
+       here - the host does not know what they mean, it just hands them on */
+    if (view.onProp) view.onProp(port, value);
+    /* which presentation this view is: an icon that opens a floating panel,
+       or drawn in place inside whatever contains it */
+    if (port === 'ReservedViewEmbedded' && view.setEmbedded) view.setEmbedded(value !== '0' && value !== '');
     else if (port === 'W' && (!resizeState || resizeState.alias !== alias)) {
       view.panel.style.width = (parseInt(value, 10) || 190) + 'px';
       updateWiresFor(alias);

@@ -1,12 +1,12 @@
 CC=gcc
 
-SOURCE= tableview.c
+SOURCE= radiogroup.c
 
 OBJECTS= $(subst .c,.o,$(SOURCE))
 
-GOAL=tableview.object
+GOAL=radiogroup.object
 
-INCLUDES=-iquote../../src -iquote../data_ext -iquote../table
+INCLUDES=-iquote../../src
 
 OPT=-Wall -g
 
@@ -15,13 +15,11 @@ OPT=-Wall -g
 
 all: $(OBJECTS) $(GOAL)
 
-include ../show.mk
-
 $(GOAL): $(OBJECTS)
 	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
-	rm -f $(OBJECTS) $(GOAL) $(SHOW_CLEAN) > /dev/null 2>&1
+	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 DEPINC=-I../../src -I/usr/include/x86_64-linux-gnu \
        -I$(shell $(CC) -print-file-name=include)

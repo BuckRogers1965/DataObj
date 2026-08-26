@@ -275,8 +275,14 @@ void Widget_BuildTable(NodeObj instance, WidgetItem *table)
 		}
 		else if (strcmp(t->cls, "Help") == 0)	/* the standard help sub-view */
 		{
+			/* THE ROW SAYS WHICH PANEL, here as everywhere else. This used
+			   to pass `instance`, so a Help row's panel field was dead and
+			   help always landed on the main view - an assumption about one
+			   widget's shape baked into the shared builder. Identical for
+			   every widget whose Help row says panel 0, because panels[0]
+			   IS the instance. */
 			if (np < WIDGET_MAX_PANELS)
-				panels[np++] = Widget_AddHelp(instance, t->prop);
+				panels[np++] = Widget_AddHelp(parent, t->prop);
 		}
 		else									/* a control */
 		{

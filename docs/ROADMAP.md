@@ -3771,3 +3771,40 @@ it should be recorded as a choice rather than left looking like an accident.
 > belongs in the constructor now that the constructor has a place and a name.
 > That is a per-widget judgement - init moves, action stays - and nothing
 > forces it, since panels build without it.
+
+---
+
+## The last cleanup of the class path: the serializer's own special case
+
+Clone and serialize are messages now (`msg_serialize` / `msg_deserialize`,
+callback.h), and both callers ask before they act: `CloneData` (object.c) and
+the serializer's per-instance walk send the message, use whatever came back,
+and do the default property walk only if no class claimed the job. A class
+that keeps state where a property walk cannot see it — a private object it
+points at with a LONG, which `IsPortableProp` refuses by design — answers, and
+answers by sending the same message one level down to whatever holds the data.
+`objects/tableview` is the worked example: a `Table` reached by a `long`, nine
+controls aliased onto a window of its cells, and it survives clone, export and
+import with its values because it answers the message rather than because
+anything walks into it.
+
+What is still outside the class path, and it is the last of it:
+
+- **The serializer names the contribution.** Export writes what the class
+  produced as a property literally called `Self`, and the import loop tests for
+  that name to know where to send it back. That is a special case at both ends
+  of the file format — the one place the format knows something about the
+  mechanism instead of just carrying it.
+- **A deliberate drop is still overridden by its parent.** `rtrn_unhandled`
+  exists and means "I did not handle this", but `PuntToClass` still accepts
+  `rtrn_dropped` as "keep walking", because 238 handlers across `objects/`
+  currently spell "not mine" that way (only 4 sites in the core test a verdict
+  at all). Each of those 238 is one of two statements — "I recognised this and
+  consumed it" or "I have never heard of this" — and only reading it says
+  which. Converting them lets the second test go, and a class that refuses
+  something stops being answered for by the level above it.
+
+The conversion fails closed if it is done in that order: nothing walks until a
+handler says `rtrn_unhandled` deliberately, so a missed site shows up as an
+object not doing something, rather than as a parent quietly answering for a
+child that had refused.

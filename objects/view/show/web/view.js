@@ -30,6 +30,13 @@ function registerPanel(alias, panelEl, display, onToggle) {
     el: panelEl,
     openApplied: false,
     setOpen(open) {
+      /* LOCKED OPEN: a panel that is drawn in place has no icon to bring
+         it back, so closing it would just vanish it. Every caller comes
+         through here - the header button, the host applying
+         ReservedViewOpen, an alias opening it - so the guard belongs here
+         and nowhere else. */
+      if (rec.lockedOpen && !open) return;
+
       /* an explicit open/close IS a presentation decision - a late-      */
       /* arriving initial Open value must never override it               */
       rec.openApplied = true;
@@ -105,6 +112,10 @@ function registerView(alias, props, pos, hidden, container, reservedIn, reserved
   const iconLabel = document.createElement('span');
   iconLabel.className = 'instance-icon-label';
   iconLabel.textContent = baseName(alias);
+  /* A ONE-CHARACTER NAME IS A SYMBOL, not a word: draw it as a small glyph
+     button rather than a labelled box. Purely how it is drawn - the name is
+     still the name, and the engine is not consulted about pixels. */
+  if ([...baseName(alias)].length === 1) icon.classList.add('instance-icon-glyph');
   iconLabel.title = alias;
   icon.appendChild(iconLabel);
   wrap.appendChild(icon);
@@ -171,15 +182,90 @@ function registerView(alias, props, pos, hidden, container, reservedIn, reserved
 
   /* aliasing a view aliases its Open - the alias renders as another icon */
   /* that opens this same panel (see renderAliasControl)                   */
-  icon.onpointerdown = (ev) => { if (ev.target === icon || ev.target === iconLabel) startDrag(ev, wrap, alias, 'View', 'ReservedViewOpen'); };
-  header.onpointerdown = (ev) => { if (ev.target !== collapseBtn) startPanelDrag(ev, aliasOfEl(wrap, alias), panel); };
+  /* ON THE WRAP, which is where every control binds it (control.js): the
+     chrome drags, and anything inside stops propagation and wins. Bound to
+     the icon it went missing the moment the icon did, and an embedded view
+     could not be moved or cloned. Same binding serves both presentations -
+     the icon is inside the wrap, and so are the contents. */
+  wrap.onpointerdown = (ev) => {
+    /* ONLY THE CHROME DRAGS - control.js's rule, and a View is the one
+       control that has contents, so the rule has teeth here. Its chrome is
+       the icon when it is an icon, and the header or the frame itself when
+       it is drawn in place. A member gets its own gesture and this must
+       not steal it: bound with no test at all, a pointerdown on a checkbox
+       inside started a second drag that never ended. */
+    if (ev.target !== icon && ev.target !== iconLabel
+        && ev.target !== header && ev.target !== headerTitle
+        && ev.target !== panel && ev.target !== wrap)
+      return;
+    startDrag(ev, wrap, alias, 'View', 'ReservedViewOpen');
+  };
+  /* the header floats a FLOATING panel to a new spot. An embedded view is
+     not floating - it lives where its container puts it - and leaving this
+     bound meant one pointerdown on the header started a panel drag AND the
+     view drag: pointerup finishes the panel drag and returns, so the view
+     drag never completed and could not be put down. */
+  header.onpointerdown = (ev) => {
+    if (view.embedded || ev.target === collapseBtn) return;
+    startPanelDrag(ev, aliasOfEl(wrap, alias), panel);
+  };
   attachDeleteGesture(wrap, alias);
   attachOptionsGesture(wrap, alias);
   /* same as a card: the panel is a root-level peer, so it carries the      */
   /* view's own Options gesture (members' gestures stopPropagation and win)  */
   attachOptionsGesture(panel, alias);
 
-  const view = { el: wrap, panel, innerEl, header, resizeHandle, icon, setOpen: p.setOpen };
+  /* THE OTHER PRESENTATION OF THE SAME OBJECT: drawn in place instead of
+     as an icon you open. It is an ordinary control - the wrap IS the
+     control, placed in its container at its own X/Y, carrying the same
+     drag, clone, alias, delete and options gestures every control carries.
+     Nothing here touches those. The only thing that changes is what the
+     wrap draws: its contents instead of an icon. */
+  function setEmbedded(on) {
+    if (on === view.embedded) return;
+    view.embedded = on;
+
+    if (on) {
+      icon.style.display = 'none';
+      panel.classList.add('view-embedded');
+      panel.style.position = 'static';	/* it fills the control, not the page */
+      panel.style.display = 'flex';
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.style.zIndex = '';
+      panel.style.borderRadius = '6px';
+      wrap.appendChild(panel);			/* the control's contents */
+
+      /* IT IS ALWAYS OPEN, so it must do what opening does. A view's
+         members are fetched by the first open (registerPanel's toggle),
+         and that fetch is also what registers this window as VIEWING the
+         container - which is what scopes instance-created events to it.
+         Without it a drop lands in the engine and the browser is never
+         told, and a reload shows nothing either. */
+      /* NO CLOSE. Closing hides the panel, and an embedded view has no icon
+         to bring it back - the gesture would simply vanish it. It is not
+         "open", it is drawn: there is nothing to shut. */
+      collapseBtn.style.display = 'none';
+      p.lockedOpen = true;
+
+      const curAlias = aliasOfEl(wrap, alias);
+      if (!loadedContainers[curAlias]) {
+        loadedContainers[curAlias] = 1;
+        send({ cmd: 'list-instances', container: curAlias });
+      }
+    } else {
+      icon.style.display = '';
+      panel.classList.remove('view-embedded');
+      panel.style.position = 'absolute';
+      collapseBtn.style.display = '';
+      p.lockedOpen = false;
+      panel.style.display = 'none';
+      $('canvas').appendChild(panel);
+    }
+  }
+
+  const view = { el: wrap, panel, innerEl, header, resizeHandle, icon, setOpen: p.setOpen,
+                 embedded: false, setEmbedded };
   views[alias] = view;
   /* instance-created carries Container inline - see registerWidgetAtom's   */
   /* matching comment                                                       */
@@ -196,6 +282,7 @@ function registerView(alias, props, pos, hidden, container, reservedIn, reserved
   send({ cmd: 'subscribe', instance: alias, port: 'H' });
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
   send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewResizeable' });
+  send({ cmd: 'subscribe', instance: alias, port: 'ReservedViewEmbedded' });
 
   /* purely a visual cue, shown only in Connect mode: this view names a
      control that stands in for it on that side. Not clickable, not a port,

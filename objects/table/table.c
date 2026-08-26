@@ -95,7 +95,7 @@ static NodeObj Table_Cell(NodeObj instance, int row, int col)
 			  && local->cells[row * local->cols + col])
 		return local->cells[row * local->cols + col];
 
-	snprintf(name, sizeof(name), TABLE_CELL_FORMAT, row, col);
+	TableCellName(name, sizeof(name), row, col);
 
 	cell = GetPropNode(instance, name);
 	if (!cell)
@@ -165,7 +165,7 @@ static char *Table_Write(NodeObj instance)
 	{
 		for (c = 0; c < cols; c++)
 		{
-			snprintf(name, sizeof(name), TABLE_CELL_FORMAT, r, c);
+			TableCellName(name, sizeof(name), r, c);
 			cell = GetPropNode(instance, name);
 			buf = Table_Append(buf, &len, &cap, cell ? GetValueStr(cell) : "");
 			if (c + 1 < cols)
@@ -202,7 +202,7 @@ static void Table_Clear(NodeObj instance)
 	{
 		next = GetNextSibling(prop);
 		name = GetNameStr(prop);
-		if (!name || sscanf(name, TABLE_CELL_FORMAT, &row, &col) != 2)
+		if (!name || !TableCellParse(name, &row, &col))
 			continue;
 
 		RemoveProp(instance, prop);
@@ -311,6 +311,11 @@ static int Table_MessageFunc(NodeObj instance, MsgId message, NodeObj data)
 					 GetNameStr(instance) ? GetNameStr(instance) : "?",
 					 GetPropInt(data, "Row"), GetPropInt(data, "Col"));
 			DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+			return rtrn_handled;
+
+		case DATA_EXT_DROP_MSG:
+			/* keep the shape, lose the contents */
+			Table_Clear(instance);
 			return rtrn_handled;
 
 		case DATA_EXT_SHAPE_MSG:
@@ -483,7 +488,7 @@ static char *CellAt(NodeObj t, int r, int c)
 	char name[64];
 	NodeObj cell;
 
-	snprintf(name, sizeof(name), TABLE_CELL_FORMAT, r, c);
+	TableCellName(name, sizeof(name), r, c);
 	cell = GetPropNode(t, name);
 	return cell ? GetValueStr(cell) : NULL;
 }
@@ -541,11 +546,12 @@ int main(void)
 	free(text);
 	text = Table_Write(src);
 	Table_Read(dst, text);
-	if (GetPropNode(dst, "R1C2"))
+	{ char probe[32]; TableCellName(probe, sizeof(probe), 1, 2);
+	if (GetPropNode(dst, probe))
 	{
 		printf("FAIL empty cell made a node: '%s'\n", CellAt(dst, 1, 2));
 		fails++;
-	}
+	} }
 	if (GetPropInt(dst, "Cols") != 4)
 	{
 		printf("FAIL empty cell lost a column: %d\n", GetPropInt(dst, "Cols"));
@@ -566,7 +572,7 @@ int main(void)
 		Table_Read(sp2, t2);
 
 		for (prop = GetNextProp(sp2); prop; prop = GetNextSibling(prop))
-			if (GetNameStr(prop) && sscanf(GetNameStr(prop), TABLE_CELL_FORMAT, &r2, &c2) == 2)
+			if (GetNameStr(prop) && TableCellParse(GetNameStr(prop), &r2, &c2))
 				nodes++;
 
 		if (nodes != 2)

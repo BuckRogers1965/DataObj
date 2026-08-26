@@ -35,12 +35,19 @@ enum {
 	DATA_EXT_ADDRESS_MSG,
 
 	/* How much of me is there, in the terms of my own shape. */
-	DATA_EXT_SHAPE_MSG
+	DATA_EXT_SHAPE_MSG,
+
+	/* Throw the contents away and keep the shape. Sparse means an empty
+	   cell has no node, so dropping is deleting the nodes - which is also
+	   why it cannot be left to a caller: whatever indexes them has to let
+	   go in the same breath. APPENDED, so ids do not shift. */
+	DATA_EXT_DROP_MSG
 };
 
 #define DataExtSerialize(pData,into)   DeliverMsg((pData), "Msg", DATA_EXT_SERIALIZE_MSG, (into))
 #define DataExtDeserialize(pData,from) DeliverMsg((pData), "Msg", DATA_EXT_DESERIALIZE_MSG, (from))
 #define DataExtAddress(pData,at)       DeliverMsg((pData), "Msg", DATA_EXT_ADDRESS_MSG, (at))
 #define DataExtShape(pData,into)       DeliverMsg((pData), "Msg", DATA_EXT_SHAPE_MSG, (into))
+#define DataExtDrop(pData)             DeliverMsg((pData), "Msg", DATA_EXT_DROP_MSG, 0L)
 
 #endif

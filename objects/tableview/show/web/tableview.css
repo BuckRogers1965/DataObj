@@ -1,0 +1,21 @@
+/* A divider is a line on a cell edge that you can grab. It has to sit ABOVE
+   the controls to be clickable: every instance wrap carries a z-index from
+   the raise-to-front counter (which starts at 100 and only counts up), so a
+   small number puts these behind the cells - which is exactly where they
+   were. Below the wire layers at 100000, same ceiling the rest of the GUI
+   already lives with. */
+.table-divider {
+  position: absolute;
+  background: #4a4e5a;
+  z-index: 99990;
+}
+.table-divider:hover { background: #6b9fe6; }
+
+.table-divider-col {
+  width: 5px;
+  cursor: col-resize;
+}
+.table-divider-row {
+  height: 5px;
+  cursor: row-resize;
+}
