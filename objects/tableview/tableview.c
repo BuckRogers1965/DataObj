@@ -57,6 +57,8 @@ static NodeObj ClassSelf;
 
 static WidgetItem TableViewPanel[];
 
+int TableView_OnSize(NodeObj instance, MsgId message, NodeObj data);
+
 int Handle_Message(NodeObj instance, MsgId message, NodeObj data)
 {
 	DebugPrint("TableView handling a message.", __FILE__, __LINE__, OBJMSGHANDLING);
@@ -113,8 +115,30 @@ static NodeObj TableView_MakeData(NodeObj instance)
 	return table;
 }
 
-/* one size for every column, one for every row - a divider drag sets the
-   whole grid at once, the way a spreadsheet does */
+/* A WIDTH BELONGS TO A COLUMN, not to the grid. Dragging the divider after
+   B widens B and every cell in it, and leaves A and C alone - which is what
+   a spreadsheet does. The size lives in a property named for the column
+   ("ColW_B") or the row ("RowH_3"), so it is sparse like everything else:
+   a column nobody has resized has no property and takes the default. And
+   because they are ordinary properties they clone, serialise and can be
+   wired, with no list anywhere. */
+static void TableView_SizeName(char *out, int size, int isCol, int index)
+{
+	char cell[32];
+	int  k = 0;
+
+	TableCellName(cell, sizeof(cell), isCol ? 0 : index, isCol ? index : 0);
+	if (isCol)
+	{
+		while (cell[k] >= 'A' && cell[k] <= 'Z')
+			k++;
+		cell[k] = 0;
+		snprintf(out, size, "ColW_%s", cell);
+	}
+	else
+		snprintf(out, size, "RowH_%d", index + 1);
+}
+/* the default, for a column or row nobody has touched */
 static int TableView_CellW(NodeObj instance)
 {
 	int v = GetPropInt(instance, "CellW");
@@ -131,6 +155,69 @@ static int TableView_CellH(NodeObj instance)
 	if (v < CELL_MIN) v = CELL_H_DEF;
 	if (v > CELL_MAX) v = CELL_MAX;
 	return v;
+}
+
+/* THE SIZE LIVES ON THE DATA, because it is that column's width - not the
+   third slot's. Keyed by the ABSOLUTE column, so scrolling carries D's
+   width to D rather than leaving it on whatever is third; two views of one
+   table therefore agree, and the widths travel with the data through clone
+   and export like any other property of it.
+
+   `col` and `row` here are absolute - the caller adds the window offset. */
+static int TableView_ColW(NodeObj instance, int col)
+{
+	NodeObj table = TableView_Data(instance);
+	char    name[64];
+	int     v;
+
+	if (!table)
+		return TableView_CellW(instance);
+
+	TableView_SizeName(name, sizeof(name), 1, col);
+	v = GetPropInt(table, name);
+	if (v < CELL_MIN || v > CELL_MAX)
+		return TableView_CellW(instance);
+	return v;
+}
+
+static int TableView_RowH(NodeObj instance, int row)
+{
+	NodeObj table = TableView_Data(instance);
+	char    name[64];
+	int     v;
+
+	if (!table)
+		return TableView_CellH(instance);
+
+	TableView_SizeName(name, sizeof(name), 0, row);
+	v = GetPropInt(table, name);
+	if (v < CELL_MIN || v > CELL_MAX)
+		return TableView_CellH(instance);
+	return v;
+}
+
+/* where a column starts / a row starts - cumulative, because the sizes
+   differ now */
+/* where the n-th VISIBLE column starts - the widths it walks past are the
+   absolute ones, offset by where the window sits */
+static int TableView_ColX(NodeObj instance, int slot)
+{
+	TableViewData *local = (TableViewData *)GetPropLong(instance, "local");
+	int x = CELL_X, c, off = local ? local->col : 0;
+
+	for (c = 0; c < slot; c++)
+		x += TableView_ColW(instance, off + c) + CELL_G;
+	return x;
+}
+
+static int TableView_RowY(NodeObj instance, int slot)
+{
+	TableViewData *local = (TableViewData *)GetPropLong(instance, "local");
+	int y = CELL_Y, r, off = local ? local->row : 0;
+
+	for (r = 0; r < slot; r++)
+		y += TableView_RowH(instance, off + r) + CELL_G;
+	return y;
 }
 
 /* how much is on show, and how big the thing underneath is - clamped so a
@@ -314,13 +401,99 @@ static void TableView_Prune(NodeObj instance, int rows, int cols)
 	}
 }
 
-/* the panel is tight around the grid, then padded - the rule is pad beyond
-   a TIGHT estimate, so the estimate has to actually be tight */
+/* EVERYTHING BELOW THE GRID FOLLOWS IT. The walk buttons and the position
+   readouts are laid out under the grid, so making a row taller - or adding
+   rows, or widening a column - moves them instead of letting the grid grow
+   down over them. Their X stays where the table put it; only the band they
+   sit in moves. */
+static void TableView_Follow(NodeObj instance, int bottom)
+{
+	static struct { char *name; int dx, dy; } below[] = {
+		{ "Left",   44, 13 }, { "Up",     86,  0 },
+		{ "Right", 128, 13 }, { "Down",   86, 26 },
+		{ "Row",   200,  3 }, { "Col",   200, 29 },
+		{ NULL, 0, 0 }
+	};
+	char me[300], path[400];
+	int  i;
+
+	if (!PathOfInstance(instance, me, sizeof(me)))
+		return;
+
+	for (i = 0; below[i].name; i++)
+	{
+		NodeObj ctl;
+
+		snprintf(path, sizeof(path), "%s/%s", me, below[i].name);
+		ctl = ResolvePath(path);
+		if (!ctl)
+			continue;			/* a bare table has none of these */
+
+		SetPropInt(ctl, "X", below[i].dx);
+		SetPropInt(ctl, "Y", bottom + 20 + below[i].dy);
+	}
+}
+
+/* ONE PER COLUMN AND ONE PER ROW, at their defaults, from the start. Not
+   one per cell - a size belongs to the column, so ten columns and ten rows
+   is twenty properties, not a hundred. Filled in when the table is made and
+   whenever the stored shape grows, so every column has a width to read and
+   nothing has to infer one from an absence. */
+static void TableView_Defaults(NodeObj instance, NodeObj table)
+{
+	char name[64], dbg[200];
+	int  rows, cols, i, made = 0;
+
+	if (!table)
+		return;
+
+	cols = GetPropInt(table, "Cols");
+	rows = GetPropInt(table, "Rows");
+
+	for (i = 0; i < cols; i++)
+	{
+		TableView_SizeName(name, sizeof(name), 1, i);
+		if (!GetPropNode(table, name))
+		{
+			SetPropInt(table, name, TableView_CellW(instance));
+			made++;
+		}
+	}
+	for (i = 0; i < rows; i++)
+	{
+		TableView_SizeName(name, sizeof(name), 0, i);
+		if (!GetPropNode(table, name))
+		{
+			SetPropInt(table, name, TableView_CellH(instance));
+			made++;
+		}
+	}
+
+	if (made)
+	{
+		snprintf(dbg, sizeof(dbg),
+				 "TableView: %d column/row size(s) set to their defaults (%d cols, %d rows)",
+				 made, cols, rows);
+		DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+	}
+}
+
+/* the panel is tight around what is in it, then padded - the rule is pad
+   beyond a TIGHT estimate, so the estimate has to actually be tight */
 static void TableView_Size(NodeObj instance, int rows, int cols)
 {
-	int cw = TableView_CellW(instance), ch = TableView_CellH(instance);
-	int w = CELL_X + cols * (cw + CELL_G) - CELL_G;
-	int h = CELL_Y + rows * (ch + CELL_G) - CELL_G;
+	int w = TableView_ColX(instance, cols) - CELL_G;
+	int h = TableView_RowY(instance, rows) - CELL_G;
+
+	TableView_Follow(instance, h);
+
+	/* the walk buttons live under the grid, so they set the bottom - unless
+	   they are not there at all, in which case the grid does */
+	if (GetPropInt(instance, "ShowControls"))
+		h += 20 + 26 + 20;		/* the band, its tallest row, and clear space */
+
+	if (w < 240)
+		w = 240;				/* the buttons and readouts need this much */
 
 	SetPropInt(instance, "W", w + 50);
 	SetPropInt(instance, "H", h + 50);
@@ -331,9 +504,13 @@ static void TableView_Size(NodeObj instance, int rows, int cols)
    instance to have a place - and again whenever the viewport changes. */
 static void TableView_Build(NodeObj instance)
 {
+	TableViewData *local = (TableViewData *)GetPropLong(instance, "local");
 	NodeObj table, ctl, hd;
 	char    prop[64], dbg[200];
-	int     r, c, rows, cols, cw, ch;
+	int     r, c, rows, cols;
+
+	if (!local)
+		return;
 
 	table = TableView_Data(instance);
 	if (!table)
@@ -345,11 +522,10 @@ static void TableView_Build(NodeObj instance)
 		SetPropInt(table, "Cols", GetPropInt(instance, "DataCols"));
 	}
 
+	TableView_Defaults(instance, table);
+
 	rows = TableView_Vis(instance, "ViewRows");
 	cols = TableView_Vis(instance, "ViewCols");
-	cw   = TableView_CellW(instance);
-	ch   = TableView_CellH(instance);
-
 	TableView_Prune(instance, rows, cols);
 
 	for (c = 0; c < cols; c++)
@@ -357,11 +533,12 @@ static void TableView_Build(NodeObj instance)
 		hd = TableView_At(instance, "ColHead", 0, c);
 		if (!hd)
 			hd = TableView_Head(instance, "ColHead", 0, c,
-								CELL_X + c * (cw + CELL_G), HDR_Y, cw);
+								TableView_ColX(instance, c), HDR_Y,
+								TableView_ColW(instance, local->col + c));
 		if (hd)
 		{
-			SetPropInt(hd, "X", CELL_X + c * (cw + CELL_G));
-			SetPropInt(hd, "W", cw);
+			SetPropInt(hd, "X", TableView_ColX(instance, c));
+			SetPropInt(hd, "W", TableView_ColW(instance, local->col + c));
 		}
 	}
 	for (r = 0; r < rows; r++)
@@ -369,9 +546,9 @@ static void TableView_Build(NodeObj instance)
 		hd = TableView_At(instance, "RowHead", r, 0);
 		if (!hd)
 			hd = TableView_Head(instance, "RowHead", r, 0,
-								12, CELL_Y + r * (ch + CELL_G) + 4, HDR_W);
+								12, TableView_RowY(instance, r) + 4, HDR_W);
 		if (hd)
-			SetPropInt(hd, "Y", CELL_Y + r * (ch + CELL_G) + 4);
+			SetPropInt(hd, "Y", TableView_RowY(instance, r) + 4);
 	}
 
 	for (r = 0; r < rows; r++)
@@ -380,10 +557,10 @@ static void TableView_Build(NodeObj instance)
 			ctl = TableView_At(instance, "Cell", r, c);
 			if (ctl)
 			{
-				SetPropInt(ctl, "X", CELL_X + c * (cw + CELL_G));
-				SetPropInt(ctl, "Y", CELL_Y + r * (ch + CELL_G));
-				SetPropInt(ctl, "W", cw);
-				SetPropInt(ctl, "H", ch);
+				SetPropInt(ctl, "X", TableView_ColX(instance, c));
+				SetPropInt(ctl, "Y", TableView_RowY(instance, r));
+				SetPropInt(ctl, "W", TableView_ColW(instance, local->col + c));
+				SetPropInt(ctl, "H", TableView_RowH(instance, local->row + r));
 				continue;
 			}
 
@@ -399,12 +576,44 @@ static void TableView_Build(NodeObj instance)
 			SetPropStr(ctl, "Kind", "Cell");
 			SetPropInt(ctl, "CellRow", r);
 			SetPropInt(ctl, "CellCol", c);
-			SetPropInt(ctl, "X", CELL_X + c * (cw + CELL_G));
-			SetPropInt(ctl, "Y", CELL_Y + r * (ch + CELL_G));
-			SetPropInt(ctl, "W", cw);
-			SetPropInt(ctl, "H", ch);
+			SetPropInt(ctl, "X", TableView_ColX(instance, c));
+			SetPropInt(ctl, "Y", TableView_RowY(instance, r));
+			SetPropInt(ctl, "W", TableView_ColW(instance, local->col + c));
+			SetPropInt(ctl, "H", TableView_RowH(instance, local->row + r));
 			SetPropStr(ctl, "LabelPos", "none");	/* the headers say which cell */
 		}
+
+	/* A PROPERTY HAS TO EXIST TO ACT. ColW_B is created when a column comes
+	   into view, carrying the handler, so a size written from the browser
+	   re-lays the grid instead of being quietly stored. Its VALUE stays the
+	   default until someone drags it, so nothing here un-sparses. */
+	for (c = 0; c < cols; c++)
+	{
+		char name[64];
+
+		TableView_SizeName(name, sizeof(name), 1, local->col + c);
+		if (!GetPropNode(instance, name))
+		{
+			/* ZERO MEANS UNSET, not zero-wide. Creating it at the current
+			   default froze that default into every visible column, so
+			   changing CellW afterwards did nothing - the columns already
+			   had an answer. It exists so a write can ACT; what it says is
+			   "nobody has dragged me". */
+			SetPropInt(instance, name, 0);
+			SetPropLong(GetPropNode(instance, name), "OnMsg", (long)TableView_OnSize);
+		}
+	}
+	for (r = 0; r < rows; r++)
+	{
+		char name[64];
+
+		TableView_SizeName(name, sizeof(name), 0, local->row + r);
+		if (!GetPropNode(instance, name))
+		{
+			SetPropInt(instance, name, 0);		/* unset - see the columns above */
+			SetPropLong(GetPropNode(instance, name), "OnMsg", (long)TableView_OnSize);
+		}
+	}
 
 	/* WHERE THE GRID STARTS AND HOW IT IS SPACED. The browser half draws
 	   the dividers on the cell edges, and it must not carry its own copy
@@ -465,7 +674,12 @@ static int TableView_Step(NodeObj instance, int dRow, int dCol)
 
 	SetPropInt(instance, "Row", r);
 	SetPropInt(instance, "Col", c);
-	TableView_Point(instance);
+
+	/* RE-LAY-OUT, not just re-point. Columns have their own widths now, so
+	   moving the window changes the geometry as well as which cell each
+	   control stands for - scrolling onto a wide column has to make that
+	   slot wide. */
+	TableView_Build(instance);
 
 	return rtrn_handled;
 }
@@ -607,12 +821,68 @@ static int TableView_OnCellSize(NodeObj instance, MsgId message, NodeObj data, c
 	if (v > CELL_MAX) v = CELL_MAX;
 
 	SetPropInt(instance, which, v);
+
+	/* EVERY COLUMN, OR EVERY ROW. Each one has its own width now, set at
+	   the start, so a default nothing consults is a setting that lies -
+	   typing it here means "make them all this". A divider drag afterwards
+	   is how one of them comes to differ. */
+	{
+		NodeObj table = TableView_Data(instance);
+		int     isCol = !strcmp(which, "CellW");
+		char    name[64];
+		int     n, i;
+
+		if (table)
+		{
+			n = GetPropInt(table, isCol ? "Cols" : "Rows");
+			for (i = 0; i < n; i++)
+			{
+				TableView_SizeName(name, sizeof(name), isCol, i);
+				SetPropInt(table, name, v);
+			}
+		}
+	}
+
 	TableView_Build(instance);
 	return rtrn_handled;
 }
 
 int TableView_OnCellW(NodeObj i, MsgId m, NodeObj d) { return TableView_OnCellSize(i, m, d, "CellW"); }
 int TableView_OnCellH(NodeObj i, MsgId m, NodeObj d) { return TableView_OnCellSize(i, m, d, "CellH"); }
+
+/* ONE COLUMN, ONE ROW. The browser writes "ColW_B" or "RowH_3" - a
+   property named for the thing it sizes - and this only has to lay the
+   grid out again. Any property that names a column or a row lands here. */
+int TableView_OnSize(NodeObj instance, MsgId message, NodeObj data)
+{
+	int v;
+
+	if (message == msg_eof || !data)
+		return rtrn_handled;
+
+	if (GetPropInt(instance, "LockCells"))
+	{
+		DebugPrint("TableView: cells are locked - size refused",
+				   __FILE__, __LINE__, OBJMSGHANDLING);
+		return rtrn_handled;
+	}
+
+	v = GetValueInt(data);
+	if (v < CELL_MIN) v = CELL_MIN;
+	if (v > CELL_MAX) v = CELL_MAX;
+
+	/* ON THE DATA. The widget's own property is only the doorway the
+	   browser can address - the width is the column's, and the column is
+	   the table's. */
+	{
+		NodeObj table = TableView_Data(instance);
+
+		if (table)
+			SetPropInt(table, GetNameStr(data), v);
+	}
+	TableView_Build(instance);
+	return rtrn_handled;
+}
 
 int TableView_OnUp(NodeObj instance, MsgId message, NodeObj data)
 {
