@@ -2810,6 +2810,800 @@ click resolves to the element they meant (`elementFromPoint`), and say so when
 it does not. That one change turns five mystery timeouts into one accurate
 message.
 
+## Planned - four bounded bands, and no counter
+
+The `toTop` item above has a shape now, arrived at while working out what an
+embedded View needs (see the "two chains and a table" post). **Z-order is
+depth, not arrival, and every band is bounded:**
+
+    structural depth    containment depth - free from the DOM
+    floating panels     bounded by how many are open
+    overlay             popups, menus, tooltips
+    modal               a scrim, and the dialog above it
+
+**Embedding retires the counter for everything it touches.** A DOM child
+paints above its parent with no `z-index` at all, so once a View can render
+*in place* inside its parent panel rather than as a root-level peer, the
+depth rule costs nothing to implement - it is what the browser already does.
+The counter exists today only because every panel is a flat sibling and
+nothing else orders them. What is left after that is raise-to-front among
+floating peers, which renumbers down to actual depth on each promotion
+instead of counting up.
+
+**The bug this already causes, today.** `.flow-dialog-overlay` is pinned at
+`z-index: 300` (web/style.css) while `topZ` starts at 100 and only ever
+increments - once a session has rendered and raised its way past 200, **the
+file selector on Save / Load / Import renders BELOW open panels.** The scrim
+dims them correctly and they paint straight over the dialog anyway. That is
+not a dialog bug; it is the unbounded counter arriving at its first victim,
+exactly as the TODO predicted.
+
+**The modal band is the fix, and it is half-built.** The scrim already
+exists - `position: fixed`, `inset: 0`, `rgba(0,0,0,0.45)`. What it needs is
+to own the top band outright and to swallow pointer events, so that while a
+dialog is up nothing below it can be raised at all. Then "below the panels"
+is not reachable by any sequence of clicks.
+
+**The overlay band answers popup escape.** A Dropdown in a table cell has to
+open over the cell and over the panel edge, and CSS stacking contexts make
+that unwinnable from inside: an ancestor with a `transform`, a `filter`, or
+`opacity` below 1 traps its descendants and no `z-index` lifts them out.
+Rendering transient things - a dropdown's list, a menu, a tooltip - into a
+shared overlay layer sidesteps the whole class. Decide it before three
+widgets depend on the other answer.
+
+**A modal here is a View with a flag** (`ReservedViewModal`, beside the
+`ReservedViewEmbedded` the embedded rendering needs), and it is worth naming
+what it is *not*: in a conventional toolkit a modal spins a nested event
+loop, and that re-entrancy is a genus of bugs on its own. There is one loop
+here, always. The scrim blocks the pointer, not the fabric - messages keep
+flowing and tasks keep firing behind the dialog. And because modality is
+per-connection presentation state rather than engine state, a dialog open in
+one browser does not freeze another session on the same instances. Both fall
+out of the GUI being a projection rather than the program.
+
+**Order of work:** the bands are a prerequisite for the embedded View, which
+is itself the prerequisite for a TableView. The file-selector bug is
+independently worth fixing first, because it is live and it gets worse with
+session length.
+
+
+## Planned - a theme is an instance, not a stylesheet
+
+Stated plainly because it is the honest reason it is on the list: **if this
+looked good, far more people would look at it.** Architecture does not
+survive first contact with a screenshot. Someone decides in about a second
+whether the thing in the picture is worth reading about, and nothing else on
+this roadmap has a comparable interest-per-hour return.
+
+**A theme is an ordinary instance whose properties are the tokens.** Colors,
+fonts, sizes, radii, spacing - each an ordinary property on a `Theme`
+instance living in a container. That buys the whole deployment story for
+free, because it is the same one everything else here has: a theme is
+addressable, subscribable, clonable, savable, exportable, and mailable as a
+flow fragment. Nobody edits CSS to reskin a session.
+
+**Restyling is live, because a property write fans out.** Wire a control to
+a theme token and the whole session restyles as the value changes - no
+reload, no rebuild, no regenerated stylesheet. That is not a feature to
+build; it is what property writes already do.
+
+**The mechanical prerequisite, measured.** There are **52 hardcoded hex
+colors in `web/style.css` and 40 more across the controls' own
+`show/web/*.css`, and exactly zero `var(--...)` anywhere.** Converting those
+literals to custom properties is the actual work, and it is mechanical.
+**Do it before the z-order/embedded-view work touches the same files**, or
+it gets done twice.
+
+**Fonts belong to the theme, and by role.** Today there are four
+`font-family` declarations in four places - `web/style.css` twice, plus
+`textbox.css` and `markdown.css` each independently choosing their own
+monospace stack. Those are exactly the roles a theme should name: UI text,
+data/monospace, labels, headings, each with size and weight. Right now they
+disagree in four files with no way to change them together.
+
+One constraint worth stating so nobody reaches for a CDN: the page is served
+by the framework's own Http object, so either the theme names system font
+stacks (free, zero bytes, and what is there now) or it ships a font file
+that Http serves off disk like any other asset. There is no third option and
+that is fine.
+
+**Per-session, without new machinery.** A theme is an instance and a session
+points at one by path - one browser on `/Root/Themes/Dark`, another on
+`/Root/Themes/Light`, same engine, same instances. Nothing per-connection
+has to be stored but a path, and `prefers-color-scheme` can choose the
+default on first connect.
+
+**Not to be confused with Skin.** `objects/skin` is a class's default
+*layout* - one row per published property, generated from the interface and
+overridable from a file. That is position. A theme is appearance. A control
+gets where it sits from one and how it looks from the other, and merging
+them would recreate exactly the fusion this design keeps taking apart.
+
+
+## Planned - break from the desktop, lay out the way the web does
+
+**Nearly no web site positions anything by pixel.** Absolute X/Y for every
+element is a desktop-toolkit inheritance, and this framework carries it
+because that is where its lineage is. It is worth noticing that the medium
+we actually run in has spent thirty years building the other thing, and that
+fighting it costs us its single best property: **content that lays out
+correctly at any font, any size, any density, and any language.**
+
+That is what "infinite themeability" means, and it is not reachable from
+pixel layout. A hand-placed panel can be themed only within the slack
+somebody padded into it - which is precisely why the standing rules are
+"pad the panel +40" and "pad 50". Those numbers are error bars on a human
+estimate of something a layout container computes exactly.
+
+### Two kinds of container, and the boundary between them
+
+**Canvas.** X/Y is engine state - shared, saved, dragged, wired against.
+The Root view and any flow diagram are canvases forever. Positions here are
+facts, so every client must agree on them, and scaling has to be a uniform
+transform rather than a re-layout.
+
+**Layout.** `Stack`, `Row`, `Grid`. **No X/Y is stored at all.** Position is
+a function of order, rule, and font, computed fresh in each client.
+
+The second half is the realisation that makes the whole thing safe:
+**nobody has to agree on an X/Y that was never asserted.** Two sessions at
+different font sizes render different pixel positions inside a layout
+container and neither is wrong, because neither position is data. So
+per-session theming - already the plan for colors and fonts - extends to
+scale and density for free, with nothing to synchronise and nothing to
+conflict.
+
+### The rule that survives unchanged
+
+**Sized by structure, at build time: fine.** Four stacked rows are four rows
+tall the moment the panel is built, identically in every client running the
+same font. Deterministic and repeatable.
+
+**Resized by content, at runtime: still no.** A Textbox does not grow
+because somebody typed a long line. A label does not shove its neighbours
+sideways because a value got wider. Content scrolls inside its declared box,
+exactly as now. A UI that twitches while data moves through it was always
+the thing being prevented, and none of this relaxes it.
+
+The case between them is a layout container whose *members* change at
+runtime - a group gaining a checkbox, a table gaining rows. That is
+structural, so it re-lays-out legitimately, and it needs a ceiling or a
+table grows a million rows tall: the container declares its maximum extent
+and scrolls past it.
+
+### It is half-written already
+
+`objects/skin` generates "one row per published property, stacked
+`SKIN_ROW_HEIGHT` apart, in the order it was published." **That is a stack
+layout.** It is simply pre-computed into pixel offsets instead of expressed
+as a rule the browser executes - which is also why it cannot follow a theme.
+
+What changes for a widget author: a panel table entry declares its place in
+a sequence rather than a coordinate, for containers that opt in. Today every
+widget hand-computes X/Y for its controls in C - the same layout algorithm
+written thirty times - and "make the panel bigger" means editing every
+offset in it.
+
+### Scale on the canvas side
+
+Canvas containers keep authoritative pixel coordinates, so a theme's font
+size cannot re-place them. It applies as a **uniform scale**: declare
+geometry in font units so a 300x200 panel at 14px becomes 343x229 at 16px
+with everything inside scaling by the same factor. Nothing reflows, nothing
+moves relative to anything else, the declared size is still obeyed - only
+the unit under it tracks the theme. That is what OS-level zoom does, and it
+is why it is an accessibility feature rather than a layout mode.
+
+### Cost and order
+
+Three properties on View cover all of it - embedded, modal, and how it
+places its members - and **there is no engine change under any of them.**
+
+Order: theme tokens first (the 92 literals), then the z-order bands, then
+embedded views, then placement modes, then TableView. Each one is a
+prerequisite for the next, and the first three all edit the same CSS.
+
+
+## Planned - the flow owns the icons, the device owns the panels
+
+Right now some presentation state shares between clients and some does not,
+and the split was decided per property inside its own branch rather than by
+a rule. `ReservedViewOpen` is deliberately per-window with a stored default
+(app.js:824 - *"Open's stored value is the initial presentation only - after
+first paint, open/closed is this window's own business"*), while
+`ReservedViewPanelX`/`PanelY` five lines below apply on every change and are
+therefore live-shared. Those two are the same kind of thing and disagree.
+
+**The rule: the engine holds what the flow IS, the device holds how it is
+being looked at.**
+
+| flow - shared live, saved, exported | device - owned per device, restored per device |
+|---|---|
+| instances, values, wiring | which panels are open |
+| names, containment | where each panel sits on screen |
+| **an icon's X/Y in its view** | scroll position, interaction mode |
+| a control's X/Y/W/H in its panel | cursor position, theme and scale |
+
+So **icons move live** - drag one on the desktop and it moves on the pad,
+because where a thing sits in a view is part of the flow and always was
+(it saves, it exports, and the round-trip test asserts on it). **Panels do
+not** - your desktop keeps its arrangement and your pad keeps its own, each
+restored to whatever you last had open there.
+
+**A device profile is an ordinary instance**, in your own tree, at something
+like `/Root/Devices/pad`: one entry per panel holding open/x/y. Which means
+it is addressable, savable, clonable and aliasable, and three separate
+features fall out of that rather than being built:
+
+- **Multi-device work.** A pad beside the monitor holding messaging or a
+  monitoring panel, while the desktop is on a different task entirely. One
+  instance, two arrangements, no sync.
+- **Fast task switching.** Named arrangements on the same device - "monitor"
+  and "build" - and switching is loading a different profile. Virtual
+  desktops, as data, with nothing new underneath.
+- **Support sessions.** A second connection adopts your profile and sees
+  what you see.
+
+**Mirror versus follow is alias versus clone** - the same two operations the
+share model already defines. Support *aliasing* your profile is a live
+mirror: you both move each other's panels. Support *cloning* it is "start
+where you are, then diverge." Default to the clone; make the mirror
+explicit, because most of the time the helper wants to poke at something
+without dragging your windows around.
+
+**And support controlling anything is a real permission**, not a view
+setting: it is a full client on your engine, which has no per-connection
+restrictions, so it is an authentication decision at the launcher - explicit,
+time-boxed, and revocable. With always-on instances, revoking is dropping
+the connection.
+
+### Two collaboration shapes, and they are not the same permission
+
+**A shared workspace** is peers in a common view, each placing their own
+nodes and cloning each other's out. Single-writer still holds, because it is
+per node and not per container - I write mine, you write yours, and exchange
+is a clone. Authorization is "who may place things in this view," and it
+belongs on the **connection** at connect time rather than as a list stored
+on the node: enforcement at the translator, same as everywhere else.
+
+**Remote assist** is a different thing entirely - not sharing a node but
+delegating a session, so the helper acts as you, in your engine. Windows
+Remote Assistance is the right reference because of its four properties,
+and every one of them already has a mechanism here:
+
+- **the user invites; support cannot just connect** - the invitation IS a
+  one-time key, the same object as the reconnect ticket
+- **the user sees everything that happens** - both connections are on one
+  engine, so effects are visible by construction
+- **the user can end it instantly** - drop the connection; the always-on
+  instance is unaffected
+- **it is a session, not a standing grant** - TTL on the ticket, plus a
+  scheduled task that disconnects
+
+**Pointing is a published value, so it needs no permission.** Each
+connection publishes its cursor - read only to everyone else, because your
+pointer is yours to write - and others alias it and render a labelled
+cursor. Publish, alias, subscribe: nothing new. The property that matters
+is the separation it creates: in every screen-sharing tool, pointing at
+something requires taking control. Here "let me show you" costs nothing and
+"let me fix it" is a separate decision.
+
+**Presence falls out of it.** The pointer publishes which VIEW it is in, so
+a helper who wanders off to look at something else simply stops rendering on
+your screen, and reappears when they come back. No presence protocol, no
+join/leave events - a value whose scope stopped matching yours.
+
+**Point at the node, not the pixel.** This is the part to get right at the
+start, and it is the thing screen sharing cannot do at all. With per-device
+panels, per-device theming and per-device scale, a raw (x,y) is meaningless
+across devices. Everything here is addressable, so a pointer publishes what
+it is OVER - `/Root/Sheet/Total` - and each device highlights that node
+wherever it happens to have drawn it. The phone, the pad and the desktop all
+light up the right thing while agreeing on nothing about layout.
+
+**And it beats Remote Assistance rather than imitating it: RA shares pixels,
+this shares the engine.** No pointer contention. The helper has their own
+device profile, their own open panels, their own cursor, so both people work
+at once instead of wrestling over one mouse. Which is where mirror-versus-
+follow earns its keep - alias the profile when they should be looking at
+what you are pointing at, clone it when they should fix one panel while you
+carry on in another.
+
+
+## Planned - one root per user, and a share folder
+
+The three entries above worry about two sessions agreeing on the same
+instances. **Give each user their own session, their own root, and their own
+saved directory, and most of that becomes moot** - nobody is co-observing a
+canvas, so there is no geometry to agree on, no cross-session conflict, and
+per-session theming and scale stop needing any justification at all. The
+per-connection dirty set stays, but as a rate limiter, which is all it was
+ever for.
+
+**Process per user is affordable here, and almost nowhere else.** The
+library is 128 KB, an object is 20 KB, and an idle instance stops scheduling
+once its last client detaches and the flush task stops re-arming - so an
+unattended tenant costs its footprint and nothing else. A Node or JVM tenant
+starts at 50-200 MB before it does anything. This design can afford the
+isolation model that everyone else has to simulate, and it should take it:
+there is no security boundary between objects inside a process, so the
+process IS the boundary, and one per user is the honest answer rather than a
+deployment preference.
+
+### Spawn on login, hand over the port
+
+The mechanism is inetd's, and it suits this framework better than it suits
+anything modern, because the thing being spawned is 128 KB and knows how to
+stop. A listener accepts the connection, authenticates, spawns that user's
+engine with their own cwd - which is also their scan path and their saved
+directory - and hands the socket over.
+
+**The one code change is in the TCP object**: it listens-and-accepts, and it
+client-connects, and it needs a third mode - **adopt an already-connected
+fd**. Skip `socket`/`bind`/`listen`/`accept` and start from a descriptor
+handed in. That covers both handoffs: `fork`+`exec` with the fd inherited
+for a fresh session, and `SCM_RIGHTS` over a unix socket for a user whose
+engine is already running when they reconnect.
+
+**The listener is an object, not host code.** Features never go in main.c,
+so the accept/authenticate/spawn path is a flow like everything else, and
+the share engine is simply one more process the user engines bridge to. N
+user processes plus a share process, all speaking the protocol they already
+speak. Authentication happens before the handoff, in the launcher, because
+it is the one thing that cannot live inside what it protects.
+
+**The cwd is the whole handoff.** `chdir(userdir); exec framework` and there
+is no user id to pass, no config to look up and no tenant table, because the
+working directory already does all three jobs: it is the scan path
+(`InstallObjects` is `ScanDir(".", ".object", ...)`, cwd-relative by
+design), it is the saved directory (flows, and the help READMEs objects read
+relative to cwd), and it is where the session file is picked up at boot. The
+process's directory IS the user as far as the engine can tell.
+
+Two things fall out unbuilt. **Per-user object sets**: a user can hold
+objects nobody else has, which sharpens the shared-native-code fork above -
+a shared `.object` lands in one directory and its blast radius is one user.
+And **this is the third governing principle as a deployment model**:
+shipping a different product means different objects and a different flow,
+never a different binary - so the binary is identical for every user and the
+directory is the entire difference.
+
+There is already a working prototype: `run.sh` runs five build variants at
+once, each in its own directory with its own build, its own `.object` files,
+its own flows and its own port offset. That is the multi-tenant model,
+exercised on every test run. The only change is that a tenant becomes a
+person instead of a compiler flag.
+
+**Where TLS terminates is the fork.** A TLS session's state cannot be handed
+to a child along with the descriptor, so "no crypto in the engine" and
+"encrypted past the handoff" cannot both be had from a plain fd pass. Two
+shapes, and they are not exclusive:
+
+1. **The launcher terminates and proxies** plaintext to the child over a
+   unix socket. Crypto stays entirely in the launcher, the engine never
+   links a TLS library, the browser's origin never changes, and no per-user
+   port is exposed. One local hop, which is nothing at these message sizes.
+2. **TLS as an object.** A transport is just an object here - WebSocket
+   already layers over TCP by sniffing the first message, and TLS layers the
+   same way. The crypto lives in `tls.object`, loaded only when a flow uses
+   it, so `libframework.so` stays 128 KB.
+
+**Build (2) regardless, because outbound needs it**: Ollama, ComfyUI, REST
+and any remote MCP service will want HTTPS, and there is no TLS anywhere in
+the tree today. Then let the launcher use (1), which is the simpler inbound
+story.
+
+**No cookies, and that is a feature.** Session state lives in the engine,
+not the browser, so the usual traps do not apply - and the absence buys
+more than it costs. **No ambient credentials means no CSRF class at all.**
+The connection IS the session: a persistent WebSocket plus a per-user
+process means identity is established once at spawn and never re-asserted,
+so there is no session id because there is nothing to multiplex. And with
+mutual TLS the key lives in the browser's certificate store rather than the
+page's, so a refresh loses nothing because nothing was there - which is the
+"GUI is a projector" rule showing up as a security property.
+
+(For the record, since it constrains any future variant: a per-user PORT
+would not have been an isolation boundary anyway. Cookies ignore port, so
+`host:8083` and `host:41823` are one origin to them, and a browser
+redirected to a high port does not survive corporate networks or NAT.)
+
+**Reconnect uses a one-time key, delivered inside TLS.** The launcher
+authenticates, then redirects the client with a single-use ticket that the
+engine consumes on the WebSocket upgrade. Three details decide whether it
+actually holds:
+
+- **Not in the query string.** A redirect URL leaks through browser history,
+  the `Referer` header on any later outbound request, and access logs.
+  Single-use defeats replay but not observation - anyone who sees the key can
+  race the legitimate client and win. Put it in the URL **fragment**, which
+  is never sent to a server and never logged, and `history.replaceState` it
+  away on read. An auto-submitting POST does the same with the key in a body.
+- **TTL in seconds, not minutes.** The key's entire job is to authenticate
+  ONE upgrade, because after that the connection is the session. Small job,
+  small window - and it is small because of the persistent-connection design.
+- **Atomic consumption**, which is free: one launcher process, single
+  threaded, so "mark used before acting" has no race to lose.
+
+**The first connection needs no key at all.** With the fd handoff above, the
+child receives a socket that is already connected and already authenticated.
+The ticket is only for *re*connecting to an already-running engine, minted
+fresh each time - which is another argument for launcher-as-proxy over a
+per-user port: one TLS endpoint, one certificate, and the key never leaves
+the encrypted channel to reach a differently-secured port.
+
+**The instance is long-lived, not a login session.** It keeps running when
+you log out - your flows keep flowing, your ports keep listening, your
+shares keep serving - and you reconnect a browser to look at it. On a
+hypervisor it can migrate between hosts with its connections intact, which
+is cheap here for the same reason everything else is: live migration cost is
+dirty pages, and a 128 KB engine with a few MB of node tree moves in
+nothing. A 4 GB JVM heap does not.
+
+**Which means quiescence was already right, and the browser was never what
+held it up.** The process persists exactly as long as it has work. A
+listening TCP object has a poll task; a running flow has tasks; a subscribed
+share has a connection. An empty workspace exiting costs nothing, because
+the session file is on disk. The flush task stopping when the last client
+detaches remains correct - it stops the viewer's work, not the user's. No
+grace period is needed.
+
+**And always-on is a requirement, not a preference, for the directory case**
+(see the org-chart worked example): a live status board only works if
+everyone's instance is up while they are asleep. Each person is a peer
+serving their own profile, not a row in somebody's database.
+
+**Two consequences that follow.** *Polling cost bounds tenant density* -
+nothing here is interrupt driven, so a listening socket with no traffic
+still wakes its poll task, and a thousand idle instances waking to check
+quiet sockets is measurable CPU. The fix is the existing idiom: an idle
+listener re-arms with a longer delay and backs off, snapping to its fast
+cadence on the first byte. That is the one place "everything is polled" has
+a price at scale, and it wants measuring before any density number is
+promised. *And hot reload stops being a convenience* - a 24/7 instance
+cannot be restarted to upgrade it, so the half-built machinery (`_fini` ->
+`UnregisterLibrary`, `UnloadClasses`) becomes load-bearing rather than
+someday work.
+
+*REST remains the exception on auth* - `objects/rest` is genuinely stateless
+request/response, `curl` has no connection to be the session, so that
+surface needs per-request auth of its own.
+
+**Mutual TLS is the good fit for the real audience.** A per-user client
+certificate beats a password flow for a team, a lab or an operator: nothing
+travels, there is no password store, no session table and no cookies, and
+the browser proves possession on every connection. The costs are enrollment
+and revocation, and browsers' certificate pickers are unpleasant. Fair trade
+for a handful of trusted users; wrong for public signup.
+
+**Session cleanup is free.** A user's engine exits when nothing is
+scheduled. A browser holds it up through the flush task; when the last
+client detaches and that task stops re-arming, the process ends on its own.
+No reaper, no session timeout, no garbage collection of abandoned sessions -
+logout IS quiescence, and quiescence was already the shutdown mechanism.
+
+**Crash isolation comes with it**, which is the honest answer to having no
+boundary between objects inside a process: make the process the user.
+
+**The share folder is a container in the engine, and the verb is clone.**
+Not a directory, not a file format, not a serializer round trip: a View that
+users clone INTO to share a thing and clone OUT of to take one. Which is the
+Palette pattern applied to user-made things - the Palette is already a View
+holding one instance of every class, and dragging out of it is already a
+clone. Same mechanism, different container, and the GUI gesture exists.
+
+Everything that makes clone correct is therefore already done: internal
+links come across relative, compiled handlers are rebuilt by construction
+rather than copied, help comes with it. And it needs no locking, no merge,
+no conflict resolution and no multi-writer anything, because taking a copy
+is taking a copy.
+
+It is also strictly better to look at than a file listing. **A shared thing
+is live.** Open its panel and see what it does before you decide to take
+one - the shared instance is a real instance, not a description of one.
+
+Consequences that are already handled:
+
+- **The file dialog grows a second source.** It already lists what the
+  engine says exists in `saved/`; the share folder is one more place to list.
+- **Import is where a singleton class earns its keep.** A foreign flow
+  carrying somebody's engine-settings object is refused on create, so
+  importing cannot overwrite your own. The rule that makes it a singleton is
+  the same rule that makes import safe.
+- **Provenance has a precedent.** Every library node already carries
+  `UUID`/`Company` for exactly this reason; a shared export should say who
+  shared it, on the same grounds.
+
+**The caution: a shared instance is running.** A share view full of live TCP
+objects would hold ports and keep the process from ever quiescing. The
+existing rule covers it - a widget does not act until something tells it to,
+so a shared thing sits built and unactivated - but it has to be *stated*
+here, because "clone it in and leave it" is otherwise an invitation to a
+folder full of half-live network objects.
+
+**Two deployments, one idea.** A share view inside one engine serves the
+users who share that engine - a team, a tenant - and sharing is a clone
+between containers in one tree, immediate and with nothing serialized.
+Across engines, the same gesture pointed at a Bridge is federation: browse
+what that instance has and clone it here. Export/import to files stays for
+what it is already good at - carrying a thing to somebody you are not
+connected to. Three ranges, one verb.
+
+
+### Reflecting a remote share into a local view
+
+Across a network the gesture is the same, and the object that does it
+already has a working twin. **MCPSource** connects to a remote service, asks
+what it has, and builds real widgets for each of them inside a view named by
+its `ViewName` property. A **ShareSource** is that object pointed at another
+engine's share view: contain a TCP client, speak the bridge protocol to the
+peer, and reflect what is there into one of your own views.
+
+The pieces it needs are built. `Bridge_ListInstances` enumerates a
+container. Creates and deletes are already announced scoped by container
+key, so a reflection stays in step by subscribing rather than polling. And
+a Bridge is already proven as a client of another Bridge - the harness
+composes its own raw transport through the web bridge to run its tests.
+
+**Two kinds of reflection, and they must not be conflated.**
+
+*Catalog reflection* mirrors the remote share's **contents list** into a
+local view: you see what is on offer, and cloning one brings a copy across
+to live in your tree. This is the palette of somebody else's engine, it is
+cheap, and it is what "share a folder over a network" should mean.
+
+*Live reflection* makes a shared node's value visible to both sides: I share
+a Textbox, you subscribe to it, and my updates arrive in your view. Note
+what this is NOT - it is not two people editing one field. **One node has
+one writer.** I put a box in the share and only I write it; you put one in
+and only you write yours; each of us is read-only on the other's. Two-way
+talk is two one-way channels, which is exactly how the bridge is already
+wired to TCP - `Connect(Tcp,"Out",Bridge,"In")` and
+`Connect(Bridge,"Out",Tcp,"In")`. So the conflict problem that makes
+collaborative editing an entire product (OT, CRDTs) never arises here,
+because nothing is ever written by two parties.
+
+That also supplies a permission model with no ACL in it: **you put it in the
+share, so it is yours to write, and everyone else reads.** Ownership by
+placement. Enforcement belongs in the ShareSource - refuse writes to
+anything it did not originate - not in the engine, the same way the bridge
+is the only thing that knows what a frame is.
+
+**Lifetime follows the same rule, so there is no destructive conflict
+either.** Nobody can delete what somebody else put in; you remove your own
+contribution, or you drop the whole shared view from your side. And when a
+peer does remove theirs, the event already exists: a peer closing is
+`msg_eof` out the relevant property, exactly as it is for a TCP peer
+disconnecting or a Reader hitting end of file. A remote user leaving needs
+no disconnected state and no reconnection protocol - a consumer goes quiet
+when its producer finishes, which is what consumers here have always done.
+
+Two hazards remain and are both small. **Echo**: a box writes the shared
+node and is subscribed to it, so its own write returns - covered today
+because `SetPropStr` fans out only on a real change, but that protection is
+now load-bearing across a round trip and wants a test that pins it.
+**Latency and rate**: keystrokes should coalesce through the same flush
+mechanism as the browser's dirty set rather than sending one message per
+character.
+
+And a distinction worth keeping: a shared Textbox holds the **latest**
+thing said; a shared Queue holds the **transcript**. Walkie-talkie versus
+history - two different objects for two different intentions, neither one a
+workaround for the other.
+
+**The fork that has to be a decision, not a default.** Cloning an instance
+does not ship code - it produces an instance of a class the receiving engine
+must already have. So a share either:
+
+- carries **only instances of classes both sides hold**, which is safe and
+  limited; or
+- carries **`.object` files too**, which is powerful and means executing
+  somebody else's native code in a process with no security boundary between
+  objects.
+
+The second is a real capability and a real exposure, and it should be chosen
+deliberately with the trust model written down beside it.
+
+**And there is a sweet spot in between: the scripted composite widget.** A
+View with bound ports, controls, and a script inside is a working custom
+widget that contains **no compiled code**. It crosses a network as data,
+runs in a language host that already has a runaway guard, and needs nothing
+installed on the far side but the host. That makes it the natural unit of
+network sharing - the thing people will actually want to trade - and it is
+already built.
+
+
+## Planned - users and security: what is a boundary and what is not
+
+The security posture is currently stated in pieces across several entries.
+Collected, because the pieces are individually reasonable and the whole is
+what someone deploying this needs to see.
+
+### The model, stated positively: sharing by subscription IS the security
+
+Each user has their own process, their own root, their own directory and
+their own objects. **Nothing in your environment is in mine.** The only
+thing that crosses is the value of a node you chose to publish, and single
+ownership means I write mine and you write yours - neither of us can write
+or delete the other's.
+
+That is the whole model, and it is stronger than an access-control list
+because there is nothing to grant and nothing to misconfigure. **A node is
+reachable because you placed it in a share view.** Absence is the default,
+and `objects/rest` already works exactly this way: "containment is the
+publication - drag an object into that view and it is published, drag it
+out and it is not. There is no exported flag and no category." **Default
+deny by construction, not by policy.**
+
+It also disposes of the gap listed below rather than mitigating it. "No
+boundary between objects" is a *multi-tenant-in-one-process* problem. This
+architecture never puts two tenants in one process, and inside your own
+process everything is yours already. The remaining trust surface is small
+and ordinary: the protocol parser handling untrusted peer input, and
+resource exhaustion from a peer subscribing to everything or flooding
+writes - which is what the flush/coalescing work already answers.
+
+**What crosses is an alias, not an object.** A share view holds links to
+your real nodes, and what a peer receives is the *value*, read only.
+Nothing is instantiated on their side and nothing executes.
+
+**Three verbs are the whole protocol: walk, read, subscribe.** Discovery is
+walking, drill-down is walking, live status is subscribing - and MCP, REST,
+a peer engine and the browser are dialects of the same three. Note the
+direction that puts things in: **the native surface is the richest one and
+every translator is a lossy projection of it.** REST is pull-only so its
+translator turns push into polling; MCP downgrades similarly. Neither could
+be upgraded into push if the source lacked it, which is why subscribe being
+native rather than bolted on is what lets the other surfaces be honest about
+what they offer.
+
+**The walk must root at the share view and must not escape upward.** No
+`..`, no resolving above the published container - otherwise "walkable"
+quietly becomes "the whole tree is readable." `objects/rest` already
+enforces this ("the published view is the root of the URL space, and
+nothing in a URL says where the view lives"), and the same rule has to hold
+for a ShareSource. It is what makes containment-as-publication a boundary
+rather than merely a listing.
+
+**The address form is a URL, and that is what makes it survive.** A remote
+alias is a link whose target carries an authority component -
+`dataobj://peer/Root/Sheet/Total` beside the local `/Root/Sheet/Total`.
+Because
+it is a **string**, `IsPortableProp` passes it: a remote alias lands in a
+saved flow, exports, imports, and reconnects on the far side. A runtime
+handle could never do that, so the URL form is what makes remote wiring
+serializable at all.
+
+The scheme is **`dataobj://`**. Deliberately not `data:`, which is
+registered - RFC 2397, `data:text/plain;base64,...` - and which browsers,
+JS and every HTTP library treat specially.
+
+Three things fall out. **Local and remote aliases become one record**: the
+only difference is whether the target has an authority component, so
+`LinkPropertyAs` gains a resolver rather than a species - the same
+resolve-through `ResolvePort` already does for container ports.
+**Multiplexing is already proven**: ten aliases to one peer must share one
+connection, and the Bridge already multiplexes many subscriptions over a
+single socket, which is what every browser is doing right now. **And address
+stays separate from resolution**: the URL is data in a property and a
+ShareSource is what resolves it, so a flow can name a peer it is not
+connected to yet.
+
+The REST surface already half-proves the mechanics - `curl -X PUT -d 1
+http://localhost:8483/bob` writes a button today. What this adds is the
+other direction: subscribe once, get pushed on change, which is the Bridge's
+native verb wearing a URL instead of a JSON command.
+
+**And a shared node carries no authority until the receiver grants it
+some.** A Button I share is inert in your environment - it is a value that
+changes when I press it, and it does nothing at all until *you* connect it
+to something of yours. So "what can a remote peer do to me" has an exact
+answer: whatever I wired their node to, and nothing else. Revoking is
+disconnecting. That is capability discipline, and it falls out of the fact
+that a connection is something the receiving side makes.
+
+The one thing that would void all of it is a share carrying `.object`
+files. Values cross; **code stays local.**
+
+### What is NOT a boundary
+
+- **Objects inside a process.** A loaded `.object` is native code with full
+  access to the fabric. Isolation between objects is message *discipline*,
+  not enforcement - there is no sandbox, no capability check, and nothing
+  stopping a module from walking the registry and writing anything it finds.
+- **`ReadOnly`** (once it exists). It is an interface contract: it stops a
+  client, not a module. Worth having and worth not mistaking.
+- **Containment and paths.** Addressing, not access control. A path that
+  resolves is a path anybody in the process can resolve.
+- **The message fabric itself.** Queued dispatch decouples senders from
+  receivers; it does not restrict them.
+
+### What IS a boundary
+
+- **The process.** This is the real one, which is why per-user deployment is
+  per-*process* rather than a preference: make the process the user and a bad
+  object costs one person.
+- **The filesystem, via cwd.** Per-user working directory means per-user scan
+  path AND per-user saved directory - so which objects a user can load and
+  which flows they can open are both settled by one `chdir` before `exec`.
+- **The listener.** `-ip` decides who can reach the port at all. The default
+  is `0.0.0.0` deliberately - the operator is usually remote and
+  `127.0.0.1` locks them out - which makes it a decision to be made per
+  deployment rather than a safe default to rely on.
+- **The launcher's authentication**, which happens *before* the socket is
+  handed over, because it is the one thing that cannot live inside what it
+  protects.
+- **Each translator.** REST refuses a `PUT`, the Bridge refuses a
+  `set-property`, a ShareSource refuses a write to anything it did not
+  originate. Enforcement belongs where the vocabulary is, and the engine
+  keeps having no opinion - it has no directions, and it should not acquire
+  permissions either.
+
+### The gradient of what a share may carry
+
+Riskiest last, and the line should be drawn deliberately rather than by
+whatever the first implementation happens to allow:
+
+1. **An alias to a value.** The default and the safe one. A peer reads what
+   the node holds and cannot write it, and it does nothing in their
+   environment unless they wire it to something. This is what "share"
+   should mean, and it needs no gradient at all.
+2. **A copy taken deliberately** - cloning a widget OUT of a share into your
+   own environment. Cloning does not ship code: it produces an instance of a
+   class the receiver must already hold, so nothing executable moves. But it
+   is a distinct act from watching a value, and should look like one.
+3. **A scripted composite widget, copied.** A View with bound ports,
+   controls and a script: a working custom widget containing **no compiled
+   code**. The script executes, but inside a language host, and all three
+   hosts (Lua, QuickJS, atlast Forth) share one runaway budget held in
+   `script.object`. This is the natural unit of trade - powerful, portable,
+   and bounded.
+4. **`.object` files.** Native code in the receiver's process, which is full
+   trust. Under per-user processes and per-user scan paths the blast radius
+   is one user's directory, which is what makes it tolerable at all.
+
+### Where it actually stands today
+
+- One engine, one root, all clients sharing it. Per-user processes are
+  planned, not built.
+- The authenticated bridge flow exists but is **disabled** in the default
+  app; the harness composes its own raw bridge at test time.
+- `ReadOnly` does not exist - nothing marks a property unwritable.
+- So the honest current posture is: **run it on a network you trust**, and
+  say so plainly to anyone who asks, rather than letting the architecture's
+  tidiness imply a hardening that is not there.
+
+### A consequence: build your own widgets, load and unload them live
+
+If code stays local, then what a user builds in their own environment is
+theirs to build freely - and **a widget you build is not compiled**. A View,
+controls, bound ports and a script. So creating and destroying one is
+`CreateObject` / `DeleteInstance`: **runtime load and unload of scripted
+widgets needs no `dlopen`, no reload plumbing, and works today.** The
+half-built hot-reload machinery (`_fini` -> `UnregisterLibrary`,
+`UnloadClasses`) is only needed for native `.object` files, which are
+exactly the rung of the sharing gradient that does not travel.
+
+And the builder is not speculative - it exists once already. **MCPSource
+generates real, working, clonable widgets at runtime** from a description:
+an input box per declared input, a readout per output, the help text, a
+Submit button. Point that same generation at a person's choices instead of
+a remote agent manifest and that is the widget builder. Which also means
+the thing a person builds is, from the first moment, an ordinary instance -
+clonable, savable, exportable, shareable as a value-carrying composite, with
+no separate "user widget" species anywhere.
+
+### What has to be written down before any of this ships
+
+A trust model, per surface, answering four questions each for the Bridge,
+REST, MCP and a ShareSource: who may connect, who may write, what a share
+may carry, and what an authenticated session is permitted to do. Every
+mechanism above is cheap. Deciding these four is the part that is not, and
+doing it after three surfaces exist is how the answers end up different on
+each one.
+
+
 ## Found 2026-08-16 - "done" has to mean every path it made resolves
 
 `load-flow` answers with `flow-loaded`, sent from `Bridge_LoadFlowDone` - the
