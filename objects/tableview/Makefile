@@ -1,0 +1,29 @@
+CC=gcc
+
+SOURCE= tableview.c
+
+OBJECTS= $(subst .c,.o,$(SOURCE))
+
+GOAL=tableview.object
+
+INCLUDES=-iquote../../src -iquote../data_ext -iquote../table
+
+OPT=-Wall -g
+
+%.o : %.c
+	$(CC) -fPIC $(OPT) $(INCLUDES) -c $< -o $@
+
+all: $(OBJECTS) $(GOAL)
+
+$(GOAL): $(OBJECTS)
+	ld  -shared $(OBJECTS) -o $(GOAL)
+
+clean:
+	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
+
+DEPINC=-I../../src -I/usr/include/x86_64-linux-gnu \
+       -I$(shell $(CC) -print-file-name=include)
+
+depend:
+	makedepend $(DEPINC) $(SOURCE)
+# DO NOT DELETE

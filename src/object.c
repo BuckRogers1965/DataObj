@@ -1881,6 +1881,30 @@ int IsPortableProp(NodeObj inst, NodeObj prop)
    one in the palette was. This writes values onto what is already there. */
 static void CloneData(NodeObj source, NodeObj inst)
 {
+	/* THE OBJECT HANDLES ITS OWN SERIALIZING, on this path too. Anything a
+	   class keeps where the property walk cannot see it - a private object
+	   reached by a LONG, which IsPortableProp refuses - is carried by the
+	   class itself or not at all. Same two function pointers the serializer
+	   asks for, so a class writes itself once and both paths work. */
+	{
+		NodeObj  cls = ClassOfInstance(source);
+		char   *(*writeSelf)(NodeObj) =
+			(char *(*)(NodeObj)) (cls ? GetPropLong(cls, "Serialize") : 0);
+		void   (*readSelf)(NodeObj, char *) =
+			(void (*)(NodeObj, char *)) (cls ? GetPropLong(cls, "Deserialize") : 0);
+
+		if (writeSelf && readSelf)
+		{
+			char *own = writeSelf(source);
+
+			if (own)
+			{
+				readSelf(inst, own);
+				free(own);
+			}
+		}
+	}
+
 	NodeObj prop, valnode, owner;
 	char *name, *val;
 
@@ -2230,6 +2254,28 @@ static void CloneRelinkProps(NodeObj src, NodeObj clone, NodeObj map)
 		mapped = (NodeObj) GetConnState(map, (long) target);
 		if (mapped)
 			target = mapped;
+		else
+		{
+			char probe[256];
+
+			/* NOT IN THE GROUP AND NOT ADDRESSABLE = THE ORIGINAL'S PRIVATE
+			   STATE. A link out of the group is normally kept, because the
+			   thing on the other end is shared and the copy should point at
+			   it too. But an instance with no path is a class's own private
+			   object - nothing else in the session can reach it - and
+			   pointing the COPY at it wires the new widget's controls into
+			   the original's data: typing in one changed the other. The copy
+			   owns its own, made by its own InstanceStart, so leave the link
+			   its build already set. */
+			if (!PathOfInstance(target, probe, sizeof(probe)))
+			{
+				snprintf(dbg, sizeof(dbg),
+						 "CLONE relink: '%s'.%s points at private state - left as the copy's own",
+						 GetPropStr(clone, "Name") ? GetPropStr(clone, "Name") : "?", name);
+				DebugPrint(dbg, __FILE__, __LINE__, CLONE);
+				continue;
+			}
+		}
 
 		if (LinkPropertyAs(clone, name, target, GetNameStr(resolved)))
 			snprintf(dbg, sizeof(dbg), "CLONE relink: '%s'.%s -> '%s'.%s",

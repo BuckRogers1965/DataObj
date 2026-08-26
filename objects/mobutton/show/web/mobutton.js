@@ -14,6 +14,18 @@ register('MoButton', {
     let held = false;
     btn.addEventListener('pointerdown', (ev) => {
       ev.stopPropagation();
+
+      /* A HALF-TYPED EDIT IS STILL AN EDIT, AND IT HAPPENED FIRST.
+         pointerdown beats the focused field's blur, so pressing a button
+         while a box holds an uncommitted value sent the press first and
+         let the edit land afterwards - against whatever the press had by
+         then changed the box to stand for. Blur commits it (textbox.js
+         writes on blur), so the two arrive in the order the hand did
+         them. */
+      if (document.activeElement && document.activeElement !== btn
+          && typeof document.activeElement.blur === 'function')
+        document.activeElement.blur();
+
       held = true;
       btn.classList.add('pressed');
       ctx.set('Value', '1');

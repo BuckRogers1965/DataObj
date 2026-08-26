@@ -344,6 +344,20 @@ static char *ImportCreate(char *className, char *nodeName,
 				|| !strcmp(pn, "Container") || !strcmp(pn, "State"))
 				continue;
 
+			/* what the class wrote for itself goes back to the class, not
+			   into a property - the object handles its own serializing in
+			   both directions or in neither */
+			if (!strcmp(pn, "Self"))
+			{
+				NodeObj  icls = ClassOfInstance(inst);
+				void   (*readSelf)(NodeObj, char *) =
+					(void (*)(NodeObj, char *)) (icls ? GetPropLong(icls, "Deserialize") : 0);
+
+				if (readSelf)
+					readSelf(inst, GetValueStr(p));
+				continue;
+			}
+
 			/* A LINK IS NOT A VALUE - the same rule the clone walk follows,
 			   applied at the receiving end. A panel control's Value is a
 			   LINK into the widget's own property (Widget_Ctl), and writing
@@ -1404,6 +1418,36 @@ static int Step(InstanceData *local)
 			EmitStr(local, GetNameStr(p));
 			Emit(local, ":");
 			EmitStr(local, RelTo(local, GetValueStr(p)));	/* internal paths -> relative */
+		}
+
+		/* THE OBJECT HANDLES ITS OWN SERIALIZING. Everything a class keeps
+		   somewhere the property walk cannot see - a private object it
+		   points at with a LONG, which IsPointer refuses by design - is
+		   the class's own business to write out. A class that can do that
+		   stamps a Serialize function pointer on its class node, exactly
+		   as it stamps InstanceStart; one that does not is written by the
+		   walk above and nothing changes for it. */
+		{
+			char *(*writeSelf)(NodeObj) =
+				(char *(*)(NodeObj)) (cls ? GetPropLong(cls, "Serialize") : 0);
+			char *own = writeSelf ? writeSelf(f->node) : NULL;
+
+			if (own)
+			{
+				char dbg[200];
+
+				if (!firstProp)
+					Emit(local, ",");
+				firstProp = 0;
+				EmitStr(local, "Self");
+				Emit(local, ":");
+				EmitStr(local, own);
+
+				snprintf(dbg, sizeof(dbg), "SELF '%s' wrote %d bytes of its own state",
+						 GetNameStr(f->node) ? GetNameStr(f->node) : "?", (int) strlen(own));
+				DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+				free(own);
+			}
 		}
 
 		/* outgoing wires: Connect() records a "Subscriber" sub-node on the   */

@@ -2202,6 +2202,86 @@ NodeObj Bridge_MakeTap(NodeObj bridgeInstance, NodeObj target, char *alias, char
 	return rec;
 }
 
+/* Let go of the record this bridge left on ONE node, by address.
+   Disconnect() resolves the port, so once a link has moved it can no longer
+   reach the record it left on the node the link used to point at - and that
+   is exactly the record to remove. */
+static void Bridge_DropRecordAt(NodeObj node, NodeObj bridgeInstance)
+{
+	NodeObj sub, next;
+	char   *p;
+
+	for (sub = node ? GetNextProp(node) : NULL; sub; sub = next)
+	{
+		next = GetNextSibling(sub);
+
+		if (!CmpName(sub, "Subscriber"))
+			continue;
+		if ((NodeObj) GetPropLong(sub, "Instance") != bridgeInstance)
+			continue;
+		p = GetPropStr(sub, "Port");
+		if (!p || strcmp(p, "Taps"))
+			continue;
+
+		RemoveProp(node, sub);
+		DelNode(sub);
+	}
+}
+
+/* AN ALIAS THAT MOVED IS A NEW TAP.
+   A tap is recorded on the RESOLVED node, so re-pointing a control at a
+   different property leaves the subscription on the old one: writes land
+   where nobody is listening and the client shows the old value for ever.
+   The engine has no reason to care - it has no idea anyone is watching -
+   so the bridge, which is the only piece that knows a client exists, is
+   the piece that follows. Driven by TargetProp, which AliasProperty
+   writes and which fans out like any other property. */
+static void Bridge_Relink(NodeObj bridgeInstance)
+{
+	NodeObj taps = GetPropNode(bridgeInstance, "Taps");
+	NodeObj rec, target, was, now, owner;
+	char   *port, dbg[400];
+
+	for (rec = taps ? GetChild(taps) : NULL; rec; rec = GetNextSibling(rec))
+	{
+		target = (NodeObj) GetPropLong(rec, "Target");
+		port   = GetPropStr(rec, "Port");
+		was    = (NodeObj) GetPropLong(rec, "PropNode");
+		if (!target || !port)
+			continue;
+
+		owner = target;
+		now = ResolvePort(&owner, port);
+		if (!now || now == was)
+			continue;
+
+		Bridge_DropRecordAt(was, bridgeInstance);
+		if (!Connect(target, port, bridgeInstance, "Taps"))
+			continue;
+		SetPropLong(rec, "PropNode", (long) now);
+
+		snprintf(dbg, sizeof(dbg), "RELINK '%s'.%s: tap moved from node %p to %p",
+				 GetPropStr(rec, "Instance") ? GetPropStr(rec, "Instance") : "?",
+				 port, (void *) was, (void *) now);
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+
+		/* the client is owed what it now stands for, exactly as a fresh
+		   subscribe would have handed it over */
+		Bridge_TapEmit(bridgeInstance, rec, msg_change, now);
+	}
+}
+
+int Bridge_RelinkOnIn(NodeObj instance, MsgId message, NodeObj data)
+{
+	(void) data;
+
+	if (message == msg_eof)
+		return rtrn_handled;
+
+	Bridge_Relink(instance);
+	return rtrn_propagate;
+}
+
 void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 {
 	char *alias, *port, *eventType;
@@ -2282,6 +2362,11 @@ void Bridge_Subscribe(NodeObj instance, InstanceData *local, NodeObj command)
 		}
 		propNode = valueNode ? valueNode : GetPropNode(inst, port);
 		tap = Bridge_MakeTap(instance, inst, alias, port, eventType, propNode);
+
+		/* if this tap crossed a link, the thing it stands for can be
+		   re-pointed later - hear about it, so the tap can follow */
+		if (GetPropNode(inst, "TargetProp"))
+			Connect(inst, "TargetProp", instance, "Relink");
 		if (!tap)
 		{
 			Bridge_Error(instance, "subscribe", "could not record the tap");
@@ -3256,6 +3341,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropInt(instance, "Taps", 0);
 	port = GetPropNode(instance, "Taps");
 	SetPropLong(port, "OnMsg", (long)Bridge_TapOnIn);
+
+	/* Relink: a re-pointed alias arrives here (its TargetProp changed) and
+	   every tap that crossed a link is re-checked against what it now
+	   stands for. */
+	SetPropInt(instance, "Relink", 0);
+	port = GetPropNode(instance, "Relink");
+	SetPropLong(port, "OnMsg", (long)Bridge_RelinkOnIn);
 
 	/* enable port, the LED: 1 enables, 0 disables, any source can drive it */
 	SetPropStr(instance, "Enable", "1");
