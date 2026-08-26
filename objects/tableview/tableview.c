@@ -977,7 +977,13 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	/* A PANEL, NOT AN ICON YOU OPEN. Same widget, same behaviour, drawn
 	   where it sits so it can be dropped inside another panel. */
-	SetPropStr(instance, "ReservedViewEmbedded", "1");
+	/* OFF BY DEFAULT, and the palette is why. An embedded view is
+	   permanently open, so it lists its container at render time - and a
+	   palette entry is an instance like any other, so defaulting this on
+	   made every window load the contents of a container nobody opened,
+	   and drew the whole grid inside the palette. Tick it (or set it in a
+	   flow) on the copy you drop into a panel. */
+	SetPropStr(instance, "ReservedViewEmbedded", "0");
 	SetPropStr(instance, "ReservedViewResizeable", "1");
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)TableView_Activate);
@@ -1078,7 +1084,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	Widget_Publish(ClassSelf, TableViewPanel);
 
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
-	PublishProp(ClassSelf, "ReservedViewEmbedded", PROP_CHECKBOX, "1");
+	PublishProp(ClassSelf, "ReservedViewEmbedded", PROP_CHECKBOX, "0");
 
 	/* what the browser half needs to place the dividers, and the sizes
 	   they set. PROP_NULL: real values, no control of their own. */

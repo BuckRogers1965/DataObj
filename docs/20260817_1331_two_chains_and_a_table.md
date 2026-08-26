@@ -433,3 +433,145 @@ do.
 **The second shape is what will say what belongs in the base class.** One
 cannot. When a data extension arrives with a different shape, whatever the
 two genuinely share moves up, and it will be visible rather than predicted.
+
+---
+
+## Status (2026-08-26, later): the spreadsheet, and why the second day was easy
+
+The day before this one was spent building a table and reverting all of it.
+The day after, a working spreadsheet: a widget you drop into a panel, a 3x3
+window onto a 10x10 sparse table, A B C across the top and 1 2 3 down the
+side, draggable dividers that size a column, settings, clone, export,
+import. Very little code. The difference between the two days was not
+effort and it was not the framework — it was that the shapes were right.
+
+### What it is
+
+**`objects/table`** holds the cells and answers `data_ext`'s verbs.
+**`objects/tableview`** is the widget: a `Widget` subclass that points at a
+Table with a `long`, builds a window of controls onto it, and has a browser
+half of its own for the dividers. **`objects/radiogroup`** is a View with
+one behaviour. That is the whole inventory.
+
+**A cell is named the way people name cells.** `TableCellName` /
+`TableCellParse` (table.h) are bijective base-26 columns and 1-based rows,
+so a cell is `A1` and a path is `/Root/Sheet/A1`. That is not decoration:
+it is a name a person can type, a script can resolve and an alias can point
+at. `CreateAlias(somewhere, table, "A1")` was already a working call before
+any of this — aliasing a total out of a sheet needed no new mechanism at
+all, only a name worth typing.
+
+**A width belongs to a column.** `ColW_B` and `RowH_3` are properties of
+the TABLE, keyed absolutely, so scrolling carries B's width to B rather
+than leaving it on whatever is third. Two views of one table therefore
+agree, and the widths clone and export with the data because they are
+ordinary properties of it. One per column and one per row, set to their
+defaults when the table is made — twenty properties for a ten by ten, not
+a hundred, because a size is never per cell.
+
+**The viewport is real.** ViewRows/ViewCols make and unmake controls while
+the thing is running; growing to 5x4 creates twenty cell controls and
+shrinking to 2x2 deletes sixteen. How much exists is decided by how much is
+shown, which is the same rule the palette will need.
+
+**Presentation is a property.** `ReservedViewEmbedded` on a View draws it in
+place instead of as an icon that opens a panel — the other presentation of
+one object, not another kind of object. That one property is what makes a
+table droppable into a panel, and it is also what makes a group box: an
+embedded View with an outline IS a grouping, and RadioGroup is that plus a
+handler that clears the others.
+
+### The core changes were general, not table-shaped
+
+Three things moved in the core, and none of them knows what a table is.
+
+**Clone and serialize became messages.** They were two separate walks that
+reached into an instance's properties. Now the caller sends the instance a
+message, uses whatever comes back, and does the default property walk only
+if no class claimed the job. A class that keeps state where a walk cannot
+see it — a private object reached by a `long`, which `IsPortableProp`
+refuses by design — answers, and answers by sending the same message one
+level down to whatever holds the data. That is the whole reason a widget
+with private data survives a clone and an export.
+
+**`rtrn_unhandled` exists.** `rtrn_dropped` is a handled verdict: the
+handler recognised the message and consumed it without forwarding. There
+was no way to say "I have never heard of this", which is the only thing
+that should move the class walk on. The 238 handlers that currently spell
+"not mine" as `dropped` are the conversion still to do, and doing it in
+that order fails closed.
+
+**The universal default stopped answering verbs.** `ObjectClassMsg` stores
+whatever arrives onto the named property — right for a value nothing else
+took an interest in, wrong for "write yourself out". It was storing
+`msg_deserialize`'s carrier as a property called `Self` and reporting
+HANDLED, which told CloneData the class had copied itself and stopped it
+copying anything. A cloned group came back with every member bare and piled
+in one spot.
+
+And one in `widget.c`: a Help row's panel field was dead, because the
+builder passed the widget rather than the panel the row named. Every Help
+in the codebase lands on the main view regardless of what its table says.
+One word, and identical for anything whose Help row says panel 0.
+
+### What MVC was for, and why none of it is here
+
+The interesting part is what did not have to be built.
+
+A Model is a layer whose job is to make data observable, because an array
+cannot tell anyone it changed. Every value here is a node and every node is
+subscribable, so that layer has no work. A View observes a Model through a
+protocol both sides agree on; here a control's `Value` LINKS to the cell
+and the link is the protocol, carrying reads and writes through one node.
+A Controller translates "the user typed in this box" into "mutate that
+field"; there is nothing to translate between when it is the same node.
+
+MVC is an architecture for keeping three copies in step. Nearly all of its
+bugs are sync bugs — stale view, double notification, leaked observer. Here
+there is nowhere for a second copy to live, so those are not hard, they are
+unrepresentable. The proof came from the wrong direction the day before:
+the reverted design had cell values on the view AND the real cells AND
+wiring to keep them in step, and it produced exactly that family of bugs.
+
+What replaces MVC is not MVVM. It is addressing. `/Root/Sheet/A1` is
+reachable by a browser, a script, a flow or an agent without any of them
+holding a reference, so "who may change this" stops being an architectural
+question. And the thing MVC promises and charges for — several views of one
+model — costs nothing, because neither view owns anything.
+
+One honest asymmetry: MVC enforces its separation with types and
+compilation. Nothing here enforces anything. A control CAN hold a copy, and
+that is exactly the mistake that cost the previous day. The framework does
+not prevent it; it makes it expensive within minutes.
+
+### Why the second day was easy
+
+Every correction made the code smaller. Every idea brought to it made the
+code bigger. That held without exception:
+
+- The data object was put on the view as a member, then in a struct field,
+  then as a text property, then behind function pointers on the class node —
+  four wrong homes before "it is a `long` property pointing at the data
+  object", which is what `local` and `OnMsg` already are.
+- Dividers were built to size the whole grid at once. A spreadsheet sizes
+  one column. The correction removed the concept of a global width and
+  replaced it with a property on the column, which then clone and export
+  for free.
+- The embedded view got a header drag handle of its own, when the wrap that
+  every control already uses was the answer — and binding the gesture where
+  control.js binds it fixed moving, cloning and dropping in one line.
+- Embedding was made the default, which broke the palette: a palette entry
+  is an ordinary instance, so every window loaded the contents of a
+  container nobody had opened and drew a whole grid inside the palette.
+
+That is a usable signal and it is worth keeping: **when a proposal adds an
+entity and the correction removes one, the proposal is wrong.** It has now
+held for ports, directions, Inner, the alias object, and everything tried
+across these two days.
+
+The framework's strength and the failure mode it exposes are the same
+property seen from two sides. One kind of thing, no species, every answer a
+composition — that is why a spreadsheet costs one file, and it is also why
+instincts trained on toolkits with a class per concept have nothing to grab
+and reach for an invented noun instead. The second day was easy because the
+model was right. Nothing about the framework changed between the two.

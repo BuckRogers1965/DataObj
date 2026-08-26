@@ -143,6 +143,12 @@
   "tag": "div.instance-wrap",
   "w": 60
  },
+ "RadioGroup": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 90
+ },
  "Reader": {
   "h": 30,
   "kids": "div.instance-icon,span.instance-icon-label",
@@ -226,6 +232,12 @@
   "kids": "div.instance-icon,span.instance-icon-label",
   "tag": "div.instance-wrap",
   "w": 63
+ },
+ "TableView": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 79
  },
  "TextOut": {
   "h": 27,
