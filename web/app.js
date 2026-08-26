@@ -319,7 +319,7 @@ function handleEvent(msg) {
          or from an options panel's own subscriptions. */
       if (msg.gui) for (const k in msg.gui) propertyValues[msg.instance + '.' + k] = msg.gui[k];
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
-                        msg.reservedIn, msg.reservedOut, msg.classParent);
+                        msg.reservedIn, msg.reservedOut, msg.classParent, msg.x, msg.y);
       break;
     case 'property-changed':
       onPropertyChanged(msg.instance, msg.port, msg.value);
@@ -710,7 +710,7 @@ function renderInstanceOf(spec) {
 
 
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
-                           reservedIn, reservedOut, classParent) {
+                           reservedIn, reservedOut, classParent, x, y) {
   /* replays are idempotent - a container listed twice (or an instance     */
   /* that arrived live before its container's members were fetched) never  */
   /* renders twice                                                          */
@@ -737,10 +737,10 @@ function onInstanceCreated(alias, className, parent, interfaceNode, hidden, cont
   }
 
   const props = classes[className] || [];
-  /* birth position/container are the SERVER's facts (atomic birth - the   */
-  /* create verb carried them): place it anywhere for now, the X/Y          */
-  /* subscribe below corrects it almost immediately.                        */
-  const pos = { x: 30, y: 30 };
+  /* the position came with the instance, off the instance's own node -    */
+  /* it is not something to be corrected into place afterwards. The X/Y    */
+  /* subscribe below still runs, for moves made after this.                */
+  const pos = { x: x | 0, y: y | 0 };
   container = container || '';
 
   /* a View is not a special client-side concept (the Palette included -   */

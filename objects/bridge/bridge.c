@@ -293,6 +293,7 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	char *guiText;
 	char *escIn, *escOut, *sIn, *sOut;
 	int bufLen;
+	int x, y, w, h;
 
 	interface = classNode ? GetClassInterface(classNode) : NULL;
 
@@ -317,6 +318,18 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 
 	guiText = Bridge_GuiProps(self);
 
+	/* WHERE IT IS AND HOW BIG, read off the instance while already
+	   describing it - the same lookup as ReservedIn/Out above, no round
+	   trip and nothing subscribed. Without these the client had nothing to
+	   place with, so it drew every member at a made-up position and let the
+	   X/Y subscriptions walk it to the real one: a view opened as a stack in
+	   the corner that then scattered. A position is not an update about an
+	   instance, it is part of knowing which instance you have. */
+	x = self ? GetPropInt(self, "X") : 0;
+	y = self ? GetPropInt(self, "Y") : 0;
+	w = self ? GetPropInt(self, "W") : 0;
+	h = self ? GetPropInt(self, "H") : 0;
+
 	escKind      = JsonEscapeStr(classNode ? (GetPropStr(classNode, "Parent") ?
 								   GetPropStr(classNode, "Parent") : "") : "");
 	escAlias     = JsonEscapeStr(alias ? alias : "");
@@ -326,10 +339,11 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 
 	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
 			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + (int) strlen(escKind)
-			 + (int) strlen(guiText) + 230;
+			 + (int) strlen(guiText) + 310;
 	buf = malloc(bufLen);
-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"interface\":%s}",
-			 escAlias, escClass, escKind, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, guiText, interfaceText);
+	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"interface\":%s}",
+			 escAlias, escClass, escKind, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, guiText,
+			 x, y, w, h, interfaceText);
 
 	free(escAlias);
 	free(escClass);
