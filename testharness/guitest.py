@@ -303,12 +303,25 @@ def test_boot(t, r):
     # so anything at top level carries Container='/Root' where it used to
     # carry ''. The check still has its teeth - it forbids members of any
     # container this window has not opened, which is the actual claim.
-    root_only = t.js("Object.keys(instances).every(k=>{const c=propertyValues[k+'.Container'];"
-                     "return c===undefined || c==='' || c==='/Root'"
-                     " || c==='/Root/Palette';})")
+    # At boot this window has opened NOTHING, so the set of containers whose
+    # members may legitimately be here is fixed and small: top level, the
+    # palette, and the inside of a palette entry that draws EMBEDDED - an
+    # embedded view is drawn in place and permanently open, so its members
+    # come with it. Anything else is a container that loaded itself.
+    #
+    # It has to stay a fixed set. Asking instead "is its container a view
+    # this window has open" would compare the client's state against the
+    # client's own state and could never fail.
+    root_only = t.js("Object.keys(instances).every(k=>{"
+                     "const c=propertyValues[k+'.Container'];"
+                     "if(c===undefined||c===''||c==='/Root'||c==='/Root/Palette')return true;"
+                     "if(!c.startsWith('/Root/Palette/'))return false;"
+                     "if(c.slice(15).indexOf('/')>=0)return false;"
+                     "const v=views[c];"
+                     "return !!(v&&v.embedded);})")
     r.expect("boot: only visible containers were loaded",
              "no instance from any container this window has not opened",
-             "all known instances are root-level or palette members: %s" % root_only,
+             "only top level, the palette, and embedded palette entries: %s" % root_only,
              root_only)
 
 

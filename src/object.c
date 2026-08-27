@@ -2038,11 +2038,60 @@ static NodeObj CloneObject(NodeObj source, NodeObj container, char * name)
 /* CloneConnections, Disconnect and the delete scrub all read the wire   */
 /* straight off it, no adapter, no reverse handler lookup.               */
 /* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
-void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handler){
+/* ONE WIRE, TWO RECORDS, one on each end.
+
+   The SOURCE property gets a "Subscriber": who to deliver to. That is what
+   dispatch reads, and it has always been here.
+
+   The SINK property gets a "Subscription": who it is listening to. That is
+   the half that was missing, and its absence is why two questions could
+   only be answered by sweeping the whole registry - "who points at me" on
+   delete, and "what am I listening to" for anything that wants to work
+   from its own inputs. Both are now a walk of one node's own properties.
+
+   Neither record is portable (both carry a live instance pointer as a
+   LONG), so a file carries wires as paths and a load re-makes them through
+   Connect, which is what keeps the two ends in step by construction. */
+/* the sink's record of what it is listening to - deduped the same way, so
+   re-running a build cannot double it */
+static void AddSubscriptionBack(NodeObj toPortNode, NodeObj fromOwner, NodeObj fromPort)
+{
+	NodeObj rec;
+	char   *fromName = fromPort ? GetNameStr(fromPort) : NULL;
+
+	if (!toPortNode || !fromOwner || !fromName)
+		return;
+
+	for (rec = GetNextProp(toPortNode); rec; rec = GetNextSibling(rec))
+	{
+		char *p;
+
+		if (!CmpName(rec, "Subscription"))
+			continue;
+		if ((NodeObj) GetPropLong(rec, "Instance") != fromOwner)
+			continue;
+		p = GetPropStr(rec, "Port");
+		if (p && strcmp(p, fromName) == 0)
+			return;
+	}
+
+	rec = NewNode(INTEGER);
+	SetName(rec, "Subscription");
+	SetPropLong(rec, "Instance", (long)fromOwner);
+	SetPropStr(rec, "Port", fromName);
+	AddProp(toPortNode, rec);
+}
+
+void AddSubscription(NodeObj fromOwner, NodeObj fromPort,
+					 NodeObj toNode, NodeObj toPortNode, long handler){
 
 	NodeObj sub;
+	char   *toPort = toPortNode ? GetNameStr(toPortNode) : NULL;
 
-	/* ONE wire, not two: the same sink and port recorded twice on one
+	if (!fromPort || !toNode || !toPort)
+		return;
+
+	/* ONE WIRE, not two: the same sink and port recorded twice on one
 	   source delivers every message twice. This is reached with the record
 	   already present whenever a widget's build re-makes wiring that a load
 	   already restored - and a hand cannot draw the same wire twice either.
@@ -2057,7 +2106,6 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
 			continue;
 		if ((NodeObj) GetPropLong(sub, "Instance") != toNode)
 			continue;
-		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		p = GetPropStr(sub, "Port");
 		if ((!p && !toPort) || (p && toPort && strcmp(p, toPort) == 0))
 		{
@@ -2071,10 +2119,12 @@ void AddSubscription(NodeObj fromPort, NodeObj toNode, char * toPort, long handl
 	SetName(sub, "Subscriber");
 	SetPropLong(sub, "Instance", (long)toNode);
 	if (toPort)
-		/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 		SetPropStr(sub, "Port", toPort);
 	SetPropLong(sub, "Callback", handler);
 	AddProp(fromPort, sub);
+
+	/* and the other end's record of the same wire */
+	AddSubscriptionBack(toPortNode, fromOwner, fromPort);
 }
 
 /* see the comment in object.h - a copied group has to arrive wired to  */
@@ -2556,7 +2606,20 @@ Connect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	/* is the RESOLVED node's own - wiring to an alias records what the    */
 	/* alias stands for, same rule as SetOrDeliverProp.                    */
 	handler = GetPropLong(toPort, "OnMsg");
-	AddSubscription(fromPort, toOwner, GetNameStr(toPort), handler);
+	AddSubscription(fromOwner, fromPort, toOwner, toPort, handler);
+
+	/* SAY SO. Gaining a wire changes what a thing's inputs ARE, and until
+	   now nothing announced it - so an object that works from its own
+	   subscriptions had no way to know the set had changed, only that a
+	   value had arrived. Written as an ordinary property on the sink, so it
+	   fans out to whoever is watching and costs nothing to whoever is not.
+	   Same shape as RegisterPath's LastMember for containment.
+
+	   LONG on purpose: this is a runtime fact about live wires, and
+	   IsPortableProp refuses LONG - so it cannot reach a file, be restored
+	   as a stale count, and then be bumped again by the load re-making the
+	   wire it describes. */
+	SetPropLong(toOwner, "Wiring", GetPropLong(toOwner, "Wiring") + 1);
 
 	{
 		char dbg[256];
@@ -2580,6 +2643,7 @@ Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	NodeObj fromPort, toPort, fromOwner, toOwner, sub;
 	char * toName;
+	int    wired = 0;
 
 	if (!fromNode || !from || !toNode || !to)
 		return 0;
@@ -2609,12 +2673,40 @@ Disconnect(NodeObj fromNode, char * from, NodeObj toNode, char * to){
 		RemoveProp(fromPort, sub);
 		DelNode(sub);
 
+		wired = 1;
+
+		/* BOTH ENDS. A wire is two records and removing one leaves the
+		   other describing a wire that is not there. */
+		{
+			NodeObj rec, next;
+			char   *fromName = GetNameStr(fromPort);
+
+			for (rec = GetNextProp(toPort); rec; rec = next)
+			{
+				next = GetNextSibling(rec);
+				if (!CmpName(rec, "Subscription"))
+					continue;
+				if ((NodeObj) GetPropLong(rec, "Instance") != fromOwner)
+					continue;
+				if (!GetPropStr(rec, "Port") || !fromName
+					|| strcmp(GetPropStr(rec, "Port"), fromName) != 0)
+					continue;
+				RemoveProp(toPort, rec);
+				DelNode(rec);
+				break;
+			}
+		}
+
 		{
 			char dbg[256];
 			snprintf(dbg, sizeof(dbg), "Disconnect: '%s'.%s -/-> '%s'.%s",
 					 GetPropStr(fromOwner, "Name"), from, GetPropStr(toOwner, "Name"), toName);
 			DebugPrint(dbg, __FILE__, __LINE__, WIRE);
 		}
+
+		/* losing one changes the inputs just as much as gaining one */
+		if (wired)
+			SetPropLong(toOwner, "Wiring", GetPropLong(toOwner, "Wiring") + 1);
 
 		return 1;
 	}
@@ -3386,10 +3478,18 @@ static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
 
 		if (CmpName(prop, "Subscriber") && (NodeObj)GetPropLong(prop, "Instance") == deadInstance) {
 			{
-				char dbg[256];
-				snprintf(dbg, sizeof(dbg), "Scrub: removed a wire into dying '%s' (from port '%s')",
-						 GetPropStr(deadInstance, "Name"), GetNameStr(node));
-				DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+				char dbg[300];
+				/* ScrubOwnWires ran first and should have taken this down
+				   from the dying instance's own Subscription record. Getting
+				   here means the wire was made by a route that did not go
+				   through Connect, so no second record exists - which is the
+				   thing to fix, not to quietly clean up. */
+				snprintf(dbg, sizeof(dbg),
+						 "SWEEP FOUND ONE: a wire into dying '%s' (from port '%s') had no "
+						 "matching Subscription - it was not made through Connect",
+						 GetPropStr(deadInstance, "Name") ? GetPropStr(deadInstance, "Name") : "?",
+						 GetNameStr(node) ? GetNameStr(node) : "?");
+				DebugPrint(dbg, __FILE__, __LINE__, ERROR);
 			}
 			RemoveProp(node, prop);
 			DelNode(prop);
@@ -3404,6 +3504,104 @@ static void ScrubSubscriberProps(NodeObj node, NodeObj deadInstance)
 /* walk every live instance (library -> class -> instance, the same shape */
 /* FindClass walks) scrubbing any Subscriber entry that targets           */
 /* deadInstance - see DeleteInstance                                       */
+/* Take my own wires down, from my own records, before I go.
+
+   Both directions are local now: my Subscription records say who I listen
+   to, so I can remove myself from their Subscriber lists; my Subscriber
+   records say who listens to me, so I can remove their Subscription
+   records. Neither question needs the registry swept.
+
+   Recurses into sub-properties for the same reason the sweep did - a
+   property is a node and can carry properties of its own. */
+static void ScrubOwnWiresIn(NodeObj node, NodeObj self, int *removed)
+{
+	NodeObj rec, next, owner, port;
+	char   *name;
+
+	if (!node)
+		return;
+
+	for (rec = GetNextProp(node); rec; rec = next)
+	{
+		next = GetNextSibling(rec);
+
+		if (CmpName(rec, "Subscription"))
+		{
+			/* something upstream is delivering to me - take my entry off it */
+			owner = (NodeObj) GetPropLong(rec, "Instance");
+			name  = GetPropStr(rec, "Port");
+			if (owner && name)
+			{
+				port = GetPropNode(owner, name);
+				if (port)
+				{
+					NodeObj sub, snext;
+
+					for (sub = GetNextProp(port); sub; sub = snext)
+					{
+						snext = GetNextSibling(sub);
+						if (!CmpName(sub, "Subscriber"))
+							continue;
+						if ((NodeObj) GetPropLong(sub, "Instance") != self)
+							continue;
+						RemoveProp(port, sub);
+						DelNode(sub);
+						(*removed)++;
+					}
+				}
+			}
+			RemoveProp(node, rec);
+			DelNode(rec);
+			continue;
+		}
+
+		if (CmpName(rec, "Subscriber"))
+		{
+			/* I deliver to something downstream - take its record of me off */
+			owner = (NodeObj) GetPropLong(rec, "Instance");
+			name  = GetPropStr(rec, "Port");
+			if (owner && name)
+			{
+				port = GetPropNode(owner, name);
+				if (port)
+				{
+					NodeObj back, bnext;
+
+					for (back = GetNextProp(port); back; back = bnext)
+					{
+						bnext = GetNextSibling(back);
+						if (!CmpName(back, "Subscription"))
+							continue;
+						if ((NodeObj) GetPropLong(back, "Instance") != self)
+							continue;
+						RemoveProp(port, back);
+						DelNode(back);
+						(*removed)++;
+					}
+				}
+			}
+			continue;			/* my own Subscriber records die with me */
+		}
+
+		ScrubOwnWiresIn(rec, self, removed);
+	}
+}
+
+static void ScrubOwnWires(NodeObj instance)
+{
+	char dbg[200];
+	int  removed = 0;
+
+	ScrubOwnWiresIn(instance, instance, &removed);
+
+	if (removed)
+	{
+		snprintf(dbg, sizeof(dbg), "Scrub: '%s' took down %d wire end(s) from its own records",
+				 GetPropStr(instance, "Name") ? GetPropStr(instance, "Name") : "?", removed);
+		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
+	}
+}
+
 static void ScrubRegistrySubscriptions(NodeObj deadInstance)
 {
 	NodeObj instance;
@@ -3493,6 +3691,13 @@ void DeleteInstance(NodeObj instance)
 		if (PathOfInstance(instance, gone, sizeof(gone)))
 			UnregisterPath(gone);
 	}
+
+	/* my own records first - both ends, no registry walk. The sweep below
+	   stays until it has been seen to find nothing across the suites; what
+	   it reports now is a wire made by a route that did not go through
+	   Connect, and that is worth knowing about rather than silently
+	   cleaning up. */
+	ScrubOwnWires(instance);
 
 	ScrubRegistrySubscriptions(instance);
 	ScrubRegistryLinks(instance);

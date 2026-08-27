@@ -89,6 +89,13 @@ NodeObj Widget_Ctl(NodeObj container, NodeObj target, char *cls, char *prop,
 		   cannot carry one */
 		LinkPropertyAs(c, "Value", target, prop);
 
+	/* NOT recorded here. Target/TargetProp already MEAN "this instance is
+	   an alias", and the loader acts on them - stamping them on every panel
+	   control made an import rebuild the controls as aliases and duplicate
+	   them. What a control stands for is derivable from its own link, so
+	   the bridge works it out when it describes the control rather than
+	   anything storing it. */
+
 	return c;
 }
 

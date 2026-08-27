@@ -153,6 +153,7 @@ function applyMode(mode) {
 
   if (mode === 'Connect' && prevMode !== 'Connect') {
     send({ cmd: 'list-connections' });
+    drawStandInMaps();
   }
 }
 
@@ -319,7 +320,8 @@ function handleEvent(msg) {
          or from an options panel's own subscriptions. */
       if (msg.gui) for (const k in msg.gui) propertyValues[msg.instance + '.' + k] = msg.gui[k];
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
-                        msg.reservedIn, msg.reservedOut, msg.classParent, msg.x, msg.y);
+                        msg.reservedIn, msg.reservedOut, msg.classParent, msg.x, msg.y,
+                        msg.target, msg.targetProp);
       break;
     case 'property-changed':
       onPropertyChanged(msg.instance, msg.port, msg.value);
@@ -334,6 +336,13 @@ function handleEvent(msg) {
       onDisconnected(msg.from, msg.fromPort, msg.to, msg.toPort);
       break;
     case 'connections-done':
+      /* ONE MORE PASS, over everything now known and everything now on
+         screen. Each connection got a single attempt as it arrived, and a
+         wire whose view had not finished rendering at that instant was
+         dropped and never retried - which is why connections showed at the
+         root and nowhere else. drawWire dedupes by key, so re-attempting
+         costs nothing for the ones already drawn. */
+      redrawKnownWires();
       break;
     case 'instance-removed':
       onInstanceRemoved(msg.instance);
@@ -709,8 +718,23 @@ function renderInstanceOf(spec) {
 
 
 
+/* alias.prop of the thing being SHOWN -> the elements showing it. A panel
+   control stands for a property of the object whose panel it is, and a
+   wire reported against that property has to be drawable against whatever
+   is on screen for it. The engine records the relationship (Widget_Ctl and
+   AliasProperty both write Target/TargetProp); this is the browser
+   remembering which pixels correspond. */
+const standsFor = {};
+
+function rememberStandsFor(alias, target, targetProp) {
+  if (!target || !targetProp) return;
+  const key = target + '.' + targetProp;
+  (standsFor[key] = standsFor[key] || []).push(alias);
+}
+
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
-                           reservedIn, reservedOut, classParent, x, y) {
+                           reservedIn, reservedOut, classParent, x, y, target, targetProp) {
+  rememberStandsFor(alias, target, targetProp);
   /* replays are idempotent - a container listed twice (or an instance     */
   /* that arrived live before its container's members were fetched) never  */
   /* renders twice                                                          */
@@ -1144,8 +1168,16 @@ function updateWire(wire) {
   /* hangs in, or the root canvas-wrap - the same element that scrolls it  */
   const origin = wire.svg.id === 'wires' ? $('canvas-wrap') : wire.svg.parentElement;
   const oRect = origin.getBoundingClientRect();
-  const a = wire.fromEl.getBoundingClientRect();
-  const b = wire.toEl.getBoundingClientRect();
+  /* AIM AT THE CONTROL, NOT ITS WRAPPER. An atom's element is the wrapper -
+     the control AND its label - so clipping the line to that box stops it a
+     label's height short of the thing you are looking at, and the wire ends
+     up pointing vaguely rather than at something. A dot has no label, which
+     is why those always looked right. */
+  const aimAt = (el) => el.querySelector
+    ? (el.querySelector('.widget-atom-control') || el)
+    : el;
+  const a = aimAt(wire.fromEl).getBoundingClientRect();
+  const b = aimAt(wire.toEl).getBoundingClientRect();
   const x1 = a.left + a.width / 2 - oRect.left + origin.scrollLeft;
   const y1 = a.top + a.height / 2 - oRect.top + origin.scrollTop;
   const x2 = b.left + b.width / 2 - oRect.left + origin.scrollLeft;
@@ -1176,7 +1208,10 @@ function updateWire(wire) {
   if (len > 8) {
     const edge = (r) => len * Math.min(
       Math.abs(dx) > 0.01 ? (r.width / 2) / Math.abs(dx) : Infinity,
-      Math.abs(dy) > 0.01 ? (r.height / 2) / Math.abs(dy) : Infinity) - 4;
+      /* + shortens, - lengthens: this is subtracted FROM the distance to
+         the box edge, so a smaller number lets the line run further in.
+         At -1 each end stops just short of the control it points at. */
+      Math.abs(dy) > 0.01 ? (r.height / 2) / Math.abs(dy) : Infinity) - 1;
     let ca = edge(a), cb = edge(b);
     if (ca + cb > len - 6) { const k = (len - 6) / (ca + cb); ca *= k; cb *= k; }
     sx = x1 + dx / len * ca; sy = y1 + dy / len * ca;
@@ -1221,6 +1256,7 @@ function anchorsFor(alias, port) {
   const inst = instances[alias];
   const own = inst && inst.ports[port];
   if (own && isDrawable(own)) out.push({ el: own, tag: 'ctl' });
+
   /* scan every dot and ask whether it speaks for THIS endpoint: a spec is
      accepted in more than one spelling and the engine reports whichever one
      it resolved to, so a computed key misses where a comparison does not */
@@ -1237,7 +1273,80 @@ function anchorsFor(alias, port) {
        cannot see, and only that takes the stand-in colour */
     if (hit) out.push({ el: d.el, tag: 'dot' + i, byName: alias !== d.viewAlias });
   });
+
+  /* WHATEVER IS SHOWING THAT PROPERTY - but only when no dot spoke for it
+     already. A dot IS the stand-in for this property, and the purple line
+     from the dot to its control is what says which control that is; a
+     second connection line to the same control would be saying it again,
+     in the wrong colour, from the wrong place. A property with no dot -
+     any ordinary control - still gets its line as before. */
+  if (!out.some((a) => a.tag.indexOf('dot') === 0)) {
+    (standsFor[alias + '.' + port] || []).forEach((sa, i) => {
+      const si = instances[sa];
+      const sel = si && si.ports['Value'];
+      if (sel && isDrawable(sel)) out.push({ el: sel, tag: 'stands' + i });
+    });
+  }
+
+  /* LAST RESORT: THE THING ITSELF. An endpoint whose property has no
+     control of its own, no stand-in dot and nothing showing it still
+     exists and is on screen - its icon, its panel, its atom. Anchoring
+     there draws the wire at the object rather than dropping it silently,
+     which is what "no connections inside a view" looked like: every
+     endpoint that was not a control's primary property found nothing and
+     the line was never drawn at all. */
+  if (!out.length) {
+    const el = inst && inst.el;
+    if (el && isDrawable(el)) out.push({ el, tag: 'self' });
+  }
+
   return out;
+}
+
+/* WHAT THE DOT STANDS FOR, drawn.
+
+   A dot on an icon is a stand-in for a property you usually cannot see.
+   Open the panel beside it and you CAN see it - it is one of the controls
+   in there - so this draws the short purple line from the dot to that
+   control, one per dot, saying "this is the thing that dot speaks for".
+
+   It is not a connection: nothing was wired, there is no x to cut, and it
+   says nothing about what is plugged into what. It only appears while the
+   panel is open, because that is when there are two things to relate. */
+function drawStandInMaps() {
+  if (currentMode !== 'Connect') return;
+
+  standInDots.forEach((d, i) => {
+    if (!isDrawable(d.el)) return;
+    if (d.spec.indexOf('/') >= 0) return;	/* names a control, not a property of the view */
+
+    (standsFor[d.viewAlias + '.' + d.spec] || []).forEach((sa, j) => {
+      const si = instances[sa];
+      const ctl = si && si.ports['Value'];
+
+      if (!ctl || !isDrawable(ctl)) return;
+
+      const key = 'standin-map:' + d.viewAlias + '.' + d.spec + '#' + i + '-' + j;
+      if (wires.some((w) => w.key === key)) return;
+
+      ensureWireArrow();
+      const svg = wireLayerFor(d.el, ctl);
+      const line = document.createElementNS(SVGNS, 'line');
+
+      line.classList.add('standin');
+      line.setAttribute('marker-end', 'url(#wire-arrow-standin)');
+      svg.appendChild(line);
+
+      /* the record shape the positioner and remover expect - with a
+         detached, empty x, because there is nothing here to disconnect */
+      const x = document.createElementNS(SVGNS, 'text');
+      const wire = { key, fromAlias: d.viewAlias, fromPort: d.spec, fromEl: d.el,
+                     toAlias: sa, toPort: 'Value', toEl: ctl,
+                     line, x, svg, loop: false };
+      wires.push(wire);
+      updateWire(wire);
+    });
+  });
 }
 
 /* re-attempt every connection already reported: drawWire dedupes by anchor,
@@ -1247,6 +1356,7 @@ function redrawKnownWires() {
     const c = knownConnections[k];
     onConnected(c.fromAlias, c.fromPort, c.toAlias, c.toPort);
   }
+  drawStandInMaps();
 }
 
 function onConnected(fromAlias, fromPort, toAlias, toPort) {

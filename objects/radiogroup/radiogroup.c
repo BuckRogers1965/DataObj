@@ -181,13 +181,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	SetPropStr(instance, "ReservedViewResizeable", "1");
 
 	/* a grouping is drawn where it sits, not as an icon you open */
-	/* OFF BY DEFAULT, and the palette is why. An embedded view is
-	   permanently open, so it lists its container at render time - and a
-	   palette entry is an instance like any other, so defaulting this on
-	   made every window load the contents of a container nobody opened,
-	   and drew the whole grid inside the palette. Tick it (or set it in a
-	   flow) on the copy you drop into a panel. */
-	SetPropStr(instance, "ReservedViewEmbedded", "0");
+	/* A PANEL, NOT AN ICON YOU OPEN. Drawn where it sits, so it drops
+	   into another panel. */
+	SetPropStr(instance, "ReservedViewEmbedded", "1");
 
 	/* where members report in, and where their arrival is announced */
 	SetPropStr(instance, "Member", "0");
@@ -248,7 +244,7 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
 	PublishProp(ClassSelf, "ReservedViewResizeable", PROP_CHECKBOX, "1");
-	PublishProp(ClassSelf, "ReservedViewEmbedded", PROP_CHECKBOX, "0");
+	PublishProp(ClassSelf, "ReservedViewEmbedded", PROP_CHECKBOX, "1");
 	PublishPosition(ClassSelf);
 
 	return rtrn_handled;

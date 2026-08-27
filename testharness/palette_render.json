@@ -144,10 +144,10 @@
   "w": 60
  },
  "RadioGroup": {
-  "h": 30,
-  "kids": "div.instance-icon,span.instance-icon-label",
+  "h": 220,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-panel.view-embedded,div.view-header,span,span.node-collapse,div.view-inner,div.view-resize-handle",
   "tag": "div.instance-wrap",
-  "w": 90
+  "w": 190
  },
  "Reader": {
   "h": 30,
@@ -221,6 +221,12 @@
   "tag": "div.instance-wrap",
   "w": 82
  },
+ "Sum": {
+  "h": 30,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
+  "tag": "div.instance-wrap",
+  "w": 50
+ },
  "TCPPort": {
   "h": 30,
   "kids": "div.instance-icon,span.instance-icon-label,div.view-dot.in,div.view-dot.out",
@@ -234,10 +240,142 @@
   "w": 63
  },
  "TableView": {
-  "h": 30,
-  "kids": "div.instance-icon,span.instance-icon-label",
+  "h": 230,
+  "kids": "div.instance-icon,span.instance-icon-label,div.view-panel.view-embedded,div.view-header,span,span.node-collapse,div.view-inner,div.table-divider.table-divider-col,div.table-divider.table-divider-col,div.table-divider.table-divider-col,div.table-divider.table-divider-row,div.table-divider.table-divider-row,div.table-divider.table-divider-row,div.widget-atom.atom-label-left,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,button.mo-button.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,span.widget-readout.widget-atom-control,span.widget-atom-label,div.widget-atom.atom-label-none,button.mo-button.widget-atom-control,span.widget-atom-label",
   "tag": "div.instance-wrap",
-  "w": 79
+  "w": 346
+ },
+ "TableView/Col": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-left",
+  "w": 38
+ },
+ "TableView/Down": {
+  "h": 34,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 66
+ },
+ "TableView/Label_1": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Label_2": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Label_3": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Label_4": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Label_5": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Label_6": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 19
+ },
+ "TableView/Left": {
+  "h": 34,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 56
+ },
+ "TableView/Right": {
+  "h": 34,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 64
+ },
+ "TableView/Row": {
+  "h": 27,
+  "kids": "span.widget-readout.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-left",
+  "w": 43
+ },
+ "TableView/Textbox_A1_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_A2_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_A3_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_B1_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_B2_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_B3_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_C1_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_C2_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Textbox_C3_1": {
+  "h": 36,
+  "kids": "div.textbox.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 92
+ },
+ "TableView/Up": {
+  "h": 34,
+  "kids": "button.mo-button.widget-atom-control,span.widget-atom-label",
+  "tag": "div.widget-atom.atom-label-none",
+  "w": 52
+ },
+ "TableView/\u2699": {
+  "h": 16,
+  "kids": "div.instance-icon.instance-icon-glyph,span.instance-icon-label",
+  "tag": "div.instance-wrap",
+  "w": 16
  },
  "TextOut": {
   "h": 27,

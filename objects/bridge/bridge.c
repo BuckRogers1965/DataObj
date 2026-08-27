@@ -292,6 +292,8 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	char *escAlias, *escClass, *escParent, *escContainer, *escKind, *interfaceText, *buf;
 	char *guiText;
 	char *escIn, *escOut, *sIn, *sOut;
+	char *escTgt, *escTgtP, *sTgt, *sTgtP;
+	char  tgtBuf[300];
 	int bufLen;
 	int x, y, w, h;
 
@@ -318,6 +320,30 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 
 	guiText = Bridge_GuiProps(self);
 
+	/* WHAT THIS CONTROL STANDS FOR - derived, not stored. A control that
+	   shows someone else's property has its Value LINKED to it, so
+	   resolving that link says whose and which. Nothing writes it down:
+	   Target/TargetProp mean "I am an alias" and the loader acts on them,
+	   so a control carrying them would be rebuilt as one.
+
+	   The client needs this because a wire is reported against the property
+	   the wire actually landed on, and the only thing on screen for it is
+	   the control standing in. */
+	sTgt = NULL; sTgtP = NULL;
+	if (self)
+	{
+		NodeObj owner = self;
+		NodeObj v = ResolvePort(&owner, "Value");
+
+		if (v && owner && owner != self && PathOfInstance(owner, tgtBuf, sizeof(tgtBuf)))
+		{
+			sTgt  = tgtBuf;
+			sTgtP = GetNameStr(v);
+		}
+	}
+	escTgt  = JsonEscapeStr(sTgt  ? sTgt  : "");
+	escTgtP = JsonEscapeStr(sTgtP ? sTgtP : "");
+
 	/* WHERE IT IS AND HOW BIG, read off the instance while already
 	   describing it - the same lookup as ReservedIn/Out above, no round
 	   trip and nothing subscribed. Without these the client had nothing to
@@ -339,11 +365,11 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 
 	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
 			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + (int) strlen(escKind)
-			 + (int) strlen(guiText) + 310;
+			 + (int) strlen(guiText) + (int) strlen(escTgt) + (int) strlen(escTgtP) + 340;
 	buf = malloc(bufLen);
-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"interface\":%s}",
+	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"target\":%s,\"targetProp\":%s,\"interface\":%s}",
 			 escAlias, escClass, escKind, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, guiText,
-			 x, y, w, h, interfaceText);
+			 x, y, w, h, escTgt, escTgtP, interfaceText);
 
 	free(escAlias);
 	free(escClass);
@@ -352,6 +378,8 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	free(escContainer);
 	free(escIn);
 	free(escOut);
+	free(escTgt);
+	free(escTgtP);
 	free(interfaceText);
 	free(guiText);
 
