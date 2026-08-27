@@ -3808,3 +3808,44 @@ The conversion fails closed if it is done in that order: nothing walks until a
 handler says `rtrn_unhandled` deliberately, so a missed site shows up as an
 object not doing something, rather than as a parent quietly answering for a
 child that had refused.
+
+---
+
+## Resolve from where you already are: a namespace offset per instance
+
+Every path lookup starts at the root and walks the whole string. An
+instance that knows its own position in the namespace trie could start
+there and resolve only the tail - `A1` instead of `/Root/Sheet/Data/A1`.
+
+The API is already shaped for it. `NSSearch(NSObj *Root, char *String)`
+(namespace.c) takes the node to start from and walks `Root->Child`, so
+handing it a sub-node instead of the real root needs no change to the
+search at all. What is missing is a way to GET that node: NSSearch returns
+the `Value`, not the `NSObj *`. One sibling entry point that hands back the
+position is the whole addition.
+
+The saving is larger than the character count suggests, because each level
+is a linked-list scan across siblings (`Current->Next`) - cost is length
+times branching, and the prefix skipped is the widest part of the trie.
+Everything in a session shares `/Root/`, so those first levels carry the
+most siblings; resolving `A1` from the owning instance's own position is a
+couple of steps at a level with a handful of children.
+
+**The hazard is the one that costs a day when it is got wrong: a cached
+trie pointer is a dangling pointer the moment the path changes.**
+`NSDelete` frees chains, and a rename re-keys an entire subtree
+(`Bridge_RepathSubtree`). So the position has to be dropped whenever the
+instance's own path changes - and there is exactly one choke point for
+that, `RegisterPath`/`UnregisterPath`, which every creator, clone, import
+and rename already passes through and where `LastMember` is already
+written. Hold the position in a LONG property so `IsPortableProp` refuses
+it and no file or clone can ever carry a stale one.
+
+Independent of this, and probably the larger prize: several things resolve
+by walking the registry rather than the trie at all - the table widget
+finds its controls with `FirstInstance`/`NextInstance` sweeps, and
+`DeleteInstance` sweeps the whole registry twice to answer "who points at
+me?". Those are O(session) per lookup against the trie's O(tail). The
+offset makes every path resolution cheaper whatever happens to them; see
+also the two-sided subscription note, which is what would retire the delete
+sweeps.
