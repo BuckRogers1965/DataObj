@@ -3849,3 +3849,356 @@ me?". Those are O(session) per lookup against the trie's O(tail). The
 offset makes every path resolution cheaper whatever happens to them; see
 also the two-sided subscription note, which is what would retire the delete
 sweeps.
+
+---
+
+## Security: "anything can insert into anything" needs a boundary
+
+Everything in this system is reachable. A script resolves any path, writes
+any property, creates and destroys instances, and - once functions can be
+installed on properties - can put its own handler on something it did not
+write and did not ship with. That is the power the whole design is for, and
+it is exactly why a thing that arrived from the internet must not have all
+of it by default.
+
+This is a new topic and nothing here is decided. What follows is the shape
+of the problem as this framework actually presents it, so the answer is not
+invented from a generic threat model that does not fit.
+
+### Three different surfaces, and only two are defensible
+
+**A native `.object` is total trust and always will be.** It is `dlopen`ed
+into the process; it can do anything the process can do, and no policy the
+framework enforces can change that. The boundary for native modules is
+therefore the decision to install the file, not anything at runtime. What
+the framework can offer there is provenance - the `UUID`/`Company`/version
+already on every library node - and the discipline that objects arrive as
+single files a person chose to put in the scan path.
+
+**A script is defensible, because it reaches the system through exactly one
+door.** Every language host goes through the shared verb table in
+`objects/script/script.c` - `pathget`, `pathset`, `create`, `destroy`,
+`connect`, `disconnect`, `send`, `activate`, `exists`. One table, three
+languages, and the comment on it already says "add a verb HERE and every
+language has it". That is also where a check goes: one place, all
+languages, no per-host policy to keep in step.
+
+**A flow is data that becomes behaviour.** Loading one creates instances,
+wires them, and - once scripts attach to nodes - installs functions. So
+"download a flow" is "download code", and the load path is where that has
+to be faced. A flow describing its own contents is one thing; a flow that
+reaches out and installs a handler on something already in the session is
+another.
+
+### The questions to answer
+
+**What is a script's default reach?** The natural boundary is already in
+the design: a widget's script talks to its siblings, and containment is a
+path. So "my container and below" is a scope that costs nothing to express
+and matches what scripts legitimately do today. Reaching outside it is the
+thing that should need saying out loud.
+
+**Who grants it?** A host is created by whoever inserts it, and the
+`{owner, base, port}` handed over at creation is already the pattern for
+"the creator decides how this thing reports back". A capability handed over
+the same way - which verbs, which subtree - follows the shape that exists
+rather than adding a policy object.
+
+**Who may install a handler on a property?** This did not exist as a
+question before intercepts. A control that came from elsewhere should
+probably not be able to put a function on the session's File menu. There is
+already a precedent for a property refusing an operation - `Deletable=0` -
+and it is worth deciding whether the answer is a property on the target, a
+capability on the installer, or both.
+
+**Can an intercept be refused?** The chain means a later intercept wraps an
+earlier one. If some behaviour must not be overridable - an Enable that
+really disables, a lock that really locks - then something has to be able
+to say no, and that is a different rule from "who may install at all".
+
+**What does a flow get to touch?** A load that only builds what the file
+describes is bounded by the file. A load that installs handlers on
+pre-existing instances is not. Whether those are the same verb with
+different scope, or two different things, decides how hard the boundary is.
+
+### The constraint on any answer
+
+It must not become a second mechanism. This system's strength is that there
+is one kind of thing and one way to do each gesture; a security model that
+adds a parallel permission tree, a policy object, or a second dispatch path
+would cost more than it protects. The likely shape is a capability carried
+where creation already carries the reporting address, checked at the one
+door scripts already go through, and expressed in paths because addressing
+is already paths.
+
+And it must fail closed the way the verdict conversion does: a script with
+no grant reaches nothing outside itself, rather than everything until
+someone remembers to restrict it.
+
+### The likely answer: the tree is the policy
+
+Scope it by containment. A script installed into a thing can see its
+SIBLINGS AND DOWN and may intercept there; reaching ABOVE that level -
+subscribing to, or installing on, anything outside its own container -
+needs permission.
+
+That satisfies the constraint above, because it adds nothing. Containment
+is already a path, so the check is a prefix compare against the installer's
+own container: at or below, allowed; anywhere else, refused unless granted.
+The grant is a path too, in the same vocabulary as everything else.
+
+The asymmetry is the right way round. Installing a handler beside or
+beneath you is acting on something you are part of, and it is what a
+widget's own script does all day. Reaching upward is reaching into the
+context that CONTAINS you, and that is the direction a downloaded thing
+would escape in - the File menu, the bridge carrying the session, another
+author's widget on the same canvas.
+
+The consequence worth having on purpose: **placement becomes the sandbox.**
+Drop a widget into a view and its reach narrows to that view, with nothing
+declared anywhere. Move it out and it widens. That is an existing gesture
+doing the security work, which is the cheapest possible form this could
+take - and it means a person can reason about what a downloaded thing can
+touch by looking at where it sits, rather than by reading a manifest.
+
+Left to settle: whether "down" means the whole subtree or one level; what a
+grant looks like when it is given (a path on the host instance, presumably,
+handed over at creation the way the reply address already is); and whether
+a thing can refuse to be intercepted even from within its own container.
+
+### Policy as an intercept, the way a directory did it
+
+Netscape Directory Server put access control in the directory. An ACI was
+an ATTRIBUTE ON AN ENTRY: it lived in the tree, governed that entry and
+everything beneath it, was administered with the same tools as the data,
+and several of them combined at the moment of access. There was no separate
+policy store to drift out of step with the thing it protected.
+
+That is an intercept, described in another vocabulary.
+
+Put the check on the subscription rather than in the plumbing, and policy
+becomes an ordinary node: it sits where it governs, it inherits downward
+because containment is a path, it clones and saves with the branch it
+protects, and several of them stack because the chain already lets each
+link refuse or decline to the next. Nothing is administered by a different
+mechanism from everything else - you install a function, and the function
+happens to say no.
+
+**What it requires: connect and subscribe have to be messages the target
+answers, not calls that simply happen.** That is what makes them
+interceptible at all, and it is the same question as "could an object deny
+a connection if I wanted it to" - which turns out to be the security model
+arriving early, wearing different clothes.
+
+Consequences worth wanting:
+
+- **A branch can carry its own rules.** Drop a subtree into a session and
+  its policy comes with it, because the policy is in it.
+- **Policy is inspectable with the tools that already exist.** It is nodes;
+  list it, wire something to it, watch it fire.
+- **Deny is a verdict, not a special case.** A refusing intercept returns
+  the same code any handler returns; nothing needs a second notion of
+  failure.
+- **The default stays open only where nothing was installed.** A branch with
+  no intercept behaves exactly as it does today, so this costs nothing until
+  somebody wants it - and a downloaded thing dropped into a governed branch
+  is governed by where it landed.
+
+**And the policy enforces access to the policy.** That is not a rule anyone
+adds - policy is nodes, so reaching it is governed by the same containment
+asymmetry as reaching anything else. A thing inside a governed branch
+cannot reach UP to the node carrying its own constraints, so it cannot
+remove them. The authority to set policy comes from being above what it
+governs, and being above something is a fact about the tree rather than a
+privilege the mechanism has to know about. There is no bootstrap exception
+and no special branch: the ACI controlling access to the aci attribute was
+always just another ACI.
+
+Left to settle: whether a refusal is distinguishable from "not mine". It
+has to be - declining continues the chain and refusing must stop it - and
+that is the one genuinely new thing this needs.
+
+### Administration is not access
+
+The section above says authority comes from being above what it governs.
+That is too coarse, and the coarseness is a real conflation: it hands
+whoever can ARRANGE a branch the right to READ it.
+
+Serious systems separate those. The person who administers - places things,
+sets the rules, manages who may do what - is not thereby the person who may
+see the data. And the person working with the data cannot change what is
+allowed. Neither right implies the other, and that is the point: an
+administrator who cannot read is not a weaker administrator, it is a
+different job.
+
+This framework can express it honestly because the two are genuinely
+different operations on nodes rather than a distinction someone has to
+invent:
+
+- **Administration** touches structure and policy: create a member, move
+  it, delete it, install a handler, write the rules that govern a branch.
+- **Access** touches values: read a property, write one, subscribe to it,
+  receive what flows through it.
+
+An intercept sees which one is being attempted, so a single mechanism can
+permit one and refuse the other. A grant therefore is not one capability
+over a subtree but two, independently given, in the same path vocabulary.
+
+What that buys, concretely here:
+
+- **A container can hold a branch it cannot look inside.** You may place a
+  widget, wire it, move it and delete it, and still not be able to read
+  what passes through it. That is the useful shape for a session hosting
+  somebody else's flow.
+- **A worker can be denied the ability to rewire.** A script processing
+  values can be given full access to them and no administration at all, so
+  it cannot install handlers, cannot move members, and cannot alter what
+  governs it - even inside its own container, where the containment rule
+  alone would have allowed it.
+- **The policy-protects-policy rule gets sharper.** Reaching UP is still
+  refused, but now being above only confers administration by default.
+  Reading downward becomes something granted rather than something owned.
+
+Left to settle: whether the two rights are two grants or one grant with a
+kind, whether administration divides further (placing versus policy-writing
+are arguably different jobs), and how a refusal distinguishes "you may not
+do this" from "not mine" - which is the same open question as before, and
+now carries more weight, because the answer is what a denial IS.
+
+### Where identity lives: properties on the bridge
+
+None of the above says WHO. The answer is the same shape as the rest: the
+bridge is the only piece that knows a client exists, so a login installs
+the user's properties onto that bridge instance, and everything downstream
+reads them as ordinary properties.
+
+Two pieces of this are already standing. The protocol carries a
+`logged-in` event, and the design already anticipates a root per login -
+`CreateRoot` makes an ordinary View with no container, and as many as you
+like. So the join is: the login puts the user on the bridge, the bridge is
+handed that user's root, and containment scopes everything from there.
+**Your root is your reach.**
+
+What follows without further mechanism:
+
+- **No ambient authority.** A second connection with a different login is a
+  different bridge instance carrying different properties. There is no
+  session-wide "current user" for anything to consult, and nothing acquires
+  rights by being in the same process.
+- **Rights are data.** They are properties on an instance - granted from
+  above, listed with the same verb as anything else, saved and restored with
+  the session, and unreachable from below by the same rule that stops a
+  branch editing its own policy.
+- **The intercept sees who.** A policy intercept is a handler; the delivery
+  it is answering came through a bridge, so the identity it needs to decide
+  with is reachable rather than passed along in a parallel channel.
+- **One person, several roots.** Nothing says a login gets exactly one, and
+  a grid of connections each with its own root is a wall of sessions
+  belonging to different people, in one engine, isolated by containment
+  rather than by a tenancy mechanism.
+
+Left to settle: how the identity travels to a policy intercept that is
+several hops from the bridge (the delivery knows its source - MsgFromNode -
+but "which connection" is a different question from "which node"), and
+whether a login's grants live on the bridge or on the root it was handed.
+
+### The real boundary is the process, not the policy
+
+Everything above organises access. Only one thing enforces it.
+
+A native `.object` is loaded into the address space and can do anything the
+process can - it can walk the node tree directly, ignore every intercept,
+and read any value in the session. That is stated plainly at the top of this
+topic and it does not get better with more policy. In-process rules are
+worth having: they structure a session, they keep honest code honest, and
+they make a downloaded widget's reach obvious from where it sits. They are
+not a wall.
+
+**The wall is a different process.** Run the dataflow holding the data on a
+server, connect to it over the network, and present a token you were given
+when you authenticated. Then a compromised or malicious thing on your side
+can do exactly what the token permits and nothing else, because the data was
+never in your address space to reach.
+
+This needs no new protocol. A Bridge is already verbs in and events out over
+TCP; a remote dataflow is a Bridge you connect TO rather than one that serves
+a browser. Same commands, same events, different direction. And the identity
+work above lands on the far side: the user's properties and grants live on
+the SERVER's bridge for that connection, so nothing about your rights is
+stored anywhere you control, and revoking one is a change on the machine
+that owns the data.
+
+What today's work already contributes:
+
+- **A view talks to its data through messages.** The table widget asks its
+  data object for cells rather than reaching into it, so where that object
+  lives is the object's own business. That split is the precondition for the
+  data being somewhere else at all.
+- **Addressing is paths.** `/Root/Sheet/A1` names a cell without saying
+  which process holds it.
+- **Verbs are the whole surface.** A remote peer is limited by which
+  commands it may send, and that list is short and already written down.
+
+What it needs:
+
+- TCP client mode (already on this roadmap for other reasons).
+- A token on the connection, checked once, carried by the bridge instance -
+  which is where identity already goes.
+- A decision about what a remote reference looks like locally. Today a
+  widget points at its data with a LONG, which is an in-process pointer. A
+  remote one has to be a path plus a connection, and the widget must not
+  care which it holds.
+
+The last of those is the interesting one, and it is the same shape as every
+other question that turned out well here: make the two indistinguishable to
+the thing using them, and where the data lives stops being an architectural
+decision anybody has to take twice.
+
+### dataobj:// - one name for a node in any address space
+
+The open question above was what a remote reference looks like locally. It
+looks like a URL.
+
+    /Root/Sheet/A1                    this space, as today
+    dataobj://box/Root/Sheet/A1       a node in another engine
+
+Same relationship a file path has to an http URL: the bare form is relative
+to where you are, the full form names the space as well. A thing holding a
+reference holds a string either way and does not care which it has - which
+was the whole requirement, stated one section earlier as "the widget must
+not care".
+
+Resolution splits on the authority: no authority means the local namespace
+trie; an authority means a connection to that engine, speaking the verbs it
+already speaks. Nothing about the vocabulary changes.
+
+**And a wire across machines is a subscription.** The browser is already a
+remote subscriber to a dataflow - it sends `subscribe`, it receives
+`property-changed`, over a Bridge. A wire between two engines is that same
+mechanism with something other than a GUI on the end. The first remote
+consumer simply happened to be a browser, which made it look like a GUI
+feature rather than what it is.
+
+**A URL is a name, not an authority.** Holding the string gets you nothing.
+Rights are per space: you authenticate to each engine you reach into and
+hold what it granted you there, so a reference that crosses a boundary is
+checked on the far side by the machine that owns the data. That is the same
+separation the section above describes, made explicit in the naming - which
+is worth having, because a system where the name IS the permission is how
+capability leaks happen.
+
+What this asks for:
+
+- An authority component in the addressing, and resolution that dispatches
+  on its presence.
+- A connection registry, so two references into the same engine share one
+  connection rather than each opening their own.
+- Per-space credentials held where identity already goes: on the bridge for
+  that connection.
+- A decision about failure. A local path that does not resolve is a miss; a
+  remote one can also be unreachable, slow, or refused, and those are
+  different answers a caller may want to tell apart.
+
+The last is the one that will shape the API, and it is the same question the
+data-class notes raise about `AsOf` and freshness: a value from another
+space is not simply present or absent the way a local one is.
