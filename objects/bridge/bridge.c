@@ -247,6 +247,85 @@ static void Bridge_SendEventScoped(NodeObj instance, InstanceData *local, char *
    and nothing subscribes to them; without this a client only learns them by
    opening an options panel, which is exactly the surface that does not exist
    when you are just looking at a widget. An instance with none sends {}. */
+/* {"Format":"a,b,c"} for every gesture whose class carries a companion
+   list. Built here rather than stored, like the target above. */
+static char *Bridge_GestureLists(NodeObj inst)
+{
+	NodeObj class = inst ? ClassOfInstance(inst) : NULL;
+	char   *names = inst ? ClassGestures(inst) : NULL;
+	char   *out = strdup("{");
+	char    one[128], *rows;
+	int     first = 1, i;
+
+	while (names && *names)
+	{
+		char *comma = strchr(names, ',');
+		int   len = comma ? (int)(comma - names) : (int) strlen(names);
+		char *list, *escName, *escList, prop[160];
+
+		if (len > 0 && len < (int) sizeof(one))
+		{
+			NodeObj from;
+
+			snprintf(one, sizeof(one), "%.*s", len, names);
+			for (i = (int) strlen(one) - 1; i >= 0 && (one[i] == '.' || one[i] == ' '); i--)
+				one[i] = 0;
+
+			/* companions are read from the level that OFFERED the gesture,
+			   not from the instance's own class - Script is published on
+			   Object and its ScriptRows lives there too */
+			from = ClassOfferingGesture(inst, one);
+			if (!from)
+				from = class;
+
+			snprintf(prop, sizeof(prop), "%sRows", one);
+			rows = GetPropStr(from, prop);
+			if (rows && rows[0])
+			{
+				char key[176];
+
+				snprintf(key, sizeof(key), "%s#rows", one);
+				escName = JsonEscapeStr(key);
+				escList = JsonEscapeStr(rows);
+				out = realloc(out, strlen(out) + strlen(escName) + strlen(escList) + 4);
+				if (!first)
+					strcat(out, ",");
+				strcat(out, escName);
+				strcat(out, ":");
+				strcat(out, escList);
+				first = 0;
+				free(escName);
+				free(escList);
+			}
+
+			snprintf(prop, sizeof(prop), "%sList", one);
+			list = GetPropStr(from, prop);
+			if (list && list[0])
+			{
+				escName = JsonEscapeStr(one);
+				escList = JsonEscapeStr(list);
+				out = realloc(out, strlen(out) + strlen(escName) + strlen(escList) + 4);
+				if (!first)
+					strcat(out, ",");
+				strcat(out, escName);
+				strcat(out, ":");
+				strcat(out, escList);
+				first = 0;
+				free(escName);
+				free(escList);
+			}
+		}
+
+		if (!comma)
+			break;
+		names = comma + 1;
+	}
+
+	out = realloc(out, strlen(out) + 2);
+	strcat(out, "}");
+	return out;
+}
+
 static char *Bridge_GuiProps(NodeObj inst)
 {
 	NodeObj prop;
@@ -294,6 +373,7 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	char *escIn, *escOut, *sIn, *sOut;
 	char *escTgt, *escTgtP, *sTgt, *sTgtP;
 	char  tgtBuf[300];
+	char *escGest, *gestListText;
 	int bufLen;
 	int x, y, w, h;
 
@@ -329,6 +409,14 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	   The client needs this because a wire is reported against the property
 	   the wire actually landed on, and the only thing on screen for it is
 	   the control standing in. */
+	escGest = JsonEscapeStr(ClassGestures(self) ? ClassGestures(self) : "");
+
+	/* and, for each gesture that wants something typed, whatever the class
+	   suggests - the companion <Name>List property, the same convention a
+	   Dropdown's options already use. The browser offers what it is given
+	   and invents no patterns of its own. */
+	gestListText = Bridge_GestureLists(self);
+
 	sTgt = NULL; sTgtP = NULL;
 	if (self)
 	{
@@ -365,11 +453,12 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 
 	bufLen = (int) strlen(escAlias) + (int) strlen(escClass) + (int) strlen(escParent) + (int) strlen(escContainer)
 			 + (int) strlen(escIn) + (int) strlen(escOut) + (int) strlen(interfaceText) + (int) strlen(escKind)
-			 + (int) strlen(guiText) + (int) strlen(escTgt) + (int) strlen(escTgtP) + 340;
+			 + (int) strlen(guiText) + (int) strlen(escTgt) + (int) strlen(escTgtP)
+			 + (int) strlen(escGest) + (int) strlen(gestListText) + 380;
 	buf = malloc(bufLen);
-	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"target\":%s,\"targetProp\":%s,\"interface\":%s}",
+	snprintf(buf, bufLen, "{\"event\":\"instance-created\",\"instance\":%s,\"class\":%s,\"classParent\":%s,\"parent\":%s,\"container\":%s,\"hidden\":%s,\"reservedIn\":%s,\"reservedOut\":%s,\"gui\":%s,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"target\":%s,\"targetProp\":%s,\"gestures\":%s,\"gestureLists\":%s,\"interface\":%s}",
 			 escAlias, escClass, escKind, escParent, escContainer, hidden ? "true" : "false", escIn, escOut, guiText,
-			 x, y, w, h, escTgt, escTgtP, interfaceText);
+			 x, y, w, h, escTgt, escTgtP, escGest, gestListText, interfaceText);
 
 	free(escAlias);
 	free(escClass);
@@ -380,6 +469,8 @@ void Bridge_InstanceEvent(NodeObj instance, InstanceData *local, char *alias, ch
 	free(escOut);
 	free(escTgt);
 	free(escTgtP);
+	free(escGest);
+	free(gestListText);
 	free(interfaceText);
 	free(guiText);
 
@@ -1253,6 +1344,68 @@ static void Bridge_WireEvent(NodeObj instance, InstanceData *local, char *event,
 	Bridge_SendEventScoped(instance, local, buf, fromCont);
 	if (strcmp(fromCont ? fromCont : "", toCont ? toCont : "") != 0)
 		Bridge_SendEventScoped(instance, local, buf, toCont);
+}
+
+/* A PERSON ASKED THIS THING TO DO SOMETHING BY NAME. The bridge translates
+   and nothing more: it resolves who, and sends the gesture as a message the
+   class answers or declines. What a gesture MEANS is never here. */
+void Bridge_Gesture(NodeObj instance, InstanceData *local, NodeObj command)
+{
+	char   *alias = GetPropStr(command, "instance");
+	char   *name  = GetPropStr(command, "name");
+	char   *value = GetPropStr(command, "value");
+	NodeObj inst  = Bridge_ResolveAlias(local, alias);
+	NodeObj bag;
+	int     verdict;
+
+	if (!inst || !name || !name[0])
+	{
+		Bridge_Error(instance, "gesture", "unknown instance or missing name");
+		return;
+	}
+
+	bag = NewNode(INTEGER);
+	SetName(bag, "Gesture");
+	SetPropStr(bag, "Name", name);
+	SetPropStr(bag, "Value", value ? value : "");
+
+	/* ASKING IS THE SAME GESTURE. "query" carries out nothing - it collects
+	   what is there now, from whichever class owns that gesture, so an
+	   editor opens on the real value instead of the client guessing which
+	   property a gesture keeps its value in and reading its own cache. */
+	if (GetPropStr(command, "query"))
+		SetPropStr(bag, "Query", "1");
+
+	verdict = PuntGesture(inst, bag);
+
+	if (verdict != rtrn_unhandled && GetPropStr(command, "query"))
+	{
+		char   *escA = JsonEscapeStr(alias ? alias : "");
+		char   *escN = JsonEscapeStr(name);
+		char   *escV = JsonEscapeStr(GetPropStr(bag, "Value") ? GetPropStr(bag, "Value") : "");
+		char   *escP = JsonEscapeStr(GetPropStr(bag, "Prop") ? GetPropStr(bag, "Prop") : "");
+		int     len  = (int) strlen(escA) + (int) strlen(escN) + (int) strlen(escV)
+					   + (int) strlen(escP) + 100;
+		char   *out  = malloc(len);
+		NodeObj chunk;
+
+		snprintf(out, len,
+				 "{\"event\":\"gesture-value\",\"instance\":%s,\"name\":%s,\"value\":%s,\"prop\":%s}",
+				 escA, escN, escV, escP);
+
+		chunk = NewNode(STRING);
+		SetName(chunk, "Event");
+		SetValueStr(chunk, out);
+		SetPropLong(chunk, "Conn", local->replyConn);
+		SndMsg(instance, "Out", msg_send, chunk);
+
+		free(out); free(escA); free(escN); free(escV); free(escP);
+	}
+
+	DelNode(bag);
+
+	if (verdict == rtrn_unhandled)
+		Bridge_Error(instance, "gesture", "nothing answered that gesture");
 }
 
 void Bridge_Connect(NodeObj instance, InstanceData *local, NodeObj command)
@@ -2693,6 +2846,8 @@ static void Bridge_Dispatch(NodeObj instance, InstanceData *local, char *cmd, No
 		Bridge_Move(instance, local, command);
 	else if (strcmp(cmd, "internals") == 0)
 		Bridge_Internals(instance, local, command);
+	else if (strcmp(cmd, "gesture") == 0)
+		Bridge_Gesture(instance, local, command);
 	else if (strcmp(cmd, "connect") == 0)
 		Bridge_Connect(instance, local, command);
 	else if (strcmp(cmd, "bind-port") == 0)

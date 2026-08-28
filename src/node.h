@@ -78,6 +78,13 @@ long    NodeCount (void);
 /* stored onto the record's {Instance, Port} (which fans out in turn).   */
 void    DeliverToSubscriber (NodeObj sub, int message, NodeObj data, NodeObj fromNode);
 
+/* every handler installed on a property, newest first, then its own OnMsg -
+   declining (rtrn_unhandled) continues the walk, anything else answers.
+   `found` says whether there was anything to call at all. */
+int     DeliverToHandlers (NodeObj owner, NodeObj propNode, int message,
+						   NodeObj data, int *found);
+int     HasHandler (NodeObj propNode);
+
 /* the property node the delivery being handled right now came from, or NULL
    outside a delivery. Valid only for the duration of the handler. */
 NodeObj MsgFromNode (void);

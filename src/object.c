@@ -1857,6 +1857,144 @@ int LinkProperty(NodeObj owner, NodeObj targetInst, char * propname)
    so an unpublished property survived export/import and was silently lost by
    clone - which is exactly how a generated MCP agent came back from a clone
    with no logic in it at all. */
+/* published on the class node, read back for whoever is describing an
+   instance - the same shape as the Interface: the class says it once, and
+   every instance of it offers the same list. */
+void PublishGestures(NodeObj class, char *names)
+{
+	if (!class || !names)
+		return;
+	SetPropStr(class, "Gestures", names);
+}
+
+/* EVERY LEVEL OF THE CHAIN, nearest first. A gesture published on Object is
+   offered by everything; one on Control by every control; one on a widget by
+   that widget alone. Same walk PuntToClass makes, so where a gesture is
+   published decides who offers it, with no list of exceptions anywhere.
+   The answer is built into a static buffer - read it before the next call. */
+/* WHAT IS OFFERED ON A THING - two chains, not one. Up the class chain,
+   because a Textbox is an Object; and OUT through the containers, because
+   clicking a cell in a sheet is how anyone would ask the sheet for a
+   function. The sheet publishes it, the cell is where you asked for it.
+
+   Same walk for what a gesture does: PuntGesture tries the thing you
+   clicked and, if nothing in its class chain answers, the thing it is in.
+   No registration, no menu list - a class publishes a gesture and every
+   member of every instance of it offers that gesture. */
+/* one name, however many levels publish it - Script is on Object, and a
+   control inside two views would otherwise offer it three times */
+static void GestureAdd(char *all, int cap, char *one, int len)
+{
+	char *at;
+
+	if (len <= 0)
+		return;
+
+	for (at = all; (at = strstr(at, one ? one : "")) && at < all + strlen(all); at++)
+		if ((at == all || at[-1] == ',') && (at[len] == ',' || at[len] == 0)
+			&& !strncmp(at, one, len))
+			return;
+
+	if (all[0] && (int) strlen(all) + len + 2 < cap)
+		strcat(all, ",");
+	if ((int) strlen(all) + len + 1 < cap)
+		strncat(all, one, len);
+}
+
+static void GestureAppend(char *all, int cap, NodeObj inst)
+{
+	NodeObj class;
+	char   *one, *comma;
+
+	for (class = ClassOfInstance(inst); IsClassNode(class); class = GetParent(class))
+	{
+		one = GetPropStr(class, "Gestures");
+		if (!one || !one[0])
+			continue;
+		while (*one)
+		{
+			comma = strchr(one, ',');
+			GestureAdd(all, cap, one, comma ? (int)(comma - one) : (int) strlen(one));
+			if (!comma)
+				break;
+			one = comma + 1;
+		}
+	}
+}
+
+char *ClassGestures(NodeObj inst)
+{
+	static char all[512];
+	NodeObj     at = inst;
+	int         out;
+
+	all[0] = 0;
+	for (out = 0; at && out < 8; out++)
+	{
+		GestureAppend(all, sizeof(all), at);
+		at = ResolvePath(GetPropStr(at, "Container"));
+	}
+	return all[0] ? all : NULL;
+}
+
+/* the class that published a given gesture, so its companion properties -
+   the suggestion list, how many rows the value wants - are read from the
+   level that offered it rather than from the instance's own class. Searched
+   along the same two chains, nearest first. */
+NodeObj ClassOfferingGesture(NodeObj inst, char *name)
+{
+	NodeObj class, at = inst;
+	char   *list;
+	int     out;
+
+	if (!name)
+		return NULL;
+
+	for (out = 0; at && out < 8; out++)
+	{
+		for (class = ClassOfInstance(at); IsClassNode(class); class = GetParent(class))
+		{
+			list = GetPropStr(class, "Gestures");
+			if (list && strstr(list, name))
+				return class;
+		}
+		at = ResolvePath(GetPropStr(at, "Container"));
+	}
+	return NULL;
+}
+
+/* carry out a gesture: the thing clicked first, then what it is in. The bag
+   names who was clicked, so an outer answerer knows where the gesture was
+   aimed - a formula asked for on a cell lands on that cell. */
+int PuntGesture(NodeObj inst, NodeObj bag)
+{
+	NodeObj at = inst;
+	int     verdict = rtrn_unhandled, out;
+	char    path[900], dbg[300];
+
+	if (inst && PathOfInstance(inst, path, sizeof(path)))
+		SetPropStr(bag, "On", path);
+
+	/* ONLY A REAL ANSWER ENDS THE WALK. A class chain that nobody in it
+	   wanted reports dropped, which is a decline like any other - treating
+	   it as an answer is what stopped a cell's gesture from ever reaching
+	   the sheet the cell is in. */
+	for (out = 0; at && out < 8; out++)
+	{
+		verdict = PuntToClass(at, msg_gesture, bag);
+		snprintf(dbg, sizeof(dbg), "GESTURE '%s' on '%s' -> %s",
+				 GetPropStr(bag, "Name") ? GetPropStr(bag, "Name") : "?",
+				 GetNameStr(at) ? GetNameStr(at) : "?",
+				 verdict == rtrn_handled ? "answered" : "not mine, asking what it is in");
+		DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+
+		if (verdict == rtrn_handled)
+			return verdict;
+		at = ResolvePath(GetPropStr(at, "Container"));
+	}
+	return rtrn_unhandled;
+}
+
 int IsPortableProp(NodeObj inst, NodeObj prop)
 {
 	NodeObj q;
@@ -1980,16 +2118,16 @@ static void CloneData(NodeObj source, NodeObj inst)
 		   value at all. A link is not a value and should not be cloned as
 		   one. */
 		{
-			NodeObj dst   = GetPropNode(inst, name);
-			msgobj  onmsg = dst ? (msgobj) GetPropLong(dst, "OnMsg") : NULL;
+			NodeObj dst = GetPropNode(inst, name);
 
-			if (onmsg)
+			if (HasHandler(dst))
 			{
 				NodeObj chunk = NewNode(STRING);
+				int     found;
 
 				SetName(chunk, name);
 				SetValueStr(chunk, val);
-				onmsg(inst, msg_send, chunk);
+				DeliverToHandlers(inst, dst, msg_send, chunk, &found);
 				DelNode(chunk);
 			}
 			else
@@ -2902,7 +3040,7 @@ SndMsg(NodeObj instance, char * port, MsgId message, NodeObj data){
 int DeliverMsg(NodeObj target, char *port, MsgId message, NodeObj data){
 
 	NodeObj portNode;
-	msgobj handler;
+	int     found;
 
 	if (!target || !port)
 		return 0;
@@ -2911,12 +3049,11 @@ int DeliverMsg(NodeObj target, char *port, MsgId message, NodeObj data){
 	if (!portNode)
 		return 0;
 
-	handler = (msgobj) GetPropLong(portNode, "OnMsg");
-	if (!handler)
-		return 0;
-
-	handler(target, message, data);
-	return 1;
+	/* through the chain: any handler installed on this property runs before
+	   the one its class put there, and reaching that one is what declining
+	   does. With nothing installed this is the same single call it was. */
+	DeliverToHandlers(target, portNode, message, data, &found);
+	return found ? 1 : 0;
 }
 
 /*
@@ -2960,26 +3097,25 @@ void SetOrDeliverProp(NodeObj target, char *propname, char *value)
 				 GetPropStr(target, "Name") ? GetPropStr(target, "Name") : "?",
 				 asked ? asked : "?",
 				 value ? value : "(null)",
-				 (propnode && GetPropLong(propnode, "OnMsg")) ? "DELIVER" : "STORE",
+				 (propnode && HasHandler(propnode)) ? "DELIVER" : "STORE",
 				 GetPropStr(owner, "Name") ? GetPropStr(owner, "Name") : "?",
 				 propname,
 				 (owner != target) ? "  [crossed a link]" : "");
 		DebugPrint(dbg, __FILE__, __LINE__, WIRE);
 	}
-	if (propnode && GetPropLong(propnode, "OnMsg"))
+	if (propnode && HasHandler(propnode))
 	{
 		/* the handler answers whether the property still needs writing -
 		   the same rule, and the same three codes, as DeliverToSubscriber
 		   (node.c). The handler is called here rather than through
 		   DeliverMsg because DeliverMsg reports whether a handler existed,
 		   not what it decided. */
-		msgobj handler = (msgobj) GetPropLong(propnode, "OnMsg");
-		int    verdict;
+		int verdict, found;
 
 		chunk = NewNode(STRING);
 		SetName(chunk, propname);
 		SetValueStr(chunk, value);
-		verdict = handler(owner, msg_send, chunk);
+		verdict = DeliverToHandlers(owner, propnode, msg_send, chunk, &found);
 		DelNode(chunk);
 
 		/* the missing half of the SET line above: DELIVER says a handler ran,
@@ -3239,8 +3375,59 @@ static int ObjectClassMsg(NodeObj instance, MsgId message, NodeObj data)
 	   yourself out". Left unguarded, msg_deserialize's carrier node was
 	   stored as a property called Self and reported HANDLED, which told
 	   CloneData the class had copied itself and stopped it copying
-	   anything: a cloned group came back with none of its members' X/Y. */
-	if (message == msg_serialize || message == msg_deserialize)
+	   anything: a cloned group came back with none of its members' X/Y.
+
+	   Every verb added here has to be listed, and that is the cost of the
+	   default being unconditional: a gesture nobody claimed was likewise
+	   stored as a property called "Gesture" and reported as done. */
+	/* THE ONE GESTURE EVERYTHING OFFERS. A script attaches to a node, and
+	   everything is a node - so this is answered at the end of the chain,
+	   where a class that has nothing of its own to say still gets it.
+	   Empty removes it: a Script property holding "" is still something to
+	   reason about, and the delete half of the lifecycle takes it away. */
+	if (message == msg_gesture && data)
+	{
+		char *gname = GetPropStr(data, "Name");
+		char *gval  = GetPropStr(data, "Value");
+
+		if (gname && !strncmp(gname, "Script", 6))
+		{
+			/* ASKED WHAT IS THERE, not told what to put there. The class
+			   that owns a gesture is the only thing that knows where its
+			   value lives, so it answers - the client never deduces a
+			   property name to look in. */
+			if (GetPropStr(data, "Query"))
+			{
+				char *had = GetPropStr(instance, "Script");
+
+				SetPropStr(data, "Value", had ? had : "");
+				SetPropStr(data, "Prop", "Script");	/* where it lives, for whoever wants to watch it */
+				return rtrn_handled;
+			}
+
+			if (!gval || !gval[0])
+			{
+				NodeObj had = GetPropNode(instance, "Script");
+
+				if (had)
+				{
+					RemoveProp(instance, had);
+					DelNode(had);
+				}
+			}
+			else
+				SetPropStr(instance, "Script", gval);
+
+			snprintf(dbg, sizeof(dbg), "SCRIPT on '%s': %d byte(s)",
+					 GetPropStr(instance, "Name") ? GetPropStr(instance, "Name") : "?",
+					 gval ? (int) strlen(gval) : 0);
+			DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+			return rtrn_handled;
+		}
+	}
+
+	if (message == msg_serialize || message == msg_deserialize
+		|| message == msg_gesture)
 		return rtrn_unhandled;
 
 	if (instance && prop && message != msg_eof)
@@ -3249,7 +3436,7 @@ static int ObjectClassMsg(NodeObj instance, MsgId message, NodeObj data)
 
 		/* no handler anywhere below: nobody had an opinion, so the default
 		   applies and that IS handling it */
-		if (!propnode || !GetPropLong(propnode, "OnMsg"))
+		if (!propnode || !HasHandler(propnode))
 		{
 			SetPropStr(instance, prop, val ? val : "");
 			return rtrn_handled;
@@ -3303,7 +3490,15 @@ void RegisterCoreClasses(void)
 	SetPropInt(library, "Loaded", 1);
 
 	/* the root class answers last, and answers for everything */
-	SetPropLong(CoreClass(library, "Object", NULL), "ClassMsg", (long) ObjectClassMsg);
+	{
+		NodeObj obj = CoreClass(library, "Object", NULL);
+
+		SetPropLong(obj, "ClassMsg", (long) ObjectClassMsg);
+
+		/* offered by everything, because everything descends from here */
+		PublishGestures(obj, "Script...");
+		SetPropStr(obj, "ScriptRows", "14");
+	}
 }
 
 void UnregisterLibrary(NodeObj library){
@@ -3446,7 +3641,7 @@ NodeObj RegisterInstance(NodeObj class, NodeObj Instance){
 	/* on the property NODE (never SetProp* by the port's name - the       */
 	/* shadowing landmine).                                                 */
 	activate = GetPropNode(Instance, "Activate");
-	if (activate && !GetPropLong(activate, "OnMsg"))
+	if (activate && !HasHandler(activate))
 		SetPropLong(activate, "OnMsg", (long) ActivateOnMsg);
 
 	/* leave the newest instance where CreateObject can find it */

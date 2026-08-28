@@ -913,12 +913,362 @@ int TableView_OnRight(NodeObj instance, MsgId message, NodeObj data)
    walk and no file can carry - so this class answers, and answers by
    sending the same message one level down to the thing that holds the
    grid. Nothing in between needs to know there is a private object here. */
+/* ---- formulas on cells -------------------------------------------------
+
+   A cell can carry a Formula: "SUM(A1:A10)". It lives as a property OF THE
+   CELL - a property is a node and can carry properties - so it clones,
+   exports and is addressable with the cell it belongs to, and there is no
+   separate formula store keyed by cell reference.
+
+   Deliberately not a language. Five functions that cover what people
+   actually put in a sheet, evaluated here in C: no interpreter to depend
+   on, nothing to learn, and nothing that can run away. A full script on a
+   cell is the Script gesture, which is a different thing on purpose.
+
+   Live because the table SUBSCRIBES: every cell a formula reads is wired to
+   this instance's Recalc, so a change anywhere in the range recomputes.
+   AddSubscription refuses a duplicate, so re-arming costs nothing.        */
+
+static int TableView_Range(char *spec, int *r1, int *c1, int *r2, int *c2)
+{
+	char from[32], to[32], *colon;
+	int  t;
+
+	if (!spec || !(colon = strchr(spec, ':')))
+		return 0;
+
+	snprintf(from, sizeof(from), "%.*s", (int)(colon - spec), spec);
+	snprintf(to, sizeof(to), "%s", colon + 1);
+
+	if (!TableCellParse(from, r1, c1) || !TableCellParse(to, r2, c2))
+		return 0;
+
+	if (*r1 > *r2) { t = *r1; *r1 = *r2; *r2 = t; }
+	if (*c1 > *c2) { t = *c1; *c1 = *c2; *c2 = t; }
+	return 1;
+}
+
+/* evaluate one formula against the table. Returns 0 if it is not one we
+   know, so an unrecognised formula leaves the cell alone rather than
+   writing a wrong answer into it. */
+static int TableView_Eval(NodeObj table, char *formula, long *answer)
+{
+	static char *fns[] = { "SUM", "AVG", "MIN", "MAX", "COUNT", NULL };
+	char  name[16], range[64], *open, *close;
+	int   r1, c1, r2, c2, r, c, i, fn = -1, n = 0;
+	long  total = 0, lo = 0, hi = 0;
+
+	if (!table || !formula)
+		return 0;
+
+	open = strchr(formula, '(');
+	close = open ? strrchr(open, ')') : NULL;
+	if (!open || !close || open - formula >= (int) sizeof(name))
+		return 0;
+
+	snprintf(name, sizeof(name), "%.*s", (int)(open - formula), formula);
+	snprintf(range, sizeof(range), "%.*s", (int)(close - open - 1), open + 1);
+
+	for (i = 0; fns[i]; i++)
+		if (!strcmp(name, fns[i]))
+			fn = i;
+	if (fn < 0 || !TableView_Range(range, &r1, &c1, &r2, &c2))
+		return 0;
+
+	for (r = r1; r <= r2; r++)
+		for (c = c1; c <= c2; c++)
+		{
+			char    cn[64];
+			NodeObj cell;
+			long    v;
+
+			TableCellName(cn, sizeof(cn), r, c);
+			cell = GetPropNode(table, cn);
+			if (!cell || !GetValueStr(cell) || !GetValueStr(cell)[0])
+				continue;			/* sparse: an empty cell is not a zero */
+
+			v = GetValueLong(cell);
+			if (!n || v < lo) lo = v;
+			if (!n || v > hi) hi = v;
+			total += v;
+			n++;
+		}
+
+	switch (fn)
+	{
+		case 0: *answer = total; break;
+		case 1: *answer = n ? total / n : 0; break;
+		case 2: *answer = n ? lo : 0; break;
+		case 3: *answer = n ? hi : 0; break;
+		default: *answer = n; break;
+	}
+	return 1;
+}
+
+/* recompute every cell that carries one. Depth-guarded because a result is
+   an ordinary write and fans out, so a formula reading a formula recomputes
+   through the same path. */
+static int TableView_Recalculating;
+
+static void TableView_Recalc(NodeObj instance)
+{
+	NodeObj table = TableView_Data(instance), prop;
+	int     pr, pc;
+
+	if (!table || TableView_Recalculating > 8)
+		return;
+
+	TableView_Recalculating++;
+
+	for (prop = GetNextProp(table); prop; prop = GetNextSibling(prop))
+	{
+		NodeObj f;
+		char    out[64];
+		long    answer;
+
+		if (!GetNameStr(prop) || !TableCellParse(GetNameStr(prop), &pr, &pc))
+			continue;
+
+		f = GetPropNode(prop, "Formula");
+		if (!f || !GetValueStr(f) || !GetValueStr(f)[0])
+			continue;
+
+		if (!TableView_Eval(table, GetValueStr(f), &answer))
+			continue;
+
+		snprintf(out, sizeof(out), "%ld", answer);
+		if (!GetValueStr(prop) || strcmp(GetValueStr(prop), out))
+			SetPropStr(table, GetNameStr(prop), out);
+	}
+
+	TableView_Recalculating--;
+}
+
+int TableView_OnRecalc(NodeObj instance, MsgId message, NodeObj data)
+{
+	if (message == msg_eof || !data)
+		return rtrn_handled;
+
+	TableView_Recalc(instance);
+	return rtrn_handled;
+}
+
+/* put a formula on a cell and wire it to what it reads */
+/* wire every cell a formula reads to this instance's Recalc. Idempotent:
+   AddSubscription refuses a duplicate, so re-arming a restored sheet costs
+   nothing and cannot make a change arrive twice. */
+/* one walk, both directions: adding a formula wires its range, deleting one
+   unwires exactly what that formula was reading */
+static void TableView_Wire(NodeObj instance, NodeObj table, char *formula, int on)
+{
+	char *open, *close, range[64], cn[64];
+	int   r1, c1, r2, c2, r, c;
+
+	open = formula ? strchr(formula, '(') : NULL;
+	close = open ? strrchr(open, ')') : NULL;
+	if (!open || !close)
+		return;
+
+	snprintf(range, sizeof(range), "%.*s", (int)(close - open - 1), open + 1);
+	if (!TableView_Range(range, &r1, &c1, &r2, &c2))
+		return;
+
+	for (r = r1; r <= r2; r++)
+		for (c = c1; c <= c2; c++)
+		{
+			TableCellName(cn, sizeof(cn), r, c);
+			if (on)
+			{
+				if (!GetPropNode(table, cn))
+					SetPropStr(table, cn, "");
+				Connect(table, cn, instance, "Recalc");
+			}
+			else if (GetPropNode(table, cn))
+				Disconnect(table, cn, instance, "Recalc");
+		}
+}
+
+/* Wire every surviving formula and recompute. Idempotent by construction -
+   AddSubscription refuses a duplicate {instance, property} and upgrades a
+   restored record's Callback in place - so this is safe to run over a load,
+   after an edit, or twice. It is what makes a restored sheet live again:
+   the formulas come back in the text, and this puts the subscriptions on
+   the cells they read. */
+static void TableView_Arm(NodeObj instance)
+{
+	NodeObj table = TableView_Data(instance), prop;
+	int     r, c;
+
+	if (!table)
+		return;
+
+	for (prop = GetNextProp(table); prop; prop = GetNextSibling(prop))
+	{
+		char *f;
+
+		if (!GetNameStr(prop) || !TableCellParse(GetNameStr(prop), &r, &c))
+			continue;
+		f = GetPropStr(prop, "Formula");
+		if (f && *f)
+			TableView_Wire(instance, table, f, 1);
+	}
+
+	TableView_Recalc(instance);
+}
+
+/* WHICH CELL WAS CLICKED. A control in a sheet is an alias: its Value is
+   LINKED to the cell it shows, so resolving that link says which one. The
+   control's own name is not asked and does not matter. */
+static char *TableView_CellOf(NodeObj instance, char *path)
+{
+	static char name[64];
+	NodeObj table = TableView_Data(instance);
+	NodeObj ctl = path ? ResolvePath(path) : NULL;
+	NodeObj owner = ctl, v;
+	int     r, c;
+
+	if (!table || !ctl)
+		return NULL;
+
+	v = ResolvePort(&owner, "Value");
+	if (!v || owner != table || !GetNameStr(v))
+		return NULL;
+	if (!TableCellParse(GetNameStr(v), &r, &c))
+		return NULL;
+
+	snprintf(name, sizeof(name), "%s", GetNameStr(v));
+	return name;
+}
+
+/* spec is "B6=SUM(B1:B4)" - or just "SUM(B1:B4)" when the gesture was asked
+   for ON a cell, which is how a sheet has always worked: you pick the cell,
+   then say what goes in it. */
+static int TableView_SetFormula(NodeObj instance, char *spec, char *on)
+{
+	NodeObj table = TableView_Data(instance), cell, f;
+	char    dest[32], *eq, *clicked;
+	int     dr, dc;
+
+	if (!table || !spec)
+		return 0;
+
+	eq = strchr(spec, '=');
+	if (eq)
+	{
+		snprintf(dest, sizeof(dest), "%.*s", (int)(eq - spec), spec);
+		while (*dest && dest[strlen(dest) - 1] == ' ')
+			dest[strlen(dest) - 1] = 0;
+	}
+	else
+	{
+		clicked = TableView_CellOf(instance, on);
+		if (!clicked)
+			return 0;					/* no cell named and none clicked */
+		snprintf(dest, sizeof(dest), "%s", clicked);
+		eq = spec - 1;					/* the whole spec is the formula */
+	}
+
+	if (!TableCellParse(dest, &dr, &dc))
+		return 0;
+
+	/* ADD, EDIT, DELETE, one spelling: "B6=" with nothing after it takes
+	   the formula off B6 and unwires what it was reading. Editing is a
+	   delete of the old wiring followed by the new, so a narrowed range
+	   stops watching the cells it dropped. */
+	cell = GetPropNode(table, dest);
+	if (cell)
+	{
+		char *had = GetPropStr(cell, "Formula");
+
+		if (had && *had)
+		{
+			char keep[128];
+
+			snprintf(keep, sizeof(keep), "%s", had);
+			TableView_Wire(instance, table, keep, 0);
+		}
+	}
+
+	if (!eq[1])
+	{
+		if (cell)
+		{
+			NodeObj old = GetPropNode(cell, "Formula");
+
+			if (old)
+			{
+				RemoveProp(cell, old);
+				DelNode(old);
+			}
+		}
+		{
+			char dbg[200];
+			snprintf(dbg, sizeof(dbg), "TableView: %s formula removed", dest);
+			DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+		}
+		TableView_Arm(instance);
+		return 1;
+	}
+
+	/* make the cell if it is not there, then annotate it */
+	if (!GetPropNode(table, dest))
+		SetPropStr(table, dest, "");
+	cell = GetPropNode(table, dest);
+	SetPropStr(cell, "Formula", eq + 1);
+	f = GetPropNode(cell, "Formula");
+	(void) f;
+
+	{
+		char dbg[300];
+		snprintf(dbg, sizeof(dbg), "TableView: %s = %s, watching its range", dest, eq + 1);
+		DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+	}
+
+	/* RE-ARM FROM WHAT IS ACTUALLY THERE, never from this one formula.
+	   Ranges overlap, and a subscription is one record per {instance,
+	   property}, so the wire this cell wants may be the wire another cell
+	   is already using - unwiring by formula alone would cut a neighbour's
+	   feed. Arming every surviving formula is idempotent and cannot. */
+	TableView_Arm(instance);
+	return 1;
+}
+
 static int TableView_ClassMsg(NodeObj instance, MsgId message, NodeObj data)
 {
 	NodeObj table = TableView_Data(instance);
 
 	if (!table || !data)
 		return rtrn_unhandled;
+
+	if (message == msg_gesture)
+	{
+		char *name = GetPropStr(data, "Name");
+
+		if (name && !strncmp(name, "Formula", 7))
+		{
+			/* WHAT THIS CELL SAYS NOW, so editing starts from the formula
+			   that is there instead of an empty box. The formula lives on
+			   the cell, inside a table nothing else can address, so this
+			   is the only thing that can answer. */
+			if (GetPropStr(data, "Query"))
+			{
+				NodeObj table = TableView_Data(instance), cell = NULL;
+				char   *at = TableView_CellOf(instance, GetPropStr(data, "On"));
+				char   *had;
+
+				if (table && at)
+					cell = GetPropNode(table, at);
+				had = cell ? GetPropStr(cell, "Formula") : NULL;
+				SetPropStr(data, "Value", had ? had : "");
+				return rtrn_handled;
+			}
+
+			return TableView_SetFormula(instance, GetPropStr(data, "Value"),
+										GetPropStr(data, "On"))
+				   ? rtrn_handled : rtrn_unhandled;
+		}
+		return rtrn_unhandled;
+	}
 
 	switch (message)
 	{
@@ -932,6 +1282,7 @@ static int TableView_ClassMsg(NodeObj instance, MsgId message, NodeObj data)
 
 		case msg_deserialize:
 			DataExtDeserialize(table, data);
+			TableView_Arm(instance);			/* the wires a file cannot carry */
 			TableView_Point(instance);			/* boxes stand for restored cells */
 			return rtrn_unhandled;
 	}
@@ -981,6 +1332,11 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	   into another panel. */
 	SetPropStr(instance, "ReservedViewEmbedded", "1");
 	SetPropStr(instance, "ReservedViewResizeable", "1");
+
+	/* where a watched cell reports in - one property, however many cells
+	   any formula reads */
+	SetPropStr(instance, "Recalc", "0");
+	SetPropLong(GetPropNode(instance, "Recalc"), "OnMsg", (long)TableView_OnRecalc);
 	SetPropLong(instance, "local", (long)local);
 	SetPropLong(instance, "Activate", (long)TableView_Activate);
 
@@ -1087,6 +1443,18 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "GridX", PROP_NULL, "44");
 	PublishProp(ClassSelf, "GridY", PROP_NULL, "30");
 	PublishProp(ClassSelf, "GridGap", PROP_NULL, "6");
+
+	/* what a person can ask a table to do, beyond the session's modes */
+	PublishGestures(ClassSelf, "Formula...");
+
+	/* what people actually put in a sheet. Five functions, not a language:
+	   the label says what it does and the value is an example to edit. */
+	SetPropStr(ClassSelf, "FormulaList",
+			   "Sum=SUM(A1:A10),"
+			   "Average=AVG(A1:A10),"
+			   "Smallest=MIN(A1:A10),"
+			   "Largest=MAX(A1:A10),"
+			   "How many filled=COUNT(A1:A10)");
 
 	PublishShow(ClassSelf, PROP_ICON, show_web_js, show_web_css);
 

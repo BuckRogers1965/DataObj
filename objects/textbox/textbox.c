@@ -144,6 +144,59 @@ int InstanceEnd(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
+/* A GESTURE THIS CLASS OFFERS. GUI_Format is a mask the browser applies to
+   what this box shows and validates what is typed against - an annotation
+   on the data, which is why it lives on the instance like any other
+   property. Typing nothing removes it. */
+static int Textbox_ClassMsg(NodeObj instance, MsgId message, NodeObj data)
+{
+	char *name, *value;
+
+	if (message != msg_gesture || !data)
+		return rtrn_unhandled;
+
+	name = GetPropStr(data, "Name");
+	if (!name || strncmp(name, "Format", 6))
+		return rtrn_unhandled;
+
+	if (GetPropStr(data, "Query"))
+	{
+		char *had = GetPropStr(instance, "GUI_Format");
+
+		SetPropStr(data, "Value", had ? had : "");
+		SetPropStr(data, "Prop", "GUI_Format");
+		return rtrn_handled;
+	}
+
+	value = GetPropStr(data, "Value");
+
+	/* EMPTY MEANS REMOVE, not "set to nothing". A property that exists
+	   holding "" is still an annotation somebody has to reason about; the
+	   delete half of the lifecycle takes it away. */
+	if (!value || !value[0])
+	{
+		NodeObj prop = GetPropNode(instance, "GUI_Format");
+
+		if (prop)
+		{
+			RemoveProp(instance, prop);
+			DelNode(prop);
+		}
+	}
+	else
+		SetPropStr(instance, "GUI_Format", value);
+
+	{
+		char dbg[200];
+		snprintf(dbg, sizeof(dbg), "Textbox: format on '%s' is now '%s'",
+				 GetPropStr(instance, "Name") ? GetPropStr(instance, "Name") : "?",
+				 value ? value : "");
+		DebugPrint(dbg, __FILE__, __LINE__, OBJMSGHANDLING);
+	}
+
+	return rtrn_handled;
+}
+
 int ClassStart(NodeObj library, MsgId message, NodeObj data)
 {
 	NodeObj class = NewNode(INTEGER);
@@ -165,6 +218,33 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	PublishProp(ClassSelf, "Value", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");
 	PublishProp(ClassSelf, "State", PROP_LED, "1");
+
+	/* ON THE CLASS NODE - PuntToClass walks class nodes, and a ClassMsg
+	   left on the library node is somewhere the walk never looks. */
+	SetPropLong(ClassSelf, "ClassMsg", (long)Textbox_ClassMsg);
+	PublishGestures(ClassSelf, "Format...");
+
+	/* the suggestions, in the same companion-list convention a Dropdown's
+	   options already use (Language -> LanguageList). The engine says what
+	   the common patterns are; the browser only offers them. */
+	/* "what it is = the mask", so the list reads like English and picking
+	   one fills in the pattern. Entries are comma separated (the same
+	   Items convention), so a mask must not contain a comma - none of
+	   these do. */
+	SetPropStr(ClassSelf, "FormatList",
+			   "Phone=(###) ###-####,"
+			   "Phone with dashes=###-###-####,"
+			   "SSN=###-##-####,"
+			   "Date MM/DD/YYYY=##/##/####,"
+			   "Date YYYY-MM-DD=####-##-##,"
+			   "Time HH:MM=##:##,"
+			   "Time HH:MM:SS=##:##:##,"
+			   "Zip=#####,"
+			   "Zip+4=#####-####,"
+			   "Currency=$###.##,"
+			   "Percent=##.##,"
+			   "Credit card=#### #### #### ####,"
+			   "Licence plate=AA-####");
 
 	return rtrn_handled;
 }

@@ -4202,3 +4202,137 @@ What this asks for:
 The last is the one that will shape the API, and it is the same question the
 data-class notes raise about `AsOf` and freshness: a value from another
 space is not simply present or absent the way a local one is.
+
+---
+
+## The plan, in the order it has to happen
+
+Core first, each step its own full harness run, because each one changes
+dispatch and a broken dispatch is indistinguishable from a broken
+everything. Then the gesture. Then the things the gesture makes easy.
+
+### Step 1 - a handler chain on a property (core)
+
+The three places that read AND CALL a handler - `DeliverMsg`
+(object.c:2914), `SetOrDeliverProp` (2976), `DeliverToSubscriber`
+(node.c:649) - go through one helper: walk the handler records on the
+property, then fall through to `OnMsg` as the last link. The other six
+`OnMsg` reads are existence tests and become "is there any handler".
+
+Nothing installs a record yet, so with zero records every delivery behaves
+exactly as it does today. That is the point of doing it first and alone:
+the diff is large and the behaviour change is none, so a harness run says
+cleanly whether the mechanism is right before anything depends on it.
+
+Done when: full suite green, and a hand-installed record is reached before
+`OnMsg` and can pass through to it by declining.
+
+### Step 2 - "not mine" means it, everywhere (core)
+
+Convert the 238 `return rtrn_dropped` sites in `objects/` that mean "I have
+never heard of this" to `rtrn_unhandled`, and drop `rtrn_dropped` from the
+walk conditions in `PuntToClass` and the new chain.
+
+This is mechanical, large, and fails closed: nothing walks until a handler
+says `rtrn_unhandled` deliberately, so a missed site shows up as an object
+not doing something rather than as a parent silently answering for a child.
+It has to precede any notion of refusal, because while `dropped` still
+means "keep going" there is no verdict left to mean "stop".
+
+Done when: full suite green with both walks testing only `rtrn_unhandled`.
+
+### Step 3 - a refusal that is not a decline (core)
+
+One appended verdict meaning "you may not do this", distinct from "not
+mine". Declining continues the chain; refusing stops it and the operation
+does not happen. This is the one genuinely new thing in all of the
+security work, and everything above it - policy as an intercept, deny,
+administration versus access - is unbuildable without it.
+
+Done when: an installed handler can stop a property write and the caller
+can tell that apart from nobody having answered.
+
+### Step 4 - InstanceStart becomes a message (core)
+
+`CreateObject` stops calling the class node's function pointer and sends the
+class a message instead. A compiled class answers it in C exactly as now; a
+class that answers nothing gets a default. Same "stop doing, start asking"
+as clone and serialize, and it is what allows a class whose constructor is a
+script.
+
+Done when: full suite green, and every existing class is created through the
+message with no change to its own code.
+
+### Step 5 - the trampoline (objects/script)
+
+One generic trampoline registered as a handler record, carrying which host
+and which function beside it. A script installs a function on any property -
+its own, a sibling's, a cell's - and the engine cannot tell it from compiled
+code. The script's return maps onto the verdicts, including declining so the
+original runs and refusing so it does not.
+
+Depends on 1 and 3. Not core: it is one module.
+
+Done when: a script installs a function on another control's property, that
+function runs on write, and passing through reaches the compiled handler
+underneath.
+
+### Step 6 - the ring of gestures (browser)
+
+Control-click a control, get a circle of the verbs that apply to it: alias,
+connect, disconnect, clone, move, delete, options - all existing verbs - plus
+the two new wedges. Presentation choosing a target, one command per wedge,
+scoped to the thing clicked instead of putting the whole window in a mode.
+
+Awkward first is fine and probably right: a list with a box settles whether
+the wedges work; a circle settles how it looks, and the browser is a
+projector so that half is cheap to redo.
+
+### Step 7 - the two wedges that make it worth having
+
+**Format** is a `set-property` writing `GUI_Format`, which the client
+already reads for masking and validation. No engine work; it is a wedge
+around a verb that exists.
+
+**Insert a function** uses step 5: pick a target - this control, a sibling,
+a cell - name a function, and it is installed. Cells get formulas out of
+this without cells being special, because a cell is a node like the rest.
+
+### Show what is in your hand
+
+A gesture in hand is a text label following the pointer - "move:
+Slider_1", "clone: Textbox" - and that is enough to say WHAT is being
+carried but nothing about where it will land. Carry an OUTLINE instead:
+the picked-up thing's own size, drawn as a rectangle under the pointer,
+so a drop is aimed rather than guessed. Move is where it bites first,
+because a move already has a real size on screen and the placement is
+exact; clone and alias want the same thing, and import wants the
+outline of the view it is about to unpack.
+
+Two details this is really asking about, both about pixels rather than
+mechanism:
+
+- **The grab offset.** The carry places at the pointer, where the old
+  press-drag placed at the pointer MINUS where the thing was grabbed.
+  Picking a widget up by its right edge and putting it down should not
+  re-centre it on the cursor. The outline is what makes that visible,
+  and fixing the offset without the outline is fixing something nobody
+  can see.
+- **What the outline says about the drop.** It is the natural place to
+  show refusal before it happens - a view being dragged into itself, a
+  container that will not take it - by drawing the outline differently
+  rather than accepting the click and reporting an error afterwards.
+  The engine already refuses (`ContainmentCycle`); this only shows it.
+
+Cheap, and purely presentation: the client knows the element's size
+because it is rendering it, so nothing new crosses the bridge.
+
+### After that
+
+Security, in the order the topic above sets out, and it can start any time
+after step 3 because refusal is what it is built from. Remote spaces and
+`dataobj://` after that, since a wire across machines is a subscription and
+that machinery is not disturbed by any of the steps here.
+
+Not on this path, independently useful, do whenever: the serializer's `Self`
+special case, and the namespace offset.

@@ -235,9 +235,351 @@ function modeMenuAlias() {
 }
 
 /* The mode is the session's mode, full stop. There is one. */
+/* A ONE-TIME GESTURE, aimed at one thing.
+
+   Modes are session-wide: to alias one control you put the whole window
+   into Alias mode and put it back afterwards. Control-click a thing instead
+   and pick from what applies to it - the gesture happens once, to that
+   thing, and the session's own mode is never touched.
+
+   This is the seam that makes it cost nothing: every gesture path already
+   asks effectiveMode(el) rather than reading currentMode directly, so an
+   armed override is answered here and nothing else changes. */
+let pendingGesture = null;      // {el, mode}
+
+function armGesture(el, mode) {
+  pendingGesture = { el, mode, used: false };
+  el.classList.add('gesture-armed');
+  log('next gesture on this: ' + mode, 'event');
+}
+
+function disarmGesture() {
+  if (!pendingGesture) return;
+  pendingGesture.el.classList.remove('gesture-armed');
+  pendingGesture = null;
+}
+
 function effectiveMode(el) {
+  if (pendingGesture && el
+      && (el === pendingGesture.el || pendingGesture.el.contains(el)
+          || (el.contains && el.contains(pendingGesture.el)))) {
+    /* consulted means the gesture has begun - only now is there anything
+       to clear afterwards */
+    pendingGesture.used = true;
+    return pendingGesture.mode;
+  }
   return currentMode;
 }
+
+/* the gestures on offer are the ENGINE's list - the same Items the Mode
+   menu carries - so a mode added there appears here with no client change */
+function gestureChoices() {
+  const menu = modeMenuAlias();
+  const items = menu && propertyValues[menu + '.Items'];
+
+  return (items ? items.split(',') : []).map((s) => s.trim()).filter(Boolean);
+}
+
+/* the chooser. A list for now: it settles whether a one-time gesture works,
+   which is the question. A ring is how it looks, and looks are cheap to
+   redo - the browser is a projector. */
+function openGestureMenu(el, alias, x, y) {
+  closeGestureMenu();
+
+  const box = document.createElement('div');
+
+  box.className = 'gesture-menu';
+  box.id = 'gesture-menu';
+  box.style.left = x + 'px';
+  box.style.top = y + 'px';
+
+  const title = document.createElement('div');
+  title.className = 'gesture-menu-title';
+  title.textContent = baseName(alias);
+  box.appendChild(title);
+
+  const own = (classGestures[alias] || '').split(',')
+                .map((g) => g.trim()).filter(Boolean);
+
+  if (own.length) {
+    const sep = document.createElement('div');
+    sep.className = 'gesture-menu-sep';
+    box.appendChild(sep);
+  }
+
+  /* WHAT THIS THING ITSELF OFFERS. Not a client-side table of which class
+     gets which extras - the class published these and the engine reported
+     them, so a gesture added to a widget appears here with no change in
+     the browser. A name ending in "..." wants something typed first. */
+  for (const g of own) {
+    const item = document.createElement('div');
+
+    item.className = 'gesture-menu-item gesture-menu-own';
+    item.textContent = g;
+    item.addEventListener('pointerdown', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      closeGestureMenu();
+
+      if (/\.\.\.$/.test(g)) {
+        openGestureEditor(alias, g);
+        return;
+      }
+      send({ cmd: 'gesture', instance: cur(alias), name: g, value: '' });
+      log(g + ' on ' + baseName(alias), 'event');
+    });
+    box.appendChild(item);
+  }
+
+  for (const mode of gestureChoices()) {
+    const item = document.createElement('div');
+
+    item.className = 'gesture-menu-item';
+    item.textContent = mode;
+    item.addEventListener('pointerdown', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      closeGestureMenu();
+      armGesture(el, mode);
+
+      /* THE CONTROL-CLICK WAS THE PICK. Choosing the mode finishes that
+         first click, so the thing has to end up in hand right now and the
+         next click places it - waiting for another press on it would be a
+         third click nobody asked for.
+
+         The element's OWN pointerdown handler is what picks it up, so send
+         it one at the point that was clicked rather than reconstructing
+         what that handler does. effectiveMode answers with the armed mode,
+         and every gesture behaves exactly as it does from the Mode menu. */
+      el.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, composed: true,
+        clientX: x, clientY: y, button: 0, buttons: 1, isPrimary: true,
+      }));
+    });
+    box.appendChild(item);
+  }
+
+  document.body.appendChild(box);
+}
+
+/* SETTING A PROPERTY IS A LIFECYCLE, not a prompt: add it, edit it, take it
+   away. So a gesture that wants a value gets all three - a dropdown of what
+   the CLASS suggests, a box for anything it did not think of, and a delete
+   kept apart from the buttons that keep it, so the destructive one is never
+   where the hand expects OK.
+
+   The suggestions come from the engine (the companion <Name>List on the
+   class node). Nothing here knows what a format is. */
+/* set while an editor is open, so the class's answer lands in the right box */
+let gestureEditorFill = null;
+
+function openGestureEditor(alias, gesture) {
+  const label = gesture.replace(/\.\.\.$/, '').trim();
+  const lists = gestureLists[alias] || {};
+  const rows = parseInt(lists[label + '#rows'], 10) || 1;
+
+  /* WHAT IS THERE NOW IS ASKED FOR, never deduced. Which property a
+     gesture keeps its value in is the class's business - a formula lives
+     on a cell inside a table nothing else can address, so guessing a
+     property name here opened the editor empty and an edit became a
+     replace. The answer arrives as gesture-value and fills the box. */
+  send({ cmd: 'gesture', instance: cur(alias), name: gesture, query: true });
+  let gestureProp = '';		/* the class says where it keeps this, if anywhere */
+  /* "Phone=(###) ###-####" - what it is, then the pattern. The list reads
+     like English and picking one fills the box with the mask. An entry with
+     no "=" is its own label, which is what a class that only has patterns
+     to offer would send. */
+  const suggestions = ((lists[label] || ''))
+    .split(',').map((x) => x.trim()).filter(Boolean)
+    .map((entry) => {
+      const eq = entry.indexOf('=');
+      return eq < 0 ? { name: entry, value: entry }
+                    : { name: entry.slice(0, eq).trim(), value: entry.slice(eq + 1) };
+    });
+
+  const valueOf = (v) => suggestions.some((s2) => s2.value === v) ? v : '';
+
+  closeGestureEditor();
+
+  const back = document.createElement('div');
+  back.className = 'gesture-editor-back';
+  back.id = 'gesture-editor';
+
+  const box = document.createElement('div');
+  box.className = 'gesture-editor';
+
+  const title = document.createElement('div');
+  title.className = 'gesture-editor-title';
+  title.textContent = label + ' - ' + baseName(alias);
+  box.appendChild(title);
+
+  const pick = document.createElement('select');
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = '(custom)';
+  pick.appendChild(blank);
+  for (const sug of suggestions) {
+    const o = document.createElement('option');
+    o.value = sug.value; o.textContent = sug.name;
+    pick.appendChild(o);
+  }
+  if (suggestions.length) box.appendChild(pick);
+
+  /* one line or many, as the class asked. A contenteditable div with a
+     .value shim, the same thing the framework's own Textbox is - never a
+     textarea. */
+  const text = document.createElement('div');
+  text.className = 'gesture-editor-text' + (rows > 1 ? ' gesture-editor-big' : '');
+  text.contentEditable = 'true';
+  text.spellcheck = false;
+  if (rows > 1) text.style.height = (rows * 16) + 'px';
+  text.textContent = '';
+  Object.defineProperty(text, 'value', {
+    get() { return this.innerText.replace(/\n$/, ''); },
+    set(v) { this.textContent = v; },
+  });
+  box.appendChild(text);
+  gestureEditorFill = (forAlias, forName, value, prop) => {
+    if (cur(forAlias) !== cur(alias) || forName !== gesture) return;
+    text.value = value || '';
+    gestureProp = prop || '';
+    pick.value = valueOf(text.value);
+  };
+
+  /* the list follows the box: choosing fills it, and typing something the
+     class never suggested blanks the choice back to (custom) rather than
+     leaving it claiming a pattern that is not there */
+  pick.value = valueOf(text.value);
+  pick.addEventListener('change', () => { if (pick.value) text.value = pick.value; });
+  text.addEventListener('input', () => { pick.value = valueOf(text.value); });
+
+  const row = document.createElement('div');
+  row.className = 'gesture-editor-row';
+
+  const del = document.createElement('button');
+  del.className = 'gesture-editor-delete';
+  del.textContent = 'Delete';
+  del.addEventListener('click', () => {
+    send({ cmd: 'gesture', instance: cur(alias), name: gesture, value: '' });
+
+    /* the property is gone, so nothing will arrive saying so - forget what
+       was being shown for this instance and let the events refill it. A
+       display cache being dropped, not the client deciding what exists,
+       and it names no property: which one the gesture owned is the
+       class's business, not this box's. */
+    for (const key of Object.keys(propertyValues))
+      if (key.startsWith(cur(alias) + '.GUI_')) delete propertyValues[key];
+    guiAnnotationChanged(cur(alias));
+
+    log('removed ' + label + ' from ' + baseName(alias), 'event');
+    closeGestureEditor();
+  });
+  row.appendChild(del);
+
+  const spacer = document.createElement('div');
+  spacer.className = 'gesture-editor-spacer';
+  row.appendChild(spacer);
+
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeGestureEditor);
+  row.appendChild(cancel);
+
+  const ok = document.createElement('button');
+  ok.textContent = 'OK';
+  ok.addEventListener('click', () => {
+    send({ cmd: 'gesture', instance: cur(alias), name: gesture, value: text.value });
+
+    /* AFTER, never before. Subscribing to a property that does not exist
+       CREATES it - Connect brings an absent one into being, which is the
+       late-binding mechanism and not a bug - so asking for GUI_Format up
+       front invented one holding 0 on every control and every box started
+       masked against nothing. The gesture has just written it, so by the
+       time this lands there is something real to watch. */
+    /* only what the class named, and only when there is now something
+       there: subscribing to an absent property CREATES it - Connect brings
+       one into being, which is late binding and not a bug - so asking for
+       one up front invented it holding 0 on every control. A gesture whose
+       value is not a property of this instance names nothing, and nothing
+       is watched. */
+    if (text.value && gestureProp)
+      send({ cmd: 'subscribe', instance: cur(alias), port: gestureProp });
+
+    log(label + ' on ' + baseName(alias) + ' = ' + text.value, 'event');
+    closeGestureEditor();
+  });
+  row.appendChild(ok);
+
+  box.appendChild(row);
+  back.appendChild(box);
+  document.body.appendChild(back);
+  text.focus();
+
+  back.addEventListener('pointerdown', (ev) => {
+    if (ev.target === back) closeGestureEditor();
+  });
+}
+
+function closeGestureEditor() {
+  const el = $('gesture-editor');
+  if (el) el.remove();
+  gestureEditorFill = null;
+}
+
+function closeGestureMenu() {
+  const box = $('gesture-menu');
+  if (box) box.remove();
+}
+
+/* control-click anything that has an alias. The browser's own menu is
+   suppressed on the same target so the two do not both appear. */
+document.addEventListener('pointerdown', (ev) => {
+  /* a click anywhere but in the menu closes it. The click itself is left
+     alone - dismissing is not choosing, and swallowing it would make the
+     first click after an open one do nothing. */
+  if ($('gesture-menu')
+      && !(ev.target.closest && ev.target.closest('.gesture-menu')))
+    closeGestureMenu();
+
+  if (!ev.ctrlKey || ev.button !== 0) return;
+
+  const el = ev.target.closest && ev.target.closest('.instance-wrap, .widget-atom');
+  if (!el) return;
+
+  const alias = aliasOfEl(el, null);
+  if (!alias) return;
+
+  ev.stopPropagation();
+  ev.preventDefault();
+  openGestureMenu(el, alias, ev.clientX, ev.clientY);
+}, true);
+
+document.addEventListener('contextmenu', (ev) => {
+  if (ev.target.closest && ev.target.closest('.gesture-menu, .instance-wrap, .widget-atom'))
+    ev.preventDefault();
+});
+
+/* It lasts for one gesture, and the click that CHOSE it is not that
+   gesture - selecting from the menu ends in a pointerup of its own, and
+   disarming on that cleared the arming before the hand could use it.
+   So it survives until effectiveMode has actually been asked, and is
+   cleared on the pointerup after that - on a tick, because click handlers
+   (Delete, Options) run after pointerup and still need to see it. */
+document.addEventListener('pointerup', () => {
+  /* not while the gesture is still in flight: a pick-then-place is two
+     clicks, and the pointerup of the FIRST one must not disarm before the
+     second lands. Anything still held is still going. */
+  if (!pendingGesture || !pendingGesture.used) return;
+  setTimeout(() => {
+    if (typeof dragState !== 'undefined' && dragState) return;
+    if (typeof gestureDrag !== 'undefined' && gestureDrag) return;
+    if (typeof pendingPort !== 'undefined' && pendingPort) return;
+    disarmGesture();
+  }, 0);
+});
+
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { closeGestureMenu(); closeGestureEditor(); disarmGesture(); }
+});
 
 /* Connection state is the whole screen, not a word in a corner: anything
    other than a live session greys the canvas out and says why in the
@@ -321,7 +663,7 @@ function handleEvent(msg) {
       if (msg.gui) for (const k in msg.gui) propertyValues[msg.instance + '.' + k] = msg.gui[k];
       onInstanceCreated(msg.instance, msg.class, msg.parent, msg.interface, msg.hidden, msg.container,
                         msg.reservedIn, msg.reservedOut, msg.classParent, msg.x, msg.y,
-                        msg.target, msg.targetProp);
+                        msg.target, msg.targetProp, msg.gestures, msg.gestureLists);
       break;
     case 'property-changed':
       onPropertyChanged(msg.instance, msg.port, msg.value);
@@ -355,6 +697,9 @@ function handleEvent(msg) {
       break;
     case 'flow-file':
       onFlowFile(msg.file);
+      break;
+    case 'gesture-value':
+      if (gestureEditorFill) gestureEditorFill(msg.instance, msg.name, msg.value, msg.prop);
       break;
     case 'flows-done':
       break;
@@ -726,6 +1071,12 @@ function renderInstanceOf(spec) {
    remembering which pixels correspond. */
 const standsFor = {};
 
+/* alias -> the gestures its CLASS published, beyond the session's modes.
+   The engine says what a thing can be asked to do; the browser only draws
+   the list and sends the choice back. */
+const classGestures = {};
+const gestureLists = {};        // alias -> {Format: "a,b,c"} the class suggests
+
 function rememberStandsFor(alias, target, targetProp) {
   if (!target || !targetProp) return;
   const key = target + '.' + targetProp;
@@ -733,8 +1084,11 @@ function rememberStandsFor(alias, target, targetProp) {
 }
 
 function onInstanceCreated(alias, className, parent, interfaceNode, hidden, container,
-                           reservedIn, reservedOut, classParent, x, y, target, targetProp) {
+                           reservedIn, reservedOut, classParent, x, y, target, targetProp,
+                           gestures, gestureLists_in) {
   rememberStandsFor(alias, target, targetProp);
+  if (gestures) classGestures[alias] = gestures;
+  if (gestureLists_in) gestureLists[alias] = gestureLists_in;
   /* replays are idempotent - a container listed twice (or an instance     */
   /* that arrived live before its container's members were fetched) never  */
   /* renders twice                                                          */
@@ -1696,34 +2050,16 @@ function startDrag(ev, el, alias, className, primaryProp) {
     return;
   }
 
+  /* MOVE IS A CARRY TOO. It used to be the odd one out - press, drag the
+     real element, release - which is the timing the comment above
+     startGestureDrag says was deliberately abandoned for Clone and Alias.
+     Being different made it the only gesture that cannot be started
+     without a held pointer, and it meant the same intent had two shapes
+     depending on which one you picked. Now: first click picks it up,
+     the next click puts it down, Esc cancels. */
   if (mode !== 'Move') return;
 
-  const rect = el.getBoundingClientRect();
-
-  /* One pointerdown can reach here twice (a card's icon handler and the
-     card's own), and each pass used to leave a tag behind with only the
-     last one remembered - so the earlier ones stayed on screen for good.
-     Clear any tag still standing before making this one. */
-  if (dragState && dragState.tag) dragState.tag.remove();
-  for (const stale of document.querySelectorAll('.drag-ghost.move-tag')) stale.remove();
-
-  /* say what is being moved - the full path, so there is no guessing
-     about WHICH thing the drag has hold of */
-  const tag = document.createElement('div');
-  tag.className = 'drag-ghost move-tag';
-  tag.textContent = alias;
-  tag.style.left = (ev.clientX + 8) + 'px';
-  tag.style.top = (ev.clientY + 8) + 'px';
-  document.body.appendChild(tag);
-
-  dragState = {
-    el,
-    alias,
-    tag,
-    offsetX: ev.clientX - rect.left,
-    offsetY: ev.clientY - rect.top,
-  };
-  ev.preventDefault();
+  startGestureDrag(ev, 'move', { alias }, 'move: ' + baseName(alias));
 }
 
 /* position is relative to whatever positioned ancestor the element        */
@@ -1786,6 +2122,13 @@ document.addEventListener('pointerdown', (ev) => {
       send({ cmd: 'import-flow', file: g.data.file, into: drop.container,
              x: String(Math.round(drop.x)), y: String(Math.round(drop.y)) });
       log('imported ' + g.data.file, 'event');
+    } else if (g.kind === 'move') {
+      /* one verb carrying the whole intent - where it lands and what it
+         lands in, together (move-instance -> MoveInstance, object.c). The
+         engine refuses a view entering itself. */
+      send({ cmd: 'move-instance', of: g.data.alias, container: drop.container,
+             x: String(Math.round(drop.x)), y: String(Math.round(drop.y)) });
+      log('moved ' + g.data.alias, 'event');
     } else if (g.kind === 'alias') {
       /* one verb carrying the whole intent - the server names it and    */
       /* places it in a single atomic birth (see readmefirst.md); this    */

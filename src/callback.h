@@ -14,9 +14,14 @@ typedef int (*FuncPtr)(NodeObj, NodeObj, int);
    node's "Text". msg_deserialize: read yourself back from that same Text.
    An object that keeps state where a property walk cannot see it - a
    private object it points at with a LONG - answers these; one that does
-   not says so and the caller's ordinary walk applies. */
+   not says so and the caller's ordinary walk applies.
+
+   msg_gesture: a person asked this thing to do something by name. The data
+   node carries "Name" (which gesture) and "Value" (whatever the person
+   typed, if the gesture wanted anything). A class answers the gestures it
+   published and declines the rest. */
 enum { msg_change=0, msg_update, msg_initialize, msg_send, msg_eof,
-	   msg_serialize, msg_deserialize };
+	   msg_serialize, msg_deserialize, msg_gesture };
 
 // where an object's OWN message ids start, so they never collide with the
 // framework's. An object declares its verbs and vars as an enum from here,

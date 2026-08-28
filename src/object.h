@@ -431,6 +431,16 @@ NodeObj PublishProp(NodeObj class, char * name, int widget, char * defaultValue)
    this, so they cannot drift. */
 int IsPortableProp(NodeObj inst, NodeObj prop);
 
+/* WHAT THIS CLASS OFFERS A PERSON, beyond the session's own modes: a comma
+   separated list of gesture names, published on the class node the same way
+   its Interface and its Show are. Picking one sends the instance a
+   msg_gesture naming it; the class answers or declines like any message.
+   A name ending in "..." wants something typed first. */
+void PublishGestures(NodeObj class, char *names);
+char *ClassGestures(NodeObj inst);
+int PuntGesture(NodeObj inst, NodeObj bag);
+NodeObj ClassOfferingGesture(NodeObj inst, char *name);
+
 /* One instance property's published metadata - the Interface "Property" */
 /* entry (Name/Widget/Default) on the instance's class, NULL             */
 /* if unpublished. What a translator stamping presentation defaults onto */

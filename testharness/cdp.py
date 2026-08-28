@@ -122,7 +122,7 @@ class CDP:
         self.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": name, "code": name, "windowsVirtualKeyCode": code})
 
     def pick_place(self, x1, y1, x2, y2):
-        """Clone/Alias gesture: click picks up the ghost, click again places."""
+        """Clone/Alias/Move: click picks up the ghost, click again places."""
         self.click(x1, y1)
         for i in range(1, 6):
             self.mouse("mouseMoved", x1 + (x2 - x1) * i / 5, y1 + (y2 - y1) * i / 5)
@@ -130,7 +130,7 @@ class CDP:
         self.click(x2, y2)
 
     def press_drag(self, x1, y1, x2, y2):
-        """Move-mode gesture: hold, drag, release."""
+        """Hold, drag, release - what a panel's chrome still does."""
         self.mouse("mousePressed", x1, y1)
         for i in range(1, 8):
             self.mouse("mouseMoved", x1 + (x2 - x1) * i / 7, y1 + (y2 - y1) * i / 7)

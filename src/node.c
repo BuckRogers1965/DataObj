@@ -569,6 +569,84 @@ NodeObj GetNextProp(NodeObj node)
 	return node->props;
 }
 
+/* EVERY HANDLER ON A PROPERTY, newest first, then the property's own OnMsg
+   as the last link.
+
+   A property can carry "Handler" records - the same species as a Subscriber,
+   a node holding a function pointer - and they are consulted before the
+   OnMsg the class installed. AddProp prepends, so the last one installed
+   runs first and wraps the ones before it.
+
+   rtrn_unhandled means "not mine": the walk continues to the next record and
+   finally to OnMsg. So reaching the original handler is not a call anybody
+   makes, it is what declining does. Any other verdict stops the walk and is
+   the answer.
+
+   `found` reports whether there was anything at all to call, which is what
+   the callers used to learn from OnMsg being non-NULL. With no records
+   installed this is exactly the old behaviour: one lookup, one call.
+
+   NOTE for the chain work: a Subscriber record carrying its own Callback is
+   still called directly by DeliverToSubscriber below, ahead of this - so a
+   handler installed on a property is not yet seen by wires made before it.
+   That is deliberate for now; changing it changes behaviour, and this step
+   changes none. */
+int DeliverToHandlers(NodeObj owner, NodeObj propNode, int message, NodeObj data, int *found)
+{
+	int (*fn)(NodeObj, int, NodeObj);
+	NodeObj rec;
+	int verdict;
+
+	if (found)
+		*found = 0;
+	if (!propNode)
+		return rtrn_unhandled;
+
+	for (rec = GetNextProp(propNode); rec; rec = GetNextSibling(rec))
+	{
+		if (!CmpName(rec, "Handler"))
+			continue;
+
+		fn = (int (*)(NodeObj, int, NodeObj)) GetPropLong(rec, "OnMsg");
+		if (!fn)
+			continue;
+
+		if (found)
+			*found = 1;
+		verdict = fn(owner, message, data);
+		if (verdict != rtrn_unhandled)
+			return verdict;
+	}
+
+	fn = (int (*)(NodeObj, int, NodeObj)) GetPropLong(propNode, "OnMsg");
+	if (fn)
+	{
+		if (found)
+			*found = 1;
+		return fn(owner, message, data);
+	}
+
+	return rtrn_unhandled;
+}
+
+/* is there anything to deliver to - a record or the property's own OnMsg.
+   This is what the old `GetPropLong(prop, "OnMsg")` existence tests meant. */
+int HasHandler(NodeObj propNode)
+{
+	NodeObj rec;
+
+	if (!propNode)
+		return 0;
+	if (GetPropLong(propNode, "OnMsg"))
+		return 1;
+
+	for (rec = GetNextProp(propNode); rec; rec = GetNextSibling(rec))
+		if (CmpName(rec, "Handler") && GetPropLong(rec, "OnMsg"))
+			return 1;
+
+	return 0;
+}
+
 /* deliver one message to one Subscriber record - the single definition   */
 /* of what a subscription MEANS, shared by both fan-out walkers            */
 /* (FanOutSubscribers below for synchronous property writes, DispatchMsg  */
@@ -615,7 +693,6 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	NodeObj toInstance, portnode, chunk;
 	NodeObj prevFrom;
 	int (*callback)(NodeObj, int, NodeObj);
-	int (*onmsg)(NodeObj, int, NodeObj);
 	/* This is named wrong. The framework does not have ports, it has properties that exist in containers and that are containers. */
 	char *port, *value;
 
@@ -646,8 +723,7 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 	/* same distinction SetOrDeliverProp draws, natively so node.c never  */
 	/* calls up into object.c)                                            */
 	portnode = GetPropNode(toInstance, port);
-	onmsg = portnode ? (int (*)(NodeObj, int, NodeObj)) GetPropLong(portnode, "OnMsg") : NULL;
-	if (onmsg)
+	if (HasHandler(portnode))
 	{
 		/* THE VERDICT SAYS WHETHER THE VALUE STILL NEEDS STORING, and the
 		   three existing codes already say it exactly:
@@ -664,12 +740,12 @@ void DeliverToSubscriber(NodeObj sub, int message, NodeObj data, NodeObj fromNod
 		                     value rather than displaying it
 
 		   So the handler runs first and answers, rather than being told. */
-		int verdict;
+		int verdict, found;
 
 		chunk = NewNode(STRING);
 		SetName(chunk, port);
 		SetValueStr(chunk, value);
-		verdict = onmsg(toInstance, message, chunk);
+		verdict = DeliverToHandlers(toInstance, portnode, message, chunk, &found);
 
 		/* refused by the instance: offer it up the class chain before
 		   giving up on it. rtrn_dropped means "not mine", and until this

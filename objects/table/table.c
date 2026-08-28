@@ -151,7 +151,7 @@ static char *Table_Append(char *buf, int *len, int *cap, char *text)
 static char *Table_Write(NodeObj instance)
 {
 	NodeObj cell;
-	char   *buf = NULL;
+	char   *buf = NULL, *f;
 	char    name[64];
 	int     len = 0, cap = 0;
 	int     rows, cols, r, c;
@@ -167,7 +167,18 @@ static char *Table_Write(NodeObj instance)
 		{
 			TableCellName(name, sizeof(name), r, c);
 			cell = GetPropNode(instance, name);
-			buf = Table_Append(buf, &len, &cap, cell ? GetValueStr(cell) : "");
+			/* A CELL DEFINED BY A FORMULA IS WRITTEN AS THE FORMULA. Its
+			   value is derived, so writing the value would save an answer
+			   and lose the question. The leading = is the reader's cue,
+			   the same one every sheet has used for forty years. */
+			f = cell ? GetPropStr(cell, "Formula") : NULL;
+			if (f && *f)
+			{
+				buf = Table_Append(buf, &len, &cap, "=");
+				buf = Table_Append(buf, &len, &cap, f);
+			}
+			else
+				buf = Table_Append(buf, &len, &cap, cell ? GetValueStr(cell) : "");
 			if (c + 1 < cols)
 				buf = Table_Append(buf, &len, &cap, "\t");
 		}
@@ -258,7 +269,9 @@ static void Table_Read(NodeObj instance, char *text)
 		if (*start)
 		{
 			cell = Table_Cell(instance, row, col);
-			if (cell)
+			if (cell && *start == '=')
+				SetPropStr(cell, "Formula", start + 1);	/* value is derived, not stored */
+			else if (cell)
 				SetValueStr(cell, start);
 		}
 		if (row >= seenRows) seenRows = row + 1;

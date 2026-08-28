@@ -420,6 +420,7 @@ function registerWidgetAtom(alias, className, props, pos, isCopy, container, res
   livePositions[alias] = { el };
   send({ cmd: 'subscribe', instance: alias, port: 'X' });
   send({ cmd: 'subscribe', instance: alias, port: 'Y' });
+
   send({ cmd: 'subscribe', instance: alias, port: 'Container' });
 
   log('created ' + alias + ' (' + className + ')', 'event');

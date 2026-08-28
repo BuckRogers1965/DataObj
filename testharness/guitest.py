@@ -546,7 +546,13 @@ def test_options_internals(t, r):
 
 
 def test_move(t, r):
-    """Move: X/Y are ordinary writes; crossing into a view re-containers."""
+    """Move: X/Y are ordinary writes; crossing into a view re-containers.
+
+    Move is a CARRY, the same shape as Clone and Alias - one click picks
+    the thing up, the next puts it down. It used to be the odd one out
+    (press, drag the real element, release), which meant the same intent
+    had two shapes depending on which gesture you picked.
+    """
     view = make_test_view(t, 'MoveTest')
     t.set_mode('Clone')
     src = t.center_of("instances['/Root/Palette/Slider']")
@@ -560,23 +566,23 @@ def test_move(t, r):
 
     t.set_mode('Move')
     src = t.center_of("instances['%s']" % slider)
-    t.press_drag(src["x"], src["y"], src["x"] + 80, src["y"] - 40)
+    t.pick_place(src["x"], src["y"], src["x"] + 80, src["y"] - 40)
     time.sleep(0.8)
     pos = t.js("[propertyValues['%s.X'], propertyValues['%s.Y']]" % (slider, slider))
     moved = pos and pos[0] and int(pos[0]) > 100
-    r.expect("move: drag writes X/Y back as shared properties",
-             "the slider's X/Y properties reflect the drop point (moved right of 100)",
+    r.expect("move: pick up and put down writes X/Y back as shared properties",
+             "the slider's X/Y properties reflect where it was put down (right of 100)",
              "X,Y = %s" % pos,
              bool(moved))
 
     src = t.center_of("instances['%s']" % slider)
     tgt = inner_center(t, view)
-    t.press_drag(src["x"], src["y"], tgt["x"], tgt["y"])
+    t.pick_place(src["x"], src["y"], tgt["x"], tgt["y"])
     time.sleep(1.2)
     renamed = t.js("(Object.keys(instances).find(k=>k.startsWith('%s/Slider_')) || false)" % view)
     inside = renamed and t.js("(()=>{const i=instances['%s'];const inn=i&&i.el.closest('.view-inner');"
                               "return inn&&inn.dataset.viewAlias;})()" % renamed)
-    r.expect("move: dropping into a view re-containers (and renames) the thing",
+    r.expect("move: putting it down in a view re-containers (and renames) the thing",
              "the slider now lives in MoveTest (Container change + rename), rendered inside its panel",
              "renamed to %s, rendered inside %s" % (renamed, inside),
              renamed and inside == view)
