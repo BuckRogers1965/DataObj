@@ -10,6 +10,7 @@ are writing:
 | [`object/`](object/README.md) | it is **function** - a socket, a resolver, a codec, an interpreter. No controls, no panel, never saved. | `Object` | nothing. It has no place on a canvas. |
 | [`control/`](control/README.md) | it is **one thing on screen** - a box, a light, a knob. What panels are built from. | `Control` | an atom: a control and a label. |
 | [`widget/`](widget/README.md) | it is **a bag of controls with behaviours** - an instrument panel. | `Widget` | an icon that opens a panel. |
+| [`data_ext/`](data_ext/README.md) | it is **a way of holding values** - a grid, a list, a tree, a time series. Says how its nodes are addressed and how it writes itself out. | `data_ext` | nothing. Something else owns it privately. |
 
 Answer honestly. Most mistakes in this codebase came from one module trying to
 be two of these at once.
@@ -29,6 +30,10 @@ Object                       the core provides this one, and it ends the chain
  |      MoButton, MenuButton, TextOut, VUMeter, Markdown, HTML, Image, Alias
  |
  +- Script                   a language host: Lua, JSScript
+ +- data_ext                 a way of holding values, addressed its own way
+ |   |
+ |   +- Table                 a grid of nodes (objects/table)
+ |
  +- UDP, TCPSocket, Flow, Serializer, Skin, ...   plain function
 ```
 
@@ -139,6 +144,7 @@ clean && make`.
 objects/skeleton/newwidget.sh Counter          # a widget (the default)
 objects/skeleton/newwidget.sh Counter control  # a control
 objects/skeleton/newwidget.sh Counter object   # a plain object
+objects/skeleton/newwidget.sh Ring data_ext   # a data shape
 ```
 
 That creates `objects/counter/` with the source, a real `Makefile`, and a

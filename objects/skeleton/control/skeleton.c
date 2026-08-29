@@ -23,6 +23,11 @@
 #include "DebugPrint.h"
 #include "control.h"
 
+/* the browser half: show.mk turns the js and css under show/web into these
+   two string literals. Nobody edits JavaScript inside quotes - you edit the
+   file under show/web, never this header. */
+#include "show_web.h"
+
 typedef struct InstanceData
 {
 	int enabled;
@@ -100,9 +105,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	port = GetPropNode(instance, "Enable");
 	SetPropLong(port, "OnMsg", (long)Skeleton_OnEnable);
 
-	/* what a bare wire to this control should hit, in each direction - so a
-	   client can wire it without knowing its property names */
-
 	/* X/Y/W/H, Container, Name, Deletable: what it takes to be placed. This
 	   is the line that makes it a Control rather than a plain object. */
 	InitPosition(instance);
@@ -142,6 +144,11 @@ int ClassStart(NodeObj library, MsgId message, NodeObj data)
 	/* the published interface: X/Y/W/H and friends, then this control's own
 	   properties with the widget type each one presents as */
 	PublishPosition(ClassSelf);
+
+	/* THIS CONTROL'S OWN PRESENTATION, shipped with it: the widget type it
+	   presents as, plus the browser half from show/web. A new control
+	   renders correctly the first time with no change to the client. */
+	PublishShow(ClassSelf, PROP_TEXTBOX, show_web_js, show_web_css);
 
 	PublishProp(ClassSelf, "Value", PROP_TEXTBOX, "");
 	PublishProp(ClassSelf, "Enable", PROP_CHECKBOX, "1");

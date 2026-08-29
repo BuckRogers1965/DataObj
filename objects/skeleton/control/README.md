@@ -58,9 +58,6 @@ which is a bug that takes an afternoon to find.
 it through `Connect()` - a Pulse, a script, another control. Check it in *every*
 handler, not just the obvious one. `msg_eof` on an enable line means nothing.
 
-**`ReservedIn`/`ReservedOut`** name what a bare wire to you should hit in each
-direction, so a client can wire your control without knowing your property names.
-
 **`InitPosition(instance)`** is the line that makes it a Control rather than a
 plain object: X/Y/W/H, Container, Name, Deletable. And `PublishPosition(class)`
 in `ClassStart` publishes them.
@@ -69,6 +66,56 @@ in `ClassStart` publishes them.
 type each presents as (`PROP_TEXTBOX`, `PROP_LED`, `PROP_CHECKBOX`,
 `PROP_BUTTON`, `PROP_MENU`, ...). That published interface is what a panel's
 dissection table and a client's rendering both read.
+
+---
+
+## The browser half - a control brings its own presentation
+
+**A control ships the code that draws it.** It lives in `show/web/<name>.js`
+as an ordinary editable file; `show.mk` turns it into a string literal
+(`show_web.h`) at build time, and `ClassStart` hands it over:
+
+```c
+PublishShow(ClassSelf, PROP_TEXTBOX, show_web_js, show_web_css);
+```
+
+The client asks the engine what arrived and calls what the class published.
+**There is no list of control names in the browser to add yourself to**, and
+writing a new control needs no client change at all.
+
+The file registers by class name and returns one element:
+
+```js
+register('Skeleton', {
+  create(ctx) {
+    const el = document.createElement('input');
+    el.value = (ctx && ctx.defaultValue) || '';
+    if (ctx && ctx.commit) el.onchange = () => ctx.commit(el.value);
+    return el;
+  },
+});
+```
+
+Two obligations, and only two:
+
+- **Define `.value`.** It is the ONE accessor the host reads and writes.
+  Whatever your element's natural property is, `.value` hides it — the
+  Checkbox defines it over `.checked` ('1' is ticked), the TextOut over
+  `textContent`. An `<input>` already has one, so it defines nothing.
+- **Call `ctx.commit(v)` when a PERSON changes it.** That is the gesture
+  going back to the engine. A read-only control simply omits it, and then it
+  can only ever be written *to*.
+
+`ctx.defaultValue` is the starting value the class published.
+
+Edit `show/web/<name>.js`. **Never edit `show_web.h`** — it is generated, and
+your changes there are gone at the next build. The Makefile's
+`include ../show.mk` must come *after* the `all:` target, or the default goal
+stops being `all`.
+
+There is no styling obligation: a look shared by several controls belongs in
+the host stylesheet, and only a look that is this control's alone belongs in
+`show/web/<name>.css`.
 
 ---
 
@@ -109,7 +156,11 @@ add - returning `rtrn_dropped` sends the rest up to it.
 ## Files here
 
 - `skeleton.c` - the module. One value, an Enable, a position, a published
-  interface.
+  interface, and the browser half published from `show_web.h`.
+- `show/web/skeleton.js` - its presentation. Edit this; `show_web.h` is
+  generated from it by `show.mk` and must never be edited or committed.
+- `Makefile.copy` - becomes the new module's `Makefile`. It already has the
+  `include ../show.mk` line, after `all:` where it belongs.
 
 The shipped controls are the best reference: `objects/textbox` (input),
 `objects/led` (display), `objects/mobutton` (momentary), `objects/dropdown`

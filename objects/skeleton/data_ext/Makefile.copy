@@ -6,7 +6,7 @@ OBJECTS= $(subst .c,.o,$(SOURCE))
 
 GOAL=skeleton.object
 
-INCLUDES=-iquote../../src
+INCLUDES=-iquote../../src -iquote../data_ext
 
 OPT=-Wall -g
 
@@ -15,15 +15,11 @@ OPT=-Wall -g
 
 all: $(OBJECTS) $(GOAL)
 
-# the browser half: show/web/*.js|css -> show_web.h, which skeleton.c includes.
-# MUST come after `all:` so the default goal stays `all`.
-include ../show.mk
-
 $(GOAL): $(OBJECTS)
 	ld  -shared $(OBJECTS) -o $(GOAL)
 
 clean:
-	rm -f $(OBJECTS) $(GOAL) $(SHOW_CLEAN) > /dev/null 2>&1
+	rm -f $(OBJECTS) $(GOAL) > /dev/null 2>&1
 
 DEPINC=-I../../src -I/usr/include/x86_64-linux-gnu \
        -I$(shell $(CC) -print-file-name=include)
