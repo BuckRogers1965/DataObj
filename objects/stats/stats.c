@@ -154,16 +154,19 @@ int Stats_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-int Stats_Activate(NodeObj instance, MsgId message, NodeObj data)
+/* START SAMPLING. Called from InstanceStart, which IS the init message
+   (object.c calls it as InstanceStart(class, msg_initialize, place)) -
+   there is no separate verb that turns a widget on, and waiting for one
+   is why every readout in this panel sat at its default: Enable showing
+   1, Interval showing 1000, State showing 1, and six counters showing
+   the empty string they were built with, which a TextOut paints as
+   nothing at all. */
+static void Stats_Start(NodeObj instance)
 {
 	InstanceData * local = (InstanceData *)GetPropLong(instance, "local");
 
-	if (!local)
-		return rtrn_dropped;
-
-
-	if (local->active)
-		return rtrn_handled;
+	if (!local || local->active)
+		return;
 
 	/* one task struct for the instance's whole life - see leaktest.py */
 	if (!local->task)
@@ -172,11 +175,9 @@ int Stats_Activate(NodeObj instance, MsgId message, NodeObj data)
 	SetPropInt(instance, "State", Running);
 
 	/* first sample right away - one tick from now would leave the      */
-	/* readouts blank for a whole interval after activation             */
+	/* readouts blank for a whole interval                              */
 	AddTaskMilli(local->task, 1, (FuncPtr)Stats_Tick, msg_send, instance);
 	local->scheduled = 1;
-
-	return rtrn_handled;
 }
 
 /* The whole panel in one table: main view, Help, and every control - six live
@@ -184,18 +185,23 @@ int Stats_Activate(NodeObj instance, MsgId message, NodeObj data)
    samples the core's alloc counters; the readouts ARE its outputs. */
 static WidgetItem StatsPanel[] = {
 	/* cls        prop        def    panel   x    y    w   h  label       [handler] */
-	{ "View",     "Stats",    "",    0,   0,   0, 320, 290, 0 },			/* 0: main */
+	{ "View",     "Stats",    "",    0,   0,   0, 320, 320, 0 },			/* 0: main */
 	{ "Help",     "objects/stats/README.md", "", 0, 0, 0, 0, 0, 0 },		/* 1: help */
 
-	{ "Checkbox", "Enable",   "1",   0, 290,  12,   9,  9, LABEL_LEFT, (void *)Stats_OnEnable },
-	{ "TextOut",  "Nodes",     "",   0,  15,  40, 120, 20, LABEL_NONE },
-	{ "TextOut",  "Datas",     "",   0, 175,  40, 120, 20, LABEL_NONE },
-	{ "TextOut",  "Envelopes", "",   0,  15,  85, 120, 20, LABEL_NONE },
-	{ "TextOut",  "Tasks",     "",   0, 175,  85, 120, 20, LABEL_NONE },
-	{ "TextOut",  "Buffs",     "",   0,  15, 130, 120, 20, LABEL_NONE },
-	{ "TextOut",  "Queues",    "",   0, 175, 130, 120, 20, LABEL_NONE },
-	{ "Knob",     "Interval", "1000",0,  15, 185,  60, 60, LABEL_NONE },
-	{ "LED",      "State",    "1",   0, 130, 200,  12, 12, LABEL_NONE },
+	/* over the right-hand column, ending where Datas ends (175 + 120) -
+	   never out at the panel's rim */
+	{ "Checkbox", "Enable",   "1",   0, 241,  12,   9,  9, LABEL_LEFT, (void *)Stats_OnEnable },
+	/* LABELLED, to the left of each number: unlabelled readouts say nothing
+	   about what they are counting, and an empty one paints nothing at all.
+	   Left, not top - a top label stacks into the control below it. */
+	{ "TextOut",  "Nodes",     "",   0,  15,  40, 120, 20, LABEL_LEFT },
+	{ "TextOut",  "Datas",     "",   0, 175,  40, 120, 20, LABEL_LEFT },
+	{ "TextOut",  "Envelopes", "",   0,  15,  85, 120, 20, LABEL_LEFT },
+	{ "TextOut",  "Tasks",     "",   0, 175,  85, 120, 20, LABEL_LEFT },
+	{ "TextOut",  "Buffs",     "",   0,  15, 130, 120, 20, LABEL_LEFT },
+	{ "TextOut",  "Queues",    "",   0, 175, 130, 120, 20, LABEL_LEFT },
+	{ "Knob",     "Interval", "1000",0,  15, 185,  60, 60, LABEL_LEFT },
+	{ "LED",      "State",    "1",   0, 130, 200,  12, 12, LABEL_LEFT },
 
 	{ NULL }
 };
@@ -220,7 +226,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	Widget_Init(instance, StatsPanel);
 
 	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)Stats_Activate);
 
 	InitPosition(instance);
 	Widget_MainSize(instance, StatsPanel);
@@ -228,6 +233,9 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 
 	/* placed where it was told, under the name it was given, panel and all */
 	Widget_Place(instance, data, StatsPanel);
+
+	/* and it samples from here, because this call is the init message */
+	Stats_Start(instance);
 
 	return rtrn_handled;
 }
