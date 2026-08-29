@@ -65,9 +65,11 @@ from the palette.
 
 Do the rest by editing `counter.c`:
 
-1. **Add your controls** to the `SkeletonPanel[]` table — one row per
-   control: `{ class, property, x, y, w, h, panel }`. Panel `0` is the
-   widget's own view; panel `1` is the Help sub-view.
+1. **Add your controls** to the `SkeletonPanel[]` table — one entry per
+   control: `{ cls, prop, def, panel, x, y, w, h, label, handler }`. The
+   handler is last so a plain control just omits it. Panel `0` is the
+   widget's own view; panel `1` is the Help sub-view. Lay it out by the
+   rules in section 2 below.
 2. **Publish** each property the outside world sees, in `ClassStart`
    (`PublishProp`). Add a `<Name>List` property for every `Dropdown`.
 3. **Set them up** in `InstanceStart` (`SetPropStr` for data;
@@ -77,14 +79,73 @@ Do the rest by editing `counter.c`:
 
 ---
 
-## 2. Anatomy (what each piece does)
+## 2. Laying out the panel
+
+**A panel is pixel layout.** Every control carries an `x`, `y`, `w` and `h`
+in pixels and sits exactly there. There are no rows, no columns, no grid and
+no flow — nothing reflows, nothing wraps, nothing is relative to anything
+else. Two controls sharing an `x` are not "a column"; they are two controls
+that happen to have the same `x`.
+
+**What renders is the control plus its label.** `w`/`h` describe the control
+alone, so the space an entry actually occupies is bigger than `w`/`h` on
+whichever side its label is. That is the single most common way a layout goes
+wrong: extents computed from `x`/`y`/`w`/`h` alone under-measure every
+labelled control. The label's text is the property name — `widget.c` sets
+`Label` from `prop`, so `{ "TextOut", "Envelopes", ... }` reads "Envelopes"
+on screen.
+
+### Where the label goes
+
+Never `LABEL_NONE`. An unlabelled control cannot say what it is, and one
+whose value is empty paints nothing at all — a `TextOut` with no label and
+no text is an invisible control in a panel that looks broken.
+
+- **`LABEL_LEFT` is the default.** The label reads before the control on one
+  line. It costs nothing vertically, so it can never collide with whatever
+  sits below. Use it unless you have a specific reason not to.
+- **`LABEL_RIGHT`** for a small mark whose caption reads after it — a
+  Checkbox or an LED sitting at a left-hand `x`.
+- **`LABEL_BOTTOM`** for a caption under the control: several LEDs side by
+  side, or stacked boxes where the caption belongs beneath each one.
+- **`LABEL_TOP`** costs vertical space and pushes its control down into
+  whatever follows it. Only use it where you have deliberately left the room.
+
+### Where Enable goes
+
+Enable never sits at the panel's edge. **Find the control with the largest
+`x + w` — the right-most one — and end Enable at that right edge.** Enable is
+a Checkbox with a left label, so its own footprint is its label plus the
+box (about 55px for the word "Enable" and a 9px box); place its `x` at
+`right_edge - 55` and it lines up with the content instead of floating out
+in the margin.
+
+### How big the panel is
+
+Place every control first, then size the main view: **the content extent plus
+50 pixels in each direction.** Nothing then sits against a rim. Padding only
+ever adds — a panel that already exists is never made smaller, and a panel is
+never resized to fit its content at runtime (see the size rules in
+`CLAUDE.md`: a widget declares its size and that size is obeyed).
+
+---
+
+## 3. Anatomy (what each piece does)
 
 - **`Handle_Message`** — required export; the loader dlsym's it to accept the
   module. Leave it.
-- **`InstanceStart`** — build one instance: set its properties, register
-  handlers, set the view's W/H, then arm the **deferred build task**.
-- **`Skeleton_BuildTask` / `Skeleton_BuildPanel`** — one tick later, create
-  the controls and the Help sub-view, wire Help-open, and run `Activate`.
+- **`InstanceStart` — this IS the init message, and it is the whole
+  beginning of a widget's life.** `CreateObject` calls it as
+  `InstanceStart(class, msg_initialize, place)` (`object.c`), handing it the
+  place and the name it was born with, so it sets its properties, registers
+  its handlers, sizes its view and BUILDS ITS PANEL right there. There is no
+  deferred build, no build task, no `PanelBuilt` flag and no second creation
+  path for a clone - a widget is finished when `InstanceStart` returns.
+- **There is no `Activate`.** A widget does not start; it answers what
+  arrives. Anything it must do at birth - arming a sampling task, setting
+  resting state - happens in `InstanceStart`, because that call is the init
+  message. (The engine still has an `activate` verb, but that is a PERSON
+  pressing a button on a card, not a lifecycle hook - see lesson 18.)
 - **`Skeleton_Ctl`** — create one control, register its path, and wire it to
   a widget property by control kind (command / readout / edit / menu).
 - **handlers (`_OnIn`, `_OnTrigger`, `_OnEnable`)** — a property with an
@@ -97,7 +158,7 @@ Do the rest by editing `counter.c`:
 
 ---
 
-## 3. Wiring: everything is a property
+## 4. Wiring: everything is a property
 
 Everything is a property. A control drives, or reflects, one of the
 widget's ordinary properties:
@@ -120,7 +181,7 @@ properties by name.
 
 ---
 
-## 4. Writing an object (no panel)
+## 5. Writing an object (no panel)
 
 Moved: see [`../object/README.md`](../object/README.md). Short version - the
 header is the whole interface, the state struct lives in the `.c`, nothing is
@@ -130,7 +191,7 @@ catches answers as messages. `objects/udp` + `udp.h` is the worked example.
 ---
 
 
-## 5. A widget that drives an object (the pair)
+## 6. A widget that drives an object (the pair)
 
 `objects/udpport` over `objects/udp`, and `objects/tcpport` over
 `objects/network` - read those two.
@@ -152,7 +213,7 @@ framework's equivalent of `New(GetNamedClass("UDP"), UDP_CALLBACK, pDev)`:
 args = NewNode(INTEGER);
 SetPropLong(args, "Owner",   (long) instance);   /* this panel */
 SetPropLong(args, "MsgBase", UDP_CALLBACK);      /* this panel's id for it */
-SetPropStr (args, "Callback", "Callback");       /* this panel's own port */
+SetPropStr (args, "Callback", "Callback");       /* the property replies land on */
 instanceStart(cls, msg_initialize, args);
 DelNode(args);
 local->udpInstance = (NodeObj) GetPropLong(cls, "LastInstance");
@@ -180,8 +241,8 @@ case TCP_ERROR_CALLBACK:           ...
 ```
 
 **Setup is armed at BIRTH**, in `InstanceStart`, on a one-shot task guarded by
-a flag - not in `Activate`, because a loaded or imported instance never gets
-one. Setup clears the momentary commands, forces the resting presentation
+a flag - never off the `activate` gesture, which a loaded or imported instance
+never gets. Setup clears the momentary commands, forces the resting presentation
 UNCONDITIONALLY (whatever the file said), stops the object for real, and only
 then honours the auto option by pressing the command a person would press.
 
@@ -190,7 +251,7 @@ acting, or the press becomes saved state and a load re-presses it.
 
 ---
 
-## 6. Lessons learned the hard way (read these)
+## 7. Lessons learned the hard way (read these)
 
 Every one of these cost real debugging time. The skeleton already does them
 right — don't undo them.
@@ -205,17 +266,42 @@ right — don't undo them.
    `X`, `Y`, `W`, `H`, `Container`, `Name`, `State`.
 
 2. **There are no ports and no directions.** Everything is a property, and
-   `In`/`Out` are just properties that happen to be named that. A property
-   changes and whatever subscribed to it is told — that is the whole rule, the
+   `In`/`Out` are nothing but the NAMES somebody gave two controls. They are
+   not a species, not a direction and not a kind of thing you can look up -
+   a property named `Out` behaves exactly like one named `Colour`. A property
+   changes and whatever subscribed to it is told; that is the whole rule, the
    same for every property whatever it is called.
 
-3. **Set the view's W/H in `InstanceStart`, before any client subscribes.** A
-   size set later (in the deferred build) *shadows* the W/H node the client's
-   tap is already on and never reaches it — the panel stays its default size.
+   **`ReservedIn` / `ReservedOut` are how a wire dropped on the ICON knows
+   where to land.** When an end of a `Connect` names no property, the engine
+   fills it in (`Connect`, `object.c`): the source end falls back to this
+   instance's `ReservedOut`, the sink end to its `ReservedIn`, and if neither
+   is set, to `Value` - the one property a plain control speaks through. So
+   a widget whose real traffic is on `Input` and `Output` says
 
-4. **Build deferred, one tick after creation.** In `InstanceStart` the
-   instance has no path yet, so controls can't be addressed. Arm a task at
-   +1ms; by then the bridge has placed the instance.
+   ```c
+   SetPropStr(instance, "ReservedIn",  "Input");
+   SetPropStr(instance, "ReservedOut", "Output");
+   ```
+
+   in `InstanceStart`, and from then on somebody can wire straight to the
+   widget's icon without opening the panel to find the right box. They are an
+   OVERRIDE and nothing else: they do not create a property, do not make one
+   special, and do not make it a port. Most things carry neither. The rule
+   lives in `Connect`, so a GUI dot, a script and a REST call all get the same
+   answer, and the browser draws its stand-in dot in a different colour to say
+   "this is where an unnamed wire would go", not "here is a wire".
+
+3. **Set the view's W/H in `InstanceStart`, before any client subscribes.** A
+   size set afterwards *shadows* the W/H node the client's tap is already on
+   and never reaches it — the panel stays its default size.
+
+4. **Build the panel in `InstanceStart`, in place.** The constructor is
+   handed its place and its name, so the instance is addressable and its
+   controls can be created right there. This used to be deferred a tick
+   because the instance had no path yet; it is not any more, and the flag,
+   the task and the clone's separate creation path went with it. A widget is
+   finished when `InstanceStart` returns.
 
 5. **Reflect-and-seed.** A plain `Connect` only fires on the *next* change, so
    a fresh readout reads blank. `Skeleton_Reflect` hands the control the
@@ -289,13 +375,13 @@ right — don't undo them.
 
 15. **Every loaded class gets a real instance at boot - the palette icon
     itself.** `BuildPalette` creates one live instance of every class to
-    stand for its palette icon, running the same deferred build and
-    `Activate` any placed instance gets. Anything your `Activate` does
+    stand for its palette icon, and it is born exactly the way a dragged one
+    is: `InstanceStart`, panel and all. So anything your `InstanceStart` does
     unconditionally - checking a status, dialing out, generating - runs on
     that palette seed too, at every boot, before anyone has dragged one out
-    or set it up. `Activate` should build the panel and set resting state,
-    nothing else; any real action belongs behind an explicit trigger (a
-    button, a wired `In`), gated on `Enable` like everything else.
+    or set it up. Build the panel and set resting state there, nothing else;
+    any real action belongs behind an explicit trigger (a button, a wired
+    `In`), gated on `Enable` like everything else.
 
 16. **Nothing runs on a load - the values are simply installed.** The loader
     writes saved properties with `SetPropStr`, never `SetOrDeliverProp`, so no
@@ -311,10 +397,11 @@ right — don't undo them.
     through the same command press a person would make. A panel claiming a
     socket it does not have is worse than a dead one.
 
-18. **`Activate` is not a lifecycle hook you can rely on.** Dragged instances
-    get it; loaded and imported ones do not. Anything that must happen for
-    *every* instance however it was born belongs on a task armed from
-    `InstanceStart`.
+18. **`activate` is a gesture, not a lifecycle hook.** It is a person
+    pressing a button, reaching the instance the same way any other command
+    does - so it fires for some instances and never for others, and nothing
+    that must happen for *every* instance however it was born may hang off
+    it. That belongs in `InstanceStart`, which every instance gets.
 
 19. **Test the combinations, running.** Save-while-running -> load, and
     export-while-running -> import, with the auto option both off and on: four
@@ -330,7 +417,7 @@ Two things the core now handles for you (don't re-solve them):
 
 ---
 
-## 7. Build & test
+## 8. Build & test
 
 ```
 make -C objects/<name>          # build just yours
@@ -350,4 +437,4 @@ from lesson 19 before calling it done.
 
 The long game (see `ROADMAP.md`): this per-widget boilerplate becomes a
 **Widget base object** so a new widget declares only its controls and logic,
-and the source-enumeration primitive lets gates/comparators combine N inputs.
+and the source-enumeration primitive lets gates/comparators combine N sources.

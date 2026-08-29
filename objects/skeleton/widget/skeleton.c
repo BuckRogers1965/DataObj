@@ -21,14 +21,29 @@ ways by widget.h:
   - Widget_Init    (InstanceStart) - gives the instance each control's initial
                                    value; a row with a handler ACTS when written,
                                    one without just holds its value.
-  - Widget_BuildTable / _DeferBuild / _BuildOnce - lays the controls out one tick
-                                   after creation (once the instance has a path).
+  - Widget_Place   (InstanceStart) - lays the controls out IN PLACE. The
+                                   constructor is handed its place and its name,
+                                   so there is no deferred build and no second
+                                   path for a clone: the widget is finished when
+                                   InstanceStart returns.
 
-A row is { cls, prop, def, panel, x, y, w, h, label, handler }. handler is LAST
-so plain rows just omit it. cls "View" is a panel (the first is the main view);
-cls "Help" is the standard Help sub-view (prop = README path); anything else is a
-control. w/h ARE the control's pixel size. Everything is a property; there is no
-"in"/"out" direction. NO hardcoded help: the Help box loads README.md on open.
+InstanceStart IS the init message - object.c calls it as
+InstanceStart(class, msg_initialize, place) - and it is the only thing every
+instance gets. There is no Activate to start a widget: a widget does not start,
+it answers what arrives. (`activate` exists as a VERB, a person pressing a
+button on a card; it fires for some instances and never for others, so nothing
+that must happen for every instance may hang off it.)
+
+An entry is { cls, prop, def, panel, x, y, w, h, label, handler }. handler is
+LAST so plain entries just omit it. cls "View" is a panel (the first is the main
+view); cls "Help" is the standard Help sub-view (prop = README path); anything
+else is a control. w/h ARE the control's pixel size.
+
+A PANEL IS PIXEL LAYOUT - every control sits exactly at its x,y and nothing
+reflows. There are no rows, no columns and no grid. What renders is the control
+PLUS its label, so an entry's real footprint is bigger than w/h on the label's
+side. Everything is a property; `In` and `Out` are nothing but names somebody
+gave two controls. NO hardcoded help: the Help box loads README.md on open.
 
 */
 
@@ -122,20 +137,6 @@ int Skeleton_OnEnable(NodeObj instance, MsgId message, NodeObj data)
 	return rtrn_handled;
 }
 
-/* Placement setup - the framework's Activate hook, run once by the deferred
-   build so the panel comes up live. Build the panel (once) and settle here. */
-int Skeleton_Activate(NodeObj instance, MsgId message, NodeObj data)
-{
-	SkeletonData *local = (SkeletonData *)GetPropLong(instance, "local");
-
-	if (!local)
-		return rtrn_dropped;
-
-
-	/* TODO: any resting state (e.g. Out low) */
-	return rtrn_handled;
-}
-
 /* ---- lifecycle ------------------------------------------------------ */
 
 int InstanceStart(NodeObj class, MsgId message, NodeObj data)
@@ -159,7 +160,6 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	Widget_Port(instance, "In", "0", (void *)Skeleton_OnIn);
 	SetPropInt(instance, "State", Starting);
 	SetPropLong(instance, "local", (long)local);
-	SetPropLong(instance, "Activate", (long)Skeleton_Activate);
 
 	InitPosition(instance);
 	Widget_MainSize(instance, SkeletonPanel);	/* main size before any subscribe */
@@ -168,6 +168,12 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
 	/* placed where it was told, under the name it was given, panel and all */
 	Widget_Place(instance, data, SkeletonPanel);
 
+	/* TODO: resting state, and anything this instance must do at birth - a
+	   task it arms for itself, an initial reading. THIS is where it goes:
+	   every instance gets here however it was born, and the palette's own
+	   seed instance gets here too, so nothing that acts on the outside world
+	   (dialing out, fetching, generating) belongs here unasked. */
+
 	return rtrn_handled;
 }
 
@@ -175,14 +181,29 @@ int InstanceStart(NodeObj class, MsgId message, NodeObj data)
    control (its initial value and, where it acts on write, its handler).
    TODO: add / change controls to match your widget. */
 static WidgetItem SkeletonPanel[] = {
-	/* cls        prop        def  panel   x    y    w   h  label       [handler] */
-	{ "View",     "Skeleton", "",  0,   0,   0, 260, 200, 0 },			/* 0: main */
+	/* The size comes LAST, from where the controls ended up:
+	   - the right-most control is the Out LED, whose label reads to its right,
+	     so the content reaches about x=192; the panel is that + 50 = 242.
+	   - the lowest control ends at y=56, and the Help icon widget.c places
+	     for you sits at H - 80, so H has to clear the content by more than
+	     that: 160 puts Help at 80, well below everything.
+	   Never at a rim, and never resized later to fit what is in it. */
+	/* cls        prop        def  panel   x    y    w   h  label        [handler] */
+	{ "View",     "Skeleton", "",  0,   0,   0, 242, 160, 0 },			/* 0: main */
 	{ "Help",     "objects/skeleton/README.md", "", 0, 0, 0, 0, 0, 0 },	/* 1: help */
 
-	{ "Checkbox", "Enable",   "1", 0, 200,  14,   8,  8, LABEL_LEFT, (void *)Skeleton_OnEnable },
-	{ "MoButton", "Trigger",  "0", 0,  20,  40,  60, 20, LABEL_NONE, (void *)Skeleton_OnTrigger },
-	{ "LED",      "Out",      "0", 0, 120,  44,  12, 12, LABEL_NONE },
-	/* TODO: { "Textbox", "Something", "", 0, x, y, w, h, LABEL_TOP, (void *)Skeleton_OnSomething }, */
+	/* Enable ends where the right-most control ends (192), never out at the
+	   panel's edge. Its own footprint is the word plus the box, about 55. */
+	{ "Checkbox", "Enable",   "1", 0, 137,  14,   8,  8, LABEL_LEFT,  (void *)Skeleton_OnEnable },
+
+	/* every control says what it is: LABEL_LEFT by default because it costs
+	   no vertical space and so cannot collide with what is below;
+	   LABEL_RIGHT for a small mark whose caption reads after it. Never
+	   LABEL_NONE - an unlabelled control cannot say what it is, and an empty
+	   one paints nothing at all. */
+	{ "MoButton", "Trigger",  "0", 0,  20,  40,  60, 20, LABEL_LEFT,  (void *)Skeleton_OnTrigger },
+	{ "LED",      "Out",      "0", 0, 150,  44,  12, 12, LABEL_RIGHT },
+	/* TODO: { "Textbox", "Something", "", 0, x, y, w, h, LABEL_LEFT, (void *)Skeleton_OnSomething }, */
 
 	{ NULL }
 };
