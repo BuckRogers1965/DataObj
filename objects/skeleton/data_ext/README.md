@@ -25,6 +25,7 @@ ring buffer, a graph — and each one is a `.object` you drop in the scan path.
   and the widget is the thing that *owns* one of these.
 - **Not a member of a view.** It is not a control, so it does not live in
   one. A day was lost to exactly this.
+- **Not placed and not laid out.** It has no X/Y, so nothing draws it.
 
 It **is** in the tree, like everything else - a registered instance, a node
 with properties, and its entries are ordinary properties on that node. What
@@ -34,12 +35,17 @@ its owner holds is just a `long` whose value is the instance:
 SetPropLong(instance, "Data", (long)shape);
 ```
 
-What is private is **the grid** - and the grid is nothing but a grid of this
-node's own properties, reached by name. Nothing is placed in a view, nothing
-gives it a path, so nobody else addresses those properties; that is the whole
-of its privacy. The `long` is refused by `IsPortableProp`, which is exactly
-right - a pointer is not a value and must never reach a file - while the
-properties themselves travel with a clone and an export as they should.
+Its owner refers to it with an ordinary property in the tree - a `long` whose
+value is the instance, the way `objects/tableview` holds its Table:
+
+```c
+SetPropLong(instance, "Data", (long) table);
+```
+
+The grid is that node's own properties, reached by name. The `long` is
+refused by `IsPortableProp` - a pointer is not a value and must never reach a
+file - while the properties themselves travel with a clone and an export as
+they should.
 
 ---
 
@@ -131,5 +137,5 @@ and not as `580`, because saving the answer loses the question.
   shape has no browser half, because nothing presents it.
 
 The shipped reference is `objects/table` (the grid) with `objects/tableview`
-as an example of an owner — a widget that creates one privately, points at it
-with a `long`, and drives it. `objects/data_ext` is the parent class itself.
+as an example of an owner — a widget that creates one, points at it with a
+`long` property, and drives it. `objects/data_ext` is the parent class itself.

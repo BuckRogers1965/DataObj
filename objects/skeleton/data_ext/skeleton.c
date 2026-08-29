@@ -17,12 +17,11 @@
  * these.
  *
  * It IS in the tree like everything else - a registered instance, a node with
- * properties. What its owner holds is a long whose value is the instance.
- * What is private is the GRID, and the grid is nothing but a grid of this
- * node's own properties reached by name: nothing places it, nothing gives it
- * a path, so nobody else addresses them. The long cannot reach a file
- * (IsPortableProp refuses it); the properties travel with a clone and an
- * export.
+ * properties, referred to by an ordinary property on its owner: a long whose
+ * value is the instance (tableview does SetPropLong(instance,"Data",(long)
+ * table)). The grid is that node's own properties, reached by name. The long
+ * cannot reach a file (IsPortableProp refuses it); the properties travel with
+ * a clone and an export.
  *
  * Descends from data_ext, which descends from Object.
  */
@@ -39,8 +38,8 @@
 
 /* Per-instance C state. The index is a SHORTCUT, never a second copy - the
    grid IS the properties, and this array only saves looking one up by name.
-   It lives on `local` as a LONG, so IsPortableProp refuses it and it can
-   never reach a clone or a file. */
+   It lives on `local`, which is a LONG, so IsPortableProp refuses it and it
+   can never reach a clone or a file. */
 typedef struct InstanceData
 {
 	NodeObj *entry;			/* entry[i] -> the node holding item i */
